@@ -2,6 +2,8 @@
 
 Lean 4 language support for CodeMirror 6, built around the official `@codemirror/lsp-client`.
 
+The top-level package export is intentionally Lean-focused. If you want raw `@codemirror/lsp-client` building blocks, use the explicit `codemirror-lean4-lsp/codemirror` subpath.
+
 This package stays intentionally thin:
 
 - Lean syntax/highlighting via `leanLanguageSupport()`
@@ -80,9 +82,10 @@ const client = createLeanLspClient({
 ## Notes
 
 - The default client configuration delegates to CodeMirror's official `languageServerExtensions()` bundle.
-- If you need finer control, pass `features` to `createLeanLspClient()` or use the official `@codemirror/lsp-client` exports re-exported from this package.
+- If you need finer control, pass `features` to `createLeanLspClient()` or import the official passthrough exports from `codemirror-lean4-lsp/codemirror`.
 - The package does not start Lean itself. The embedding app owns transport and process lifecycle.
 - URL-specific package metadata such as `repository`/`homepage` is intentionally not set yet because this local repo does not have a configured public remote.
+- API and release policy live in [docs/API.md](./docs/API.md), [CONTRIBUTING.md](./CONTRIBUTING.md), and [docs/RELEASING.md](./docs/RELEASING.md).
 
 ## Demo
 

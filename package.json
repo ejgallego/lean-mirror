@@ -21,7 +21,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -30,17 +31,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./codemirror": {
+      "types": "./dist/codemirror.d.ts",
+      "import": "./dist/codemirror.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "codemirror": [
+        "./dist/codemirror.d.ts"
+      ]
     }
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
-    "ci": "npm run check && npm test && npm run test:e2e && npm run build",
+    "ci": "npm run check && npm test && npm run test:e2e && npm run build && npm run pack:check",
     "demo": "node ./scripts/run-demo.mjs",
     "demo:backend": "node ./demo/server.mjs",
     "demo:frontend": "vite --config ./demo/vite.config.ts",
+    "pack:check": "node ./scripts/verify-pack.mjs",
     "playwright:install": "node ./scripts/install-playwright.mjs",
-    "prepublishOnly": "npm run check && npm test && npm run build",
+    "prepublishOnly": "npm run check && npm test && npm run build && npm run pack:check",
     "test": "vitest run",
     "test:e2e": "node ./scripts/test-e2e.mjs"
   },
