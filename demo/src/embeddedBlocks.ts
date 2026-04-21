@@ -33,6 +33,8 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
   widgetExtension(onOpen: (block: TBlock) => void): Extension;
 }
 
+export type AnyEmbeddedBlockEditorAdapter = EmbeddedBlockEditorAdapter<any>;
+
 function uncommentLine(line: string): string {
   if (line === "--") {
     return "";

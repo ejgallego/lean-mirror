@@ -1,7 +1,7 @@
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 
-import type { EmbeddedBlock, EmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
+import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlock } from "./embeddedBlocks.js";
 import {
   createEmbeddedBlockModalController,
   embeddedBlockModalTheme,
@@ -10,7 +10,7 @@ import {
 
 export interface EmbeddedEditorShell {
   close(): void;
-  extensionFor<TBlock extends EmbeddedBlock>(adapter: EmbeddedBlockEditorAdapter<TBlock>): Extension;
+  extensionsFor(adapters: readonly AnyEmbeddedBlockEditorAdapter[]): Extension[];
 }
 
 export interface EmbeddedEditorShellOptions {
@@ -24,26 +24,33 @@ export interface EmbeddedEditorShellOptions {
 export function createEmbeddedEditorShell(
   options: EmbeddedEditorShellOptions,
 ): EmbeddedEditorShell {
-  const controllers: Array<{ close(): void }> = [];
+  const controllers = new Map<AnyEmbeddedBlockEditorAdapter, { close(): void; extension: Extension }>();
 
   return {
     close() {
-      for (const controller of controllers) {
+      for (const controller of controllers.values()) {
         controller.close();
       }
     },
-    extensionFor<TBlock extends EmbeddedBlock>(adapter: EmbeddedBlockEditorAdapter<TBlock>): Extension {
-      const controller = createEmbeddedBlockModalController({
-        adapter,
-        currentUri: options.currentUri,
-        currentView: options.currentView,
-        dom: options.dom,
-        log: options.log,
-        modalTheme: options.modalTheme ?? embeddedBlockModalTheme,
-      });
-      controllers.push(controller);
-      return adapter.widgetExtension((block) => {
-        controller.open(block);
+    extensionsFor(adapters) {
+      return adapters.map((adapter) => {
+        const cached = controllers.get(adapter);
+        if (cached) {
+          return cached.extension;
+        }
+        const controller = createEmbeddedBlockModalController({
+          adapter,
+          currentUri: options.currentUri,
+          currentView: options.currentView,
+          dom: options.dom,
+          log: options.log,
+          modalTheme: options.modalTheme ?? embeddedBlockModalTheme,
+        });
+        const extension = adapter.widgetExtension((block) => {
+          controller.open(block);
+        });
+        controllers.set(adapter, { close: controller.close, extension });
+        return extension;
       });
     },
   };

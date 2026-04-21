@@ -191,7 +191,7 @@ const embeddedEditors = createEmbeddedEditorShell({
     logEvent(message);
   },
 });
-const embeddedRustExtension = embeddedEditors.extensionFor(embeddedRustAdapter);
+const embeddedBlockExtensions = embeddedEditors.extensionsFor([embeddedRustAdapter]);
 
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {
   client?.sync();
@@ -210,7 +210,7 @@ async function mountDocument(uri: string, doc: string): Promise<EditorView> {
         },
         extraExtensions: [
           demoTheme(),
-          embeddedRustExtension,
+          ...embeddedBlockExtensions,
         ],
       }),
     }),
