@@ -40,12 +40,13 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "Open Rust editor" }).click();
-  await expect(page.locator("#embedded-editor-modal")).not.toHaveAttribute("hidden", "");
-  await expect(page.locator("#embedded-editor-title")).toContainText("demo-widget");
-  await expect(page.locator("#embedded-editor-host .cm-editor")).toHaveCount(1);
+  const blockWidget = page.locator(".cm-embedded-block-widget").first();
+  await blockWidget.locator(".cm-embedded-block-open").click();
+  const expandedBlock = page.locator('.cm-embedded-block-widget[data-expanded="true"]');
+  await expect(expandedBlock).toHaveCount(1);
+  await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-editor")).toHaveCount(1);
 
-  const nestedEditor = page.locator("#embedded-editor-host .cm-content");
+  const nestedEditor = expandedBlock.locator(".cm-embedded-block-inline .cm-content");
   await nestedEditor.click();
   await page.keyboard.press("Control+End");
   await page.keyboard.type("\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}");
@@ -55,5 +56,5 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
     .toContain("-- fn mul(a: i32, b: i32) -> i32 {");
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
-  await expect(page.locator("#embedded-editor-host .cm-content")).toContainText("a - b");
+  await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-content")).toContainText("a - b");
 });

@@ -14,7 +14,6 @@ function preview(code: string): string {
 }
 
 const adapter = createCommentFencedAdapter<EmbeddedRustBlock>({
-  buttonLabel: "Open Rust editor",
   defaultTitle(block) {
     return block.label ?? `Rust Block ${block.ordinal}`;
   },

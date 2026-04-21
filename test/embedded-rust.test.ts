@@ -78,7 +78,6 @@ describe("embeddedRust", () => {
 
   it("builds adapters from the generic comment-fenced adapter factory", () => {
     const adapter = createCommentFencedAdapter({
-      buttonLabel: "Open Demo editor",
       defaultTitle(block: EmbeddedBlock) {
         return block.label ?? `Demo ${block.ordinal}`;
       },

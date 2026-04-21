@@ -1,14 +1,8 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import {
-  queryEmbeddedBlockModalDom,
-  type EmbeddedBlockModalDom,
-} from "./embeddedBlockModal.js";
-
 export interface DemoUi {
   editorHost: HTMLDivElement;
-  embeddedEditorDom: EmbeddedBlockModalDom;
   logEvent(text: string): void;
   renderDocumentButtons(
     documents: readonly string[],
@@ -58,7 +52,6 @@ export function queryDemoUi(root: ParentNode = document): DemoUi | null {
   const eventsEl = root.querySelector<HTMLDivElement>("#events");
   const editorHost = root.querySelector<HTMLDivElement>("#editor");
   const documentsEl = root.querySelector<HTMLDivElement>("#documents");
-  const embeddedEditorDom = queryEmbeddedBlockModalDom(root);
 
   if (
     !statusEl ||
@@ -66,15 +59,13 @@ export function queryDemoUi(root: ParentNode = document): DemoUi | null {
     !documentUriEl ||
     !eventsEl ||
     !editorHost ||
-    !documentsEl ||
-    !embeddedEditorDom
+    !documentsEl
   ) {
     return null;
   }
 
   return {
     editorHost,
-    embeddedEditorDom,
     logEvent(text: string) {
       const item = document.createElement("div");
       item.className = "event";

@@ -41,7 +41,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
     currentView() {
       return currentView;
     },
-    dom: options.ui.embeddedEditorDom,
     log(message) {
       options.ui.logEvent(message);
     },

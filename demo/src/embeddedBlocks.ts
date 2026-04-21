@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
+import { RangeSetBuilder, StateField, type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 
 export interface EmbeddedBlock {
@@ -16,11 +16,19 @@ export interface CommentFenceSpec {
   kind: string;
 }
 
+export interface EmbeddedBlockInlineHandle {
+  destroy(): void;
+  dom: HTMLElement;
+  sync(code: string, title: string): void;
+}
+
 export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
-  buttonLabel: string;
+  buttonLabel(block: TBlock, expanded: boolean): string;
+  createExpanded?(view: EditorView, block: TBlock): EmbeddedBlockInlineHandle | null;
   description(block: TBlock): string;
+  expanded(state: EditorState, block: TBlock): boolean;
   kindLabel(block: TBlock): string;
-  onOpen(block: TBlock): void;
+  onToggle(view: EditorView, block: TBlock): void;
   preview(code: string): string;
 }
 
@@ -29,13 +37,13 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];
   serialize(block: TBlock, code: string): string;
-  widgetExtension(onOpen: (block: TBlock) => void): Extension;
+  widget: Pick<CommentFencedAdapterSpec<TBlock>, "description" | "kindLabel" | "preview">;
+  widgetExtension(config: EmbeddedBlockWidgetConfig<TBlock>): Extension;
 }
 
 export type AnyEmbeddedBlockEditorAdapter = EmbeddedBlockEditorAdapter<any>;
 
 export interface CommentFencedAdapterSpec<TBlock extends EmbeddedBlock> {
-  buttonLabel: string;
   defaultTitle(block: EmbeddedBlock): string;
   description(block: TBlock): string;
   editorExtensions(): Extension[];
@@ -129,6 +137,7 @@ class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
   constructor(
     private readonly block: TBlock,
     private readonly config: EmbeddedBlockWidgetConfig<TBlock>,
+    private readonly expanded: boolean,
   ) {
     super();
   }
@@ -137,14 +146,16 @@ class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
     return (
       this.block.key === other.block.key &&
       this.block.code === other.block.code &&
-      this.block.title === other.block.title
+      this.block.title === other.block.title &&
+      this.expanded === other.expanded
     );
   }
 
-  override toDOM(): HTMLElement {
+  override toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "cm-embedded-block-widget";
     wrap.dataset.kind = this.config.kindLabel(this.block).toLowerCase();
+    wrap.dataset.expanded = String(this.expanded);
 
     const badge = document.createElement("span");
     badge.className = "cm-embedded-block-badge";
@@ -165,34 +176,85 @@ class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
     const button = document.createElement("button");
     button.className = "cm-embedded-block-open";
     button.type = "button";
-    button.textContent = this.config.buttonLabel;
+    button.textContent = this.config.buttonLabel(this.block, this.expanded);
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      this.config.onOpen(this.block);
+      this.config.onToggle(view, this.block);
     });
 
     wrap.append(badge, title, summary, code, button);
+
+    if (this.expanded && this.config.createExpanded) {
+      const handle = this.config.createExpanded(view, this.block);
+      if (handle) {
+        wrap.append(handle.dom);
+        (wrap as unknown as { __embeddedHandle?: EmbeddedBlockInlineHandle }).__embeddedHandle =
+          handle;
+      }
+    }
+
     return wrap;
   }
 
+  override updateDOM(dom: HTMLElement, view: EditorView): boolean {
+    const badge = dom.querySelector<HTMLElement>(".cm-embedded-block-badge");
+    const title = dom.querySelector<HTMLElement>(".cm-embedded-block-title");
+    const summary = dom.querySelector<HTMLElement>(".cm-embedded-block-summary");
+    const preview = dom.querySelector<HTMLElement>(".cm-embedded-block-preview");
+    const button = dom.querySelector<HTMLButtonElement>(".cm-embedded-block-open");
+
+    if (!badge || !title || !summary || !preview || !button) {
+      return false;
+    }
+
+    badge.textContent = this.config.kindLabel(this.block);
+    title.textContent = this.block.title;
+    summary.textContent = this.config.description(this.block);
+    preview.textContent = this.config.preview(this.block.code);
+    button.textContent = this.config.buttonLabel(this.block, this.expanded);
+    dom.dataset.expanded = String(this.expanded);
+
+    const handle = (dom as unknown as { __embeddedHandle?: EmbeddedBlockInlineHandle })
+      .__embeddedHandle;
+    if (this.expanded) {
+      if (!handle) {
+        return false;
+      }
+      handle.sync(this.block.code, this.block.title);
+    } else if (handle) {
+      handle.destroy();
+      delete (dom as unknown as { __embeddedHandle?: EmbeddedBlockInlineHandle }).__embeddedHandle;
+    }
+
+    return true;
+  }
+
   override ignoreEvent(): boolean {
-    return false;
+    return true;
+  }
+
+  override destroy(dom: HTMLElement): void {
+    const handle = (dom as unknown as { __embeddedHandle?: EmbeddedBlockInlineHandle })
+      .__embeddedHandle;
+    handle?.destroy();
   }
 }
 
 function decorationsFor<TBlock extends EmbeddedBlock>(
   source: string,
+  state: EditorState,
   config: EmbeddedBlockWidgetConfig<TBlock>,
   parse: (source: string) => TBlock[],
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const block of parse(source)) {
+    const expanded = config.expanded(state, block);
     builder.add(
       block.from,
       block.to,
       Decoration.replace({
         block: true,
-        widget: new EmbeddedBlockWidget(block, config),
+        widget: new EmbeddedBlockWidget(block, config, expanded),
       }),
     );
   }
@@ -253,6 +315,16 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     fontWeight: "700",
     padding: "8px 14px",
   },
+  ".cm-embedded-block-inline": {
+    marginTop: "6px",
+    borderRadius: "14px",
+    border: "1px solid #dccca7",
+    overflow: "hidden",
+    backgroundColor: "#fffaf0",
+  },
+  ".cm-embedded-block-inline .cm-editor": {
+    minHeight: "220px",
+  },
 });
 
 export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
@@ -263,13 +335,10 @@ export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
     embeddedBlockTheme,
     StateField.define<DecorationSet>({
       create(state) {
-        return decorationsFor(state.doc.toString(), config, parse);
+        return decorationsFor(state.doc.toString(), state, config, parse);
       },
-      update(value, transaction) {
-        if (!transaction.docChanged) {
-          return value;
-        }
-        return decorationsFor(transaction.state.doc.toString(), config, parse);
+      update(_value, transaction) {
+        return decorationsFor(transaction.state.doc.toString(), transaction.state, config, parse);
       },
       provide(field) {
         return EditorView.decorations.from(field);
@@ -302,18 +371,19 @@ export function createCommentFencedAdapter<TBlock extends EmbeddedBlock = Embedd
     parseBlocks,
     serialize: serializeBlock,
     serializeBlock,
-    widgetExtension(onOpen) {
-      return embeddedBlockWidgets(parseBlocks, {
-        buttonLabel: spec.buttonLabel,
-        description(block) {
-          return spec.description(block);
-        },
-        kindLabel(block) {
-          return spec.kindLabel(block);
-        },
-        onOpen,
-        preview: spec.preview,
-      });
+    widget: {
+      description(block) {
+        return spec.description(block);
+      },
+      kindLabel(block) {
+        return spec.kindLabel(block);
+      },
+      preview(code) {
+        return spec.preview(code);
+      },
+    },
+    widgetExtension(config) {
+      return embeddedBlockWidgets(parseBlocks, config);
     },
   };
 }
