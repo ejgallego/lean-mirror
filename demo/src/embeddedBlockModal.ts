@@ -55,6 +55,7 @@ export function embeddedBlockModalTheme(): Extension {
 export interface EmbeddedBlockModalController<TBlock extends EmbeddedBlock> {
   close(): void;
   open(block: TBlock): void;
+  syncFromOuter(): void;
 }
 
 export interface EmbeddedBlockModalOptions<TBlock extends EmbeddedBlock> {
@@ -71,6 +72,7 @@ export function createEmbeddedBlockModalController<TBlock extends EmbeddedBlock>
 ): EmbeddedBlockModalController<TBlock> {
   let embeddedView: EditorView | null = null;
   let activeBlock: { key: string; uri: string } | null = null;
+  let syncingFromOuter = false;
 
   function currentSource(): string {
     return options.currentView()?.state.doc.toString() ?? "";
@@ -109,7 +111,7 @@ export function createEmbeddedBlockModalController<TBlock extends EmbeddedBlock>
           ...options.adapter.editorExtensions(),
           options.modalTheme(),
           EditorView.updateListener.of((update) => {
-            if (!update.docChanged || !activeBlock) {
+            if (!update.docChanged || !activeBlock || syncingFromOuter) {
               return;
             }
             const outerView = options.currentView();
@@ -136,8 +138,40 @@ export function createEmbeddedBlockModalController<TBlock extends EmbeddedBlock>
     embeddedView.focus();
   }
 
+  function syncFromOuter(): void {
+    if (!activeBlock || !embeddedView) {
+      return;
+    }
+    const outerView = options.currentView();
+    if (!outerView || activeBlock.uri !== options.currentUri()) {
+      close();
+      return;
+    }
+    const target = findActiveBlock(activeBlock.key);
+    if (!target) {
+      close();
+      return;
+    }
+    options.dom.title.textContent = target.title;
+    if (embeddedView.state.doc.toString() === target.code) {
+      return;
+    }
+    syncingFromOuter = true;
+    try {
+      embeddedView.dispatch({
+        changes: {
+          from: 0,
+          insert: target.code,
+          to: embeddedView.state.doc.length,
+        },
+      });
+    } finally {
+      syncingFromOuter = false;
+    }
+  }
+
   options.dom.closeButton.addEventListener("click", close);
   options.dom.modalBackdrop.addEventListener("click", close);
 
-  return { close, open };
+  return { close, open, syncFromOuter };
 }

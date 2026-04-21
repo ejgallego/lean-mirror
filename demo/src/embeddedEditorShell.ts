@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { EditorView, ViewUpdate } from "@codemirror/view";
 
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlock } from "./embeddedBlocks.js";
 import {
@@ -46,9 +46,16 @@ export function createEmbeddedEditorShell(
           log: options.log,
           modalTheme: options.modalTheme ?? embeddedBlockModalTheme,
         });
-        const extension = adapter.widgetExtension((block) => {
-          controller.open(block);
-        });
+        const extension = [
+          adapter.widgetExtension((block) => {
+            controller.open(block);
+          }),
+          EditorView.updateListener.of((update: ViewUpdate) => {
+            if (update.docChanged) {
+              controller.syncFromOuter();
+            }
+          }),
+        ];
         controllers.set(adapter, { close: controller.close, extension });
         return extension;
       });

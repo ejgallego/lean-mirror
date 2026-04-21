@@ -58,6 +58,7 @@ declare global {
     __leanDemo?: {
     currentUri(): string | null;
     currentDoc(): string | null;
+    replaceCurrentText(search: string, replacement: string): boolean;
     setCursor(query: string): boolean;
     undo(): boolean;
     redo(): boolean;
@@ -154,6 +155,24 @@ function installDemoApi(openDocument: (uri: string) => Promise<void>): void {
   window.__leanDemo = {
     currentUri: () => currentUri,
     currentDoc: () => currentView?.state.doc.toString() ?? null,
+    replaceCurrentText(search: string, replacement: string) {
+      if (!currentView) {
+        return false;
+      }
+      const source = currentView.state.doc.toString();
+      const index = source.indexOf(search);
+      if (index < 0) {
+        return false;
+      }
+      currentView.dispatch({
+        changes: {
+          from: index,
+          insert: replacement,
+          to: index + search.length,
+        },
+      });
+      return true;
+    },
     setCursor(query: string) {
       if (!currentView) {
         return false;

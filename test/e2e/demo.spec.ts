@@ -53,4 +53,7 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("-- fn mul(a: i32, b: i32) -> i32 {");
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await expect(page.locator("#embedded-editor-host .cm-content")).toContainText("a - b");
 });
