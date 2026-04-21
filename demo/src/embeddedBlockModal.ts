@@ -15,6 +15,43 @@ export interface EmbeddedBlockModalDom {
   title: HTMLHeadingElement;
 }
 
+export function queryEmbeddedBlockModalDom(root: ParentNode = document): EmbeddedBlockModalDom | null {
+  const closeButton = root.querySelector<HTMLButtonElement>("#embedded-editor-close");
+  const editorHost = root.querySelector<HTMLDivElement>("#embedded-editor-host");
+  const modal = root.querySelector<HTMLDivElement>("#embedded-editor-modal");
+  const modalBackdrop = root.querySelector<HTMLDivElement>("#embedded-editor-backdrop");
+  const title = root.querySelector<HTMLHeadingElement>("#embedded-editor-title");
+
+  if (!closeButton || !editorHost || !modal || !modalBackdrop || !title) {
+    return null;
+  }
+
+  return {
+    closeButton,
+    editorHost,
+    modal,
+    modalBackdrop,
+    title,
+  };
+}
+
+export function embeddedBlockModalTheme(): Extension {
+  return EditorView.theme({
+    "&": {
+      height: "100%",
+      backgroundColor: "#fffaf0",
+    },
+    ".cm-scroller": {
+      fontFamily: "\"Iosevka Term\", \"IBM Plex Mono\", monospace",
+      lineHeight: "1.5",
+    },
+    ".cm-gutters": {
+      backgroundColor: "#f4ead2",
+      borderRight: "1px solid #e0d3b2",
+    },
+  });
+}
+
 export interface EmbeddedBlockModalController<TBlock extends EmbeddedBlock> {
   close(): void;
   open(block: TBlock): void;

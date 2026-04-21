@@ -11,7 +11,8 @@ import {
 import {
   embeddedRustAdapter,
 } from "./embeddedRust.js";
-import { createEmbeddedBlockModalController } from "./embeddedBlockModal.js";
+import { queryEmbeddedBlockModalDom } from "./embeddedBlockModal.js";
+import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
 
 import "./style.css";
 
@@ -29,11 +30,7 @@ const documentUriEl = document.querySelector<HTMLElement>("#document-uri");
 const eventsEl = document.querySelector<HTMLDivElement>("#events");
 const editorHost = document.querySelector<HTMLDivElement>("#editor");
 const documentsEl = document.querySelector<HTMLDivElement>("#documents");
-const embeddedEditorModalEl = document.querySelector<HTMLDivElement>("#embedded-editor-modal");
-const embeddedEditorBackdropEl = document.querySelector<HTMLDivElement>("#embedded-editor-backdrop");
-const embeddedEditorCloseEl = document.querySelector<HTMLButtonElement>("#embedded-editor-close");
-const embeddedEditorTitleEl = document.querySelector<HTMLHeadingElement>("#embedded-editor-title");
-const embeddedEditorHostEl = document.querySelector<HTMLDivElement>("#embedded-editor-host");
+const embeddedEditorDom = queryEmbeddedBlockModalDom(document);
 
 if (
   !statusEl ||
@@ -42,11 +39,7 @@ if (
   !eventsEl ||
   !editorHost ||
   !documentsEl ||
-  !embeddedEditorModalEl ||
-  !embeddedEditorBackdropEl ||
-  !embeddedEditorCloseEl ||
-  !embeddedEditorTitleEl ||
-  !embeddedEditorHostEl
+  !embeddedEditorDom
 ) {
   throw new Error("Demo DOM is incomplete.");
 }
@@ -58,11 +51,6 @@ const dom = {
   eventsEl,
   editorHost,
   documentsEl,
-  embeddedEditorCloseEl,
-  embeddedEditorBackdropEl,
-  embeddedEditorHostEl,
-  embeddedEditorModalEl,
-  embeddedEditorTitleEl,
 };
 
 declare global {
@@ -191,47 +179,23 @@ function installDemoApi(openDocument: (uri: string) => Promise<void>): void {
   };
 }
 
-function embeddedEditorTheme(): Extension {
-  return EditorView.theme({
-    "&": {
-      height: "100%",
-      backgroundColor: "#fffaf0",
-    },
-    ".cm-scroller": {
-      fontFamily: "\"Iosevka Term\", \"IBM Plex Mono\", monospace",
-      lineHeight: "1.5",
-    },
-    ".cm-gutters": {
-      backgroundColor: "#f4ead2",
-      borderRight: "1px solid #e0d3b2",
-    },
-  });
-}
-
-const embeddedBlockModal = createEmbeddedBlockModalController({
-  adapter: embeddedRustAdapter,
+const embeddedEditors = createEmbeddedEditorShell({
   currentUri() {
     return currentUri;
   },
   currentView() {
     return currentView;
   },
-  dom: {
-    closeButton: dom.embeddedEditorCloseEl,
-    editorHost: dom.embeddedEditorHostEl,
-    modal: dom.embeddedEditorModalEl,
-    modalBackdrop: dom.embeddedEditorBackdropEl,
-    title: dom.embeddedEditorTitleEl,
-  },
+  dom: embeddedEditorDom,
   log(message) {
     logEvent(message);
   },
-  modalTheme: embeddedEditorTheme,
 });
+const embeddedRustExtension = embeddedEditors.extensionFor(embeddedRustAdapter);
 
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {
   client?.sync();
-  embeddedBlockModal.close();
+  embeddedEditors.close();
   currentView?.destroy();
 
   const view = new EditorView({
@@ -246,9 +210,7 @@ async function mountDocument(uri: string, doc: string): Promise<EditorView> {
         },
         extraExtensions: [
           demoTheme(),
-          embeddedRustAdapter.widgetExtension((block) => {
-            embeddedBlockModal.open(block);
-          }),
+          embeddedRustExtension,
         ],
       }),
     }),
@@ -319,7 +281,7 @@ async function boot(): Promise<void> {
     logEvent("WebSocket transport failed.");
   });
   window.addEventListener("beforeunload", () => {
-    embeddedBlockModal.close();
+    embeddedEditors.close();
     currentView?.destroy();
     client?.disconnect();
     socket.close();

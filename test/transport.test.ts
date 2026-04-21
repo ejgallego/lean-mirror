@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createMessagePortTransport, createWebSocketTransport } from "../src/index.js";
-import { delay } from "./support/helpers.js";
+import { waitFor } from "./support/helpers.js";
 
 describe("transport helpers", () => {
   it("adapts WebSocket-like objects to CodeMirror transports", async () => {
@@ -51,7 +51,7 @@ describe("transport helpers", () => {
     });
 
     channel.port2.postMessage("{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}");
-    await delay(0);
+    await waitFor(() => received.length === 1);
 
     expect(received).toEqual(["{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"]);
   });
