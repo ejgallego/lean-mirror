@@ -29,11 +29,11 @@ const documentUriEl = document.querySelector<HTMLElement>("#document-uri");
 const eventsEl = document.querySelector<HTMLDivElement>("#events");
 const editorHost = document.querySelector<HTMLDivElement>("#editor");
 const documentsEl = document.querySelector<HTMLDivElement>("#documents");
-const rustModalEl = document.querySelector<HTMLDivElement>("#rust-modal");
-const rustModalBackdropEl = document.querySelector<HTMLDivElement>("#rust-modal-backdrop");
-const rustModalCloseEl = document.querySelector<HTMLButtonElement>("#rust-modal-close");
-const rustModalTitleEl = document.querySelector<HTMLHeadingElement>("#rust-modal-title");
-const rustModalEditorEl = document.querySelector<HTMLDivElement>("#rust-modal-editor");
+const embeddedEditorModalEl = document.querySelector<HTMLDivElement>("#embedded-editor-modal");
+const embeddedEditorBackdropEl = document.querySelector<HTMLDivElement>("#embedded-editor-backdrop");
+const embeddedEditorCloseEl = document.querySelector<HTMLButtonElement>("#embedded-editor-close");
+const embeddedEditorTitleEl = document.querySelector<HTMLHeadingElement>("#embedded-editor-title");
+const embeddedEditorHostEl = document.querySelector<HTMLDivElement>("#embedded-editor-host");
 
 if (
   !statusEl ||
@@ -42,11 +42,11 @@ if (
   !eventsEl ||
   !editorHost ||
   !documentsEl ||
-  !rustModalEl ||
-  !rustModalBackdropEl ||
-  !rustModalCloseEl ||
-  !rustModalTitleEl ||
-  !rustModalEditorEl
+  !embeddedEditorModalEl ||
+  !embeddedEditorBackdropEl ||
+  !embeddedEditorCloseEl ||
+  !embeddedEditorTitleEl ||
+  !embeddedEditorHostEl
 ) {
   throw new Error("Demo DOM is incomplete.");
 }
@@ -58,11 +58,11 @@ const dom = {
   eventsEl,
   editorHost,
   documentsEl,
-  rustModalCloseEl,
-  rustModalBackdropEl,
-  rustModalEditorEl,
-  rustModalEl,
-  rustModalTitleEl,
+  embeddedEditorCloseEl,
+  embeddedEditorBackdropEl,
+  embeddedEditorHostEl,
+  embeddedEditorModalEl,
+  embeddedEditorTitleEl,
 };
 
 declare global {
@@ -191,7 +191,7 @@ function installDemoApi(openDocument: (uri: string) => Promise<void>): void {
   };
 }
 
-function rustModalTheme(): Extension {
+function embeddedEditorTheme(): Extension {
   return EditorView.theme({
     "&": {
       height: "100%",
@@ -217,16 +217,16 @@ const embeddedBlockModal = createEmbeddedBlockModalController({
     return currentView;
   },
   dom: {
-    closeButton: dom.rustModalCloseEl,
-    editorHost: dom.rustModalEditorEl,
-    modal: dom.rustModalEl,
-    modalBackdrop: dom.rustModalBackdropEl,
-    title: dom.rustModalTitleEl,
+    closeButton: dom.embeddedEditorCloseEl,
+    editorHost: dom.embeddedEditorHostEl,
+    modal: dom.embeddedEditorModalEl,
+    modalBackdrop: dom.embeddedEditorBackdropEl,
+    title: dom.embeddedEditorTitleEl,
   },
   log(message) {
     logEvent(message);
   },
-  modalTheme: rustModalTheme,
+  modalTheme: embeddedEditorTheme,
 });
 
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {

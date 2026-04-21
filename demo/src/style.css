@@ -195,7 +195,7 @@ code {
   margin-top: 10px;
 }
 
-.rust-modal {
+.embedded-editor-modal {
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -203,18 +203,18 @@ code {
   place-items: center;
 }
 
-.rust-modal[hidden] {
+.embedded-editor-modal[hidden] {
   display: none;
 }
 
-.rust-modal-backdrop {
+.embedded-editor-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(31, 24, 14, 0.45);
   backdrop-filter: blur(4px);
 }
 
-.rust-modal-panel {
+.embedded-editor-panel {
   position: relative;
   z-index: 1;
   width: min(860px, calc(100vw - 32px));
@@ -228,7 +228,7 @@ code {
   overflow: hidden;
 }
 
-.rust-modal-head {
+.embedded-editor-head {
   display: flex;
   justify-content: space-between;
   gap: 20px;
@@ -236,7 +236,7 @@ code {
   padding: 20px 22px 0;
 }
 
-.rust-modal-eyebrow {
+.embedded-editor-eyebrow {
   margin: 0 0 6px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
@@ -244,12 +244,12 @@ code {
   color: #8a6c2f;
 }
 
-.rust-modal-head h2 {
+.embedded-editor-head h2 {
   margin: 0;
   color: #332811;
 }
 
-.rust-modal-close {
+.embedded-editor-close {
   border: none;
   border-radius: 999px;
   background: #25443b;
@@ -260,13 +260,13 @@ code {
   padding: 10px 16px;
 }
 
-.rust-modal-editor {
+.embedded-editor-host {
   flex: 1;
   min-height: 0;
   padding: 18px 22px 22px;
 }
 
-.rust-modal-editor .cm-editor {
+.embedded-editor-host .cm-editor {
   height: 100%;
   border: 1px solid #dfd3b9;
   border-radius: 16px;
@@ -283,7 +283,7 @@ code {
     min-height: 58vh;
   }
 
-  .rust-modal-panel {
+  .embedded-editor-panel {
     width: calc(100vw - 18px);
     height: min(82vh, 760px);
   }

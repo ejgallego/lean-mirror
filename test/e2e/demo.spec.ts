@@ -41,11 +41,11 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   await page.getByRole("button", { name: "Open Rust editor" }).click();
-  await expect(page.locator("#rust-modal")).not.toHaveAttribute("hidden", "");
-  await expect(page.locator("#rust-modal-title")).toContainText("demo-widget");
-  await expect(page.locator("#rust-modal-editor .cm-editor")).toHaveCount(1);
+  await expect(page.locator("#embedded-editor-modal")).not.toHaveAttribute("hidden", "");
+  await expect(page.locator("#embedded-editor-title")).toContainText("demo-widget");
+  await expect(page.locator("#embedded-editor-host .cm-editor")).toHaveCount(1);
 
-  const nestedEditor = page.locator("#rust-modal-editor .cm-content");
+  const nestedEditor = page.locator("#embedded-editor-host .cm-content");
   await nestedEditor.click();
   await page.keyboard.press("Control+End");
   await page.keyboard.type("\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}");
