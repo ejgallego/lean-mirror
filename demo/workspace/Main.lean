@@ -12,8 +12,19 @@ def twice (f : Nat -> Nat) (n : Nat) : Nat :=
 
 #eval twice Nat.succ helperValue
 
+-- ```rust demo-widget
+-- fn add(a: i32, b: i32) -> i32 {
+--     a + b
+-- }
+--
+-- fn main() {
+--     println!("{}", add(20, 22));
+-- }
+-- ```
+
 -- Try typing:
 -- #check MissingLeanName
 -- theorem broken : False := by
 --   trivial
 -- Try F12 on helperValue to jump into Helper.lean
+-- Click the Rust widget to open a nested Rust CodeMirror editor.

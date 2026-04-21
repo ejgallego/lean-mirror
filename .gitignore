@@ -7,3 +7,4 @@ coverage/
 .codex
 playwright-report/
 test-results/
+demo/workspace/*.olean

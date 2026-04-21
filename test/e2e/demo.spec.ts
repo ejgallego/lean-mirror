@@ -33,3 +33,24 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("def helperValue");
 });
+
+test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Open Rust editor" }).click();
+  await expect(page.locator("#rust-modal")).not.toHaveAttribute("hidden", "");
+  await expect(page.locator("#rust-modal-title")).toContainText("demo-widget");
+  await expect(page.locator("#rust-modal-editor .cm-editor")).toHaveCount(1);
+
+  const nestedEditor = page.locator("#rust-modal-editor .cm-content");
+  await nestedEditor.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}");
+
+  await expect
+    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
+    .toContain("-- fn mul(a: i32, b: i32) -> i32 {");
+});

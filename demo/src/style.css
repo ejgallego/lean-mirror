@@ -195,6 +195,84 @@ code {
   margin-top: 10px;
 }
 
+.rust-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+}
+
+.rust-modal[hidden] {
+  display: none;
+}
+
+.rust-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(31, 24, 14, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.rust-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(860px, calc(100vw - 32px));
+  height: min(72vh, 760px);
+  border-radius: 22px;
+  border: 1px solid rgba(99, 72, 20, 0.22);
+  background: rgba(255, 251, 242, 0.98);
+  box-shadow: 0 30px 70px rgba(33, 23, 9, 0.28);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rust-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: start;
+  padding: 20px 22px 0;
+}
+
+.rust-modal-eyebrow {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  color: #8a6c2f;
+}
+
+.rust-modal-head h2 {
+  margin: 0;
+  color: #332811;
+}
+
+.rust-modal-close {
+  border: none;
+  border-radius: 999px;
+  background: #25443b;
+  color: #f3f8f5;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 10px 16px;
+}
+
+.rust-modal-editor {
+  flex: 1;
+  min-height: 0;
+  padding: 18px 22px 22px;
+}
+
+.rust-modal-editor .cm-editor {
+  height: 100%;
+  border: 1px solid #dfd3b9;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
 @media (max-width: 980px) {
   .hero,
   .layout {
@@ -203,5 +281,10 @@ code {
 
   .panel-editor {
     min-height: 58vh;
+  }
+
+  .rust-modal-panel {
+    width: calc(100vw - 18px);
+    height: min(82vh, 760px);
   }
 }

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFile } from "node:fs/promises";
@@ -14,6 +14,18 @@ const helperPath = join(workspaceDir, "Helper.lean");
 const rootUri = pathToFileURL(workspaceDir).toString();
 const documentUri = pathToFileURL(documentPath).toString();
 const helperUri = pathToFileURL(helperPath).toString();
+
+function ensureDemoArtifacts() {
+  const result = spawnSync("lean", ["-o", "Helper.olean", "Helper.lean"], {
+    cwd: workspaceDir,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to build demo/workspace/Helper.olean\n${result.stderr ?? result.stdout ?? ""}`.trim(),
+    );
+  }
+}
 
 function withCorsHeaders(headers = {}) {
   return {
@@ -160,6 +172,8 @@ httpServer.on("upgrade", (req, socket, head) => {
     wsServer.emit("connection", connection, req);
   });
 });
+
+ensureDemoArtifacts();
 
 httpServer.listen(port, host, () => {
   console.log(`Lean demo bridge listening on http://${host}:${port}`);

@@ -38,7 +38,7 @@
         <section class="panel panel-editor">
           <div class="panel-head">
             <h2>Editor</h2>
-            <p>Try hover, completion, go-to-definition, rename, formatting, and diagnostics.</p>
+            <p>Try hover, completion, go-to-definition, rename, formatting, diagnostics, and the embedded Rust renderer.</p>
           </div>
           <div id="editor" class="editor-host"></div>
         </section>
@@ -52,11 +52,25 @@
             <li>Hover over <code>Nat.succ</code> or trigger completion with <code>Ctrl-Space</code>.</li>
             <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
             <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
+            <li>Open the embedded Rust card to spawn a nested CodeMirror instance for Rust.</li>
             <li>Edit the file to force diagnostics or signature help.</li>
           </ul>
           <div id="events" class="events"></div>
         </aside>
       </main>
+    </div>
+    <div id="rust-modal" class="rust-modal" hidden>
+      <div id="rust-modal-backdrop" class="rust-modal-backdrop"></div>
+      <section class="rust-modal-panel">
+        <div class="rust-modal-head">
+          <div>
+            <p class="rust-modal-eyebrow">Embedded Editor</p>
+            <h2 id="rust-modal-title">Rust Block</h2>
+          </div>
+          <button id="rust-modal-close" class="rust-modal-close" type="button">Close</button>
+        </div>
+        <div id="rust-modal-editor" class="rust-modal-editor"></div>
+      </section>
     </div>
   </body>
 </html>

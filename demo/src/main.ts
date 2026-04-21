@@ -1,13 +1,21 @@
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
+import { rust } from "@codemirror/lang-rust";
 import {
   createLeanLspClient,
   createLeanWorkspace,
   createWebSocketTransport,
   lean4,
+  leanUtilities,
   type LeanWorkspace,
 } from "../../src/index.js";
+import {
+  embeddedRustWidgets,
+  parseEmbeddedRustBlocks,
+  serializeEmbeddedRustBlock,
+  type EmbeddedRustBlock,
+} from "./embeddedRust.js";
 
 import "./style.css";
 
@@ -25,8 +33,25 @@ const documentUriEl = document.querySelector<HTMLElement>("#document-uri");
 const eventsEl = document.querySelector<HTMLDivElement>("#events");
 const editorHost = document.querySelector<HTMLDivElement>("#editor");
 const documentsEl = document.querySelector<HTMLDivElement>("#documents");
+const rustModalEl = document.querySelector<HTMLDivElement>("#rust-modal");
+const rustModalBackdropEl = document.querySelector<HTMLDivElement>("#rust-modal-backdrop");
+const rustModalCloseEl = document.querySelector<HTMLButtonElement>("#rust-modal-close");
+const rustModalTitleEl = document.querySelector<HTMLHeadingElement>("#rust-modal-title");
+const rustModalEditorEl = document.querySelector<HTMLDivElement>("#rust-modal-editor");
 
-if (!statusEl || !rootUriEl || !documentUriEl || !eventsEl || !editorHost || !documentsEl) {
+if (
+  !statusEl ||
+  !rootUriEl ||
+  !documentUriEl ||
+  !eventsEl ||
+  !editorHost ||
+  !documentsEl ||
+  !rustModalEl ||
+  !rustModalBackdropEl ||
+  !rustModalCloseEl ||
+  !rustModalTitleEl ||
+  !rustModalEditorEl
+) {
   throw new Error("Demo DOM is incomplete.");
 }
 
@@ -37,6 +62,11 @@ const dom = {
   eventsEl,
   editorHost,
   documentsEl,
+  rustModalCloseEl,
+  rustModalBackdropEl,
+  rustModalEditorEl,
+  rustModalEl,
+  rustModalTitleEl,
 };
 
 declare global {
@@ -99,6 +129,8 @@ let currentView: EditorView | null = null;
 let currentUri: string | null = null;
 let workspace: LeanWorkspace | null = null;
 let client: ReturnType<typeof createLeanLspClient> | null = null;
+let rustView: EditorView | null = null;
+let activeRustBlock: { key: string; uri: string } | null = null;
 
 async function fetchSession(): Promise<DemoSession> {
   const response = await fetch(`${apiBase}/session`);
@@ -165,8 +197,86 @@ function installDemoApi(openDocument: (uri: string) => Promise<void>): void {
   };
 }
 
+function parseCurrentRustBlocks(): EmbeddedRustBlock[] {
+  return currentView ? parseEmbeddedRustBlocks(currentView.state.doc.toString()) : [];
+}
+
+function findActiveRustBlock(key: string): EmbeddedRustBlock | null {
+  return parseCurrentRustBlocks().find((block) => block.key === key) ?? null;
+}
+
+function rustModalTheme(): Extension {
+  return EditorView.theme({
+    "&": {
+      height: "100%",
+      backgroundColor: "#fffaf0",
+    },
+    ".cm-scroller": {
+      fontFamily: "\"Iosevka Term\", \"IBM Plex Mono\", monospace",
+      lineHeight: "1.5",
+    },
+    ".cm-gutters": {
+      backgroundColor: "#f4ead2",
+      borderRight: "1px solid #e0d3b2",
+    },
+  });
+}
+
+function closeRustModal(): void {
+  rustView?.destroy();
+  rustView = null;
+  activeRustBlock = null;
+  dom.rustModalEditorEl.replaceChildren();
+  dom.rustModalEl.hidden = true;
+}
+
+function openRustModal(block: EmbeddedRustBlock): void {
+  if (!currentView || !currentUri) {
+    return;
+  }
+  const resolved = findActiveRustBlock(block.key) ?? block;
+  activeRustBlock = { key: resolved.key, uri: currentUri };
+  dom.rustModalEl.hidden = false;
+  dom.rustModalTitleEl.textContent = resolved.title;
+  dom.rustModalEditorEl.replaceChildren();
+  rustView?.destroy();
+
+  let syncingOuter = false;
+  rustView = new EditorView({
+    parent: dom.rustModalEditorEl,
+    state: EditorState.create({
+      doc: resolved.code,
+      extensions: [
+        rust(),
+        ...leanUtilities({ lineWrapping: true }),
+        rustModalTheme(),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged || syncingOuter || !currentView || !activeRustBlock) {
+            return;
+          }
+          const target = findActiveRustBlock(activeRustBlock.key);
+          if (!target || activeRustBlock.uri !== currentUri) {
+            return;
+          }
+          currentView.dispatch({
+            changes: {
+              from: target.from,
+              insert: serializeEmbeddedRustBlock(target, update.state.doc.toString()),
+              to: target.to,
+            },
+          });
+        }),
+      ],
+    }),
+  });
+
+  logEvent(`Opened embedded Rust block ${resolved.title}`);
+  rustView.focus();
+}
+
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {
   client?.sync();
+  closeRustModal();
   currentView?.destroy();
 
   const view = new EditorView({
@@ -181,6 +291,11 @@ async function mountDocument(uri: string, doc: string): Promise<EditorView> {
         },
         extraExtensions: [
           demoTheme(),
+          embeddedRustWidgets({
+            onOpen(block) {
+              openRustModal(block);
+            },
+          }),
         ],
       }),
     }),
@@ -250,7 +365,14 @@ async function boot(): Promise<void> {
     setStatus("Transport error");
     logEvent("WebSocket transport failed.");
   });
+  dom.rustModalCloseEl.addEventListener("click", () => {
+    closeRustModal();
+  });
+  dom.rustModalBackdropEl.addEventListener("click", () => {
+    closeRustModal();
+  });
   window.addEventListener("beforeunload", () => {
+    closeRustModal();
     currentView?.destroy();
     client?.disconnect();
     socket.close();
