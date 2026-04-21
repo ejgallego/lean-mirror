@@ -9,8 +9,8 @@ import {
   type LeanWorkspace,
 } from "../../src/index.js";
 import {
-  embeddedRustAdapter,
-} from "./embeddedRust.js";
+  demoEmbeddedAdapters,
+} from "./embeddedAdapters.js";
 import { queryEmbeddedBlockModalDom } from "./embeddedBlockModal.js";
 import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
 
@@ -210,7 +210,7 @@ const embeddedEditors = createEmbeddedEditorShell({
     logEvent(message);
   },
 });
-const embeddedBlockExtensions = embeddedEditors.extensionsFor([embeddedRustAdapter]);
+const embeddedBlockExtensions = embeddedEditors.extensionsFor(demoEmbeddedAdapters);
 
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {
   client?.sync();

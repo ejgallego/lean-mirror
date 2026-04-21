@@ -12,9 +12,7 @@ export interface EmbeddedBlock {
 }
 
 export interface CommentFenceSpec {
-  buttonLabel: string;
   defaultTitle(block: EmbeddedBlock): string;
-  description: string;
   kind: string;
 }
 
@@ -27,6 +25,7 @@ export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
 }
 
 export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
+  kind: string;
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];
   serialize(block: TBlock, code: string): string;
@@ -34,6 +33,16 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
 }
 
 export type AnyEmbeddedBlockEditorAdapter = EmbeddedBlockEditorAdapter<any>;
+
+export interface CommentFencedAdapterSpec<TBlock extends EmbeddedBlock> {
+  buttonLabel: string;
+  defaultTitle(block: EmbeddedBlock): string;
+  description(block: TBlock): string;
+  editorExtensions(): Extension[];
+  kind: string;
+  kindLabel(block: TBlock): string;
+  preview(code: string): string;
+}
 
 function uncommentLine(line: string): string {
   if (line === "--") {
@@ -267,4 +276,44 @@ export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
       },
     }),
   ];
+}
+
+export function createCommentFencedAdapter<TBlock extends EmbeddedBlock = EmbeddedBlock>(
+  spec: CommentFencedAdapterSpec<TBlock>,
+): EmbeddedBlockEditorAdapter<TBlock> & {
+  parseBlocks(source: string): TBlock[];
+  serializeBlock(block: TBlock, code: string): string;
+} {
+  const parseBlocks = (source: string): TBlock[] =>
+    parseCommentFencedBlocks(source, {
+      defaultTitle: spec.defaultTitle,
+      kind: spec.kind,
+    }) as TBlock[];
+
+  const serializeBlock = (block: TBlock, code: string): string =>
+    serializeCommentFencedBlock(block, spec.kind, code);
+
+  return {
+    kind: spec.kind,
+    editorExtensions() {
+      return spec.editorExtensions();
+    },
+    parse: parseBlocks,
+    parseBlocks,
+    serialize: serializeBlock,
+    serializeBlock,
+    widgetExtension(onOpen) {
+      return embeddedBlockWidgets(parseBlocks, {
+        buttonLabel: spec.buttonLabel,
+        description(block) {
+          return spec.description(block);
+        },
+        kindLabel(block) {
+          return spec.kindLabel(block);
+        },
+        onOpen,
+        preview: spec.preview,
+      });
+    },
+  };
 }

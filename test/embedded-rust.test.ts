@@ -4,7 +4,12 @@ import {
   parseEmbeddedRustBlocks,
   serializeEmbeddedRustBlock,
 } from "../demo/src/embeddedRust.js";
-import { parseCommentFencedBlocks, serializeCommentFencedBlock } from "../demo/src/embeddedBlocks.js";
+import {
+  createCommentFencedAdapter,
+  parseCommentFencedBlocks,
+  serializeCommentFencedBlock,
+  type EmbeddedBlock,
+} from "../demo/src/embeddedBlocks.js";
 
 describe("embeddedRust", () => {
   it("parses comment-delimited Rust blocks from a Lean document", () => {
@@ -69,5 +74,32 @@ describe("embeddedRust", () => {
     expect(serialized).toContain("-- ```demo card");
     expect(serialized).toContain("-- alpha");
     expect(serialized).toContain("-- beta");
+  });
+
+  it("builds adapters from the generic comment-fenced adapter factory", () => {
+    const adapter = createCommentFencedAdapter({
+      buttonLabel: "Open Demo editor",
+      defaultTitle(block: EmbeddedBlock) {
+        return block.label ?? `Demo ${block.ordinal}`;
+      },
+      description() {
+        return "Demo adapter";
+      },
+      editorExtensions() {
+        return [];
+      },
+      kind: "demo",
+      kindLabel() {
+        return "Embedded Demo";
+      },
+      preview(code: string) {
+        return code;
+      },
+    });
+
+    const blocks = adapter.parseBlocks(["-- ```demo sample", "-- alpha", "-- ```", ""].join("\n"));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.key).toBe("demo:sample");
+    expect(adapter.serializeBlock(blocks[0]!, "beta")).toContain("-- beta");
   });
 });
