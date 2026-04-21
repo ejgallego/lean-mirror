@@ -1,5 +1,8 @@
 import type { Extension } from "@codemirror/state";
+import { rust } from "@codemirror/lang-rust";
+import { leanUtilities } from "../../src/index.js";
 import {
+  type EmbeddedBlockEditorAdapter,
   embeddedBlockWidgets,
   parseCommentFencedBlocks,
   serializeCommentFencedBlock,
@@ -45,3 +48,14 @@ export function embeddedRustWidgets(config: EmbeddedRustConfig): Extension {
     preview,
   });
 }
+
+export const embeddedRustAdapter: EmbeddedBlockEditorAdapter<EmbeddedRustBlock> = {
+  editorExtensions() {
+    return [rust(), ...leanUtilities({ lineWrapping: true })];
+  },
+  parse: parseEmbeddedRustBlocks,
+  serialize: serializeEmbeddedRustBlock,
+  widgetExtension(onOpen) {
+    return embeddedRustWidgets({ onOpen });
+  },
+};

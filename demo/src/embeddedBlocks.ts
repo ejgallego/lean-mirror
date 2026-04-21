@@ -26,6 +26,13 @@ export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
   preview(code: string): string;
 }
 
+export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
+  editorExtensions(): Extension[];
+  parse(source: string): TBlock[];
+  serialize(block: TBlock, code: string): string;
+  widgetExtension(onOpen: (block: TBlock) => void): Extension;
+}
+
 function uncommentLine(line: string): string {
   if (line === "--") {
     return "";
@@ -97,6 +104,14 @@ export function serializeCommentFencedBlock(
   const header = `-- \`\`\`${kind}${block.label ? ` ${block.label}` : ""}`;
   const body = code.split("\n").map((line) => (line.length === 0 ? "--" : `-- ${line}`));
   return [header, ...body, "-- ```"].join("\n") + "\n";
+}
+
+export function findEmbeddedBlockByKey<TBlock extends EmbeddedBlock>(
+  source: string,
+  key: string,
+  parse: (source: string) => TBlock[],
+): TBlock | null {
+  return parse(source).find((block) => block.key === key) ?? null;
 }
 
 class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {

@@ -1,21 +1,17 @@
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
-import { rust } from "@codemirror/lang-rust";
 import {
   createLeanLspClient,
   createLeanWorkspace,
   createWebSocketTransport,
   lean4,
-  leanUtilities,
   type LeanWorkspace,
 } from "../../src/index.js";
 import {
-  embeddedRustWidgets,
-  parseEmbeddedRustBlocks,
-  serializeEmbeddedRustBlock,
-  type EmbeddedRustBlock,
+  embeddedRustAdapter,
 } from "./embeddedRust.js";
+import { createEmbeddedBlockModalController } from "./embeddedBlockModal.js";
 
 import "./style.css";
 
@@ -129,8 +125,6 @@ let currentView: EditorView | null = null;
 let currentUri: string | null = null;
 let workspace: LeanWorkspace | null = null;
 let client: ReturnType<typeof createLeanLspClient> | null = null;
-let rustView: EditorView | null = null;
-let activeRustBlock: { key: string; uri: string } | null = null;
 
 async function fetchSession(): Promise<DemoSession> {
   const response = await fetch(`${apiBase}/session`);
@@ -197,14 +191,6 @@ function installDemoApi(openDocument: (uri: string) => Promise<void>): void {
   };
 }
 
-function parseCurrentRustBlocks(): EmbeddedRustBlock[] {
-  return currentView ? parseEmbeddedRustBlocks(currentView.state.doc.toString()) : [];
-}
-
-function findActiveRustBlock(key: string): EmbeddedRustBlock | null {
-  return parseCurrentRustBlocks().find((block) => block.key === key) ?? null;
-}
-
 function rustModalTheme(): Extension {
   return EditorView.theme({
     "&": {
@@ -222,61 +208,30 @@ function rustModalTheme(): Extension {
   });
 }
 
-function closeRustModal(): void {
-  rustView?.destroy();
-  rustView = null;
-  activeRustBlock = null;
-  dom.rustModalEditorEl.replaceChildren();
-  dom.rustModalEl.hidden = true;
-}
-
-function openRustModal(block: EmbeddedRustBlock): void {
-  if (!currentView || !currentUri) {
-    return;
-  }
-  const resolved = findActiveRustBlock(block.key) ?? block;
-  activeRustBlock = { key: resolved.key, uri: currentUri };
-  dom.rustModalEl.hidden = false;
-  dom.rustModalTitleEl.textContent = resolved.title;
-  dom.rustModalEditorEl.replaceChildren();
-  rustView?.destroy();
-
-  let syncingOuter = false;
-  rustView = new EditorView({
-    parent: dom.rustModalEditorEl,
-    state: EditorState.create({
-      doc: resolved.code,
-      extensions: [
-        rust(),
-        ...leanUtilities({ lineWrapping: true }),
-        rustModalTheme(),
-        EditorView.updateListener.of((update) => {
-          if (!update.docChanged || syncingOuter || !currentView || !activeRustBlock) {
-            return;
-          }
-          const target = findActiveRustBlock(activeRustBlock.key);
-          if (!target || activeRustBlock.uri !== currentUri) {
-            return;
-          }
-          currentView.dispatch({
-            changes: {
-              from: target.from,
-              insert: serializeEmbeddedRustBlock(target, update.state.doc.toString()),
-              to: target.to,
-            },
-          });
-        }),
-      ],
-    }),
-  });
-
-  logEvent(`Opened embedded Rust block ${resolved.title}`);
-  rustView.focus();
-}
+const embeddedBlockModal = createEmbeddedBlockModalController({
+  adapter: embeddedRustAdapter,
+  currentUri() {
+    return currentUri;
+  },
+  currentView() {
+    return currentView;
+  },
+  dom: {
+    closeButton: dom.rustModalCloseEl,
+    editorHost: dom.rustModalEditorEl,
+    modal: dom.rustModalEl,
+    modalBackdrop: dom.rustModalBackdropEl,
+    title: dom.rustModalTitleEl,
+  },
+  log(message) {
+    logEvent(message);
+  },
+  modalTheme: rustModalTheme,
+});
 
 async function mountDocument(uri: string, doc: string): Promise<EditorView> {
   client?.sync();
-  closeRustModal();
+  embeddedBlockModal.close();
   currentView?.destroy();
 
   const view = new EditorView({
@@ -291,10 +246,8 @@ async function mountDocument(uri: string, doc: string): Promise<EditorView> {
         },
         extraExtensions: [
           demoTheme(),
-          embeddedRustWidgets({
-            onOpen(block) {
-              openRustModal(block);
-            },
+          embeddedRustAdapter.widgetExtension((block) => {
+            embeddedBlockModal.open(block);
           }),
         ],
       }),
@@ -365,14 +318,8 @@ async function boot(): Promise<void> {
     setStatus("Transport error");
     logEvent("WebSocket transport failed.");
   });
-  dom.rustModalCloseEl.addEventListener("click", () => {
-    closeRustModal();
-  });
-  dom.rustModalBackdropEl.addEventListener("click", () => {
-    closeRustModal();
-  });
   window.addEventListener("beforeunload", () => {
-    closeRustModal();
+    embeddedBlockModal.close();
     currentView?.destroy();
     client?.disconnect();
     socket.close();
