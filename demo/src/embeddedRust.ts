@@ -83,10 +83,38 @@ function normalizeRustHover(
   };
 }
 
-function rustHoverTooltips(config: { hoverTime?: number } = {}): Extension {
+function hoverErrorMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return typeof error === "string" ? error : null;
+  }
+  const candidate = error as { code?: unknown; message?: unknown; error?: unknown };
+  if (typeof candidate.message === "string") {
+    return candidate.message;
+  }
+  if (candidate.error && typeof candidate.error === "object" && "message" in candidate.error) {
+    const inner = candidate.error as { message?: unknown };
+    if (typeof inner.message === "string") {
+      return inner.message;
+    }
+  }
+  return null;
+}
+
+function isTransientRustHoverError(error: unknown): boolean {
+  if (error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === -32801) {
+    return true;
+  }
+  const message = hoverErrorMessage(error)?.toLowerCase();
+  return !!message && message.includes("content modified");
+}
+
+function rustHoverTooltips(
+  canRequest: () => boolean,
+  config: { hoverTime?: number } = {},
+): Extension {
   return hoverTooltip((view, pos): Promise<Tooltip | null> => {
     const plugin = LSPPlugin.get(view);
-    if (!plugin || plugin.client.serverCapabilities?.hoverProvider === false) {
+    if (!plugin || plugin.client.serverCapabilities?.hoverProvider === false || !canRequest()) {
       return Promise.resolve(null);
     }
     plugin.client.sync();
@@ -116,12 +144,7 @@ function rustHoverTooltips(config: { hoverTime?: number } = {}): Extension {
         };
       })
       .catch((error: unknown) => {
-        if (
-          error &&
-          typeof error === "object" &&
-          "code" in error &&
-          (error as { code?: unknown }).code === -32801
-        ) {
+        if (isTransientRustHoverError(error)) {
           return null;
         }
         throw error;
@@ -131,10 +154,12 @@ function rustHoverTooltips(config: { hoverTime?: number } = {}): Extension {
     : { hideOn: (transaction) => transaction.docChanged, hoverTime: config.hoverTime });
 }
 
-function rustClientExtensions(): readonly (Extension | LSPClientExtension)[] {
+function rustClientExtensions(
+  canRequestHover: () => boolean,
+): readonly (Extension | LSPClientExtension)[] {
   return [
     serverCompletion(),
-    rustHoverTooltips(),
+    rustHoverTooltips(canRequestHover),
     keymap.of([...formatKeymap, ...renameKeymap, ...jumpToDefinitionKeymap, ...findReferencesKeymap]),
     signatureHelp(),
   ];
@@ -170,6 +195,16 @@ function createRustInlineHandle(
   let socket: WebSocket | null = null;
   let client: LSPClient | null = null;
   let sessionInfo: { documentUri: string } | null = null;
+
+  function canRequestHover(): boolean {
+    return (
+      !destroyed &&
+      persistTimer === null &&
+      pendingDiagnosticsVersion === null &&
+      !syncingFromOuter &&
+      client !== null
+    );
+  }
 
   function positionToOffset(
     doc: EditorState["doc"],
@@ -334,7 +369,7 @@ function createRustInlineHandle(
         return;
       }
       client = new LSPClient({
-        extensions: rustClientExtensions(),
+        extensions: rustClientExtensions(canRequestHover),
         notificationHandlers: {
           "textDocument/publishDiagnostics": (_client, params) => {
             if (params?.uri !== session.documentUri) {
