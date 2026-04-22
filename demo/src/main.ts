@@ -26,6 +26,35 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function transientReasonMessage(reason: unknown): string | null {
+  if (reason && typeof reason === "object") {
+    const maybeError = reason as { code?: unknown; message?: unknown };
+    if (maybeError.code === -32801 && typeof maybeError.message === "string") {
+      return maybeError.message;
+    }
+    if (typeof maybeError.message === "string") {
+      return maybeError.message;
+    }
+  }
+  if (typeof reason === "string") {
+    return reason;
+  }
+  return null;
+}
+
+function isTransientReconnectReason(reason: unknown): boolean {
+  const message = transientReasonMessage(reason);
+  if (!message) {
+    return false;
+  }
+  return (
+    message.includes("Failed to fetch") ||
+    message.includes("WebSocket connection failed") ||
+    message.includes("file worker") ||
+    message.includes("content modified")
+  );
+}
+
 async function startDemoLoop() {
   const token = ++runToken;
   let attempt = 0;
@@ -69,5 +98,12 @@ if (import.meta.hot) {
     runtime = null;
   });
 }
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (!isTransientReconnectReason(event.reason)) {
+    return;
+  }
+  event.preventDefault();
+});
 
 void startDemoLoop();

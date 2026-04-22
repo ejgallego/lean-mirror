@@ -16,7 +16,7 @@ const rootUri = pathToFileURL(workspaceDir).toString();
 const documentUri = pathToFileURL(documentPath).toString();
 const helperUri = pathToFileURL(helperPath).toString();
 
-const expectedClosePatterns = [
+const ignorableClosePatterns = [
   /Watchdog error: Cannot read LSP (?:message|notification): Stream was closed/,
   /client exited without proper shutdown sequence/,
 ];
@@ -238,7 +238,7 @@ function pipeServerStderr(stream, state) {
       }
       return;
     }
-    if (state.expectedClose && expectedClosePatterns.some((pattern) => pattern.test(text))) {
+    if (ignorableClosePatterns.some((pattern) => pattern.test(text))) {
       if (text.includes("client exited without proper shutdown sequence")) {
         skipBlock = true;
       }
@@ -270,12 +270,55 @@ function pipeServerStderr(stream, state) {
   });
 }
 
+function sendLspFrame(stream, payload) {
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  stream.write(`Content-Length: ${body.length}\r\n\r\n`);
+  stream.write(body);
+}
+
+function noteClientLspMessage(state, payload) {
+  try {
+    const message = JSON.parse(payload.toString("utf8"));
+    if (message && typeof message === "object" && message.method === "initialized") {
+      state.initialized = true;
+    }
+  } catch {}
+}
+
+function requestGracefulShutdown(child, state) {
+  if (state.shutdownSent || child.killed || !state.initialized) {
+    return;
+  }
+  state.shutdownSent = true;
+  try {
+    sendLspFrame(child.stdin, {
+      jsonrpc: "2.0",
+      id: 1_000_000,
+      method: "shutdown",
+      params: null,
+    });
+    setTimeout(() => {
+      if (child.killed) {
+        return;
+      }
+      try {
+        sendLspFrame(child.stdin, {
+          jsonrpc: "2.0",
+          method: "exit",
+          params: null,
+        });
+        child.stdin.end();
+      } catch {}
+    }, 25);
+  } catch {}
+}
+
 wsServer.on("connection", (socket) => {
   const lean = spawn("lake", ["env", "lean", "--server"], {
     cwd: workspaceDir,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  const state = { expectedClose: false };
+  const state = { expectedClose: false, initialized: false, shutdownSent: false };
   pipeServerStderr(lean.stderr, state);
 
   forwardLspFrames(lean.stdout, (message) => {
@@ -286,14 +329,20 @@ wsServer.on("connection", (socket) => {
 
   socket.on("message", (message) => {
     const payload = Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8");
+    noteClientLspMessage(state, payload);
     lean.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
     lean.stdin.write(payload);
   });
 
   const shutdown = () => {
     state.expectedClose = true;
+    requestGracefulShutdown(lean, state);
     if (!lean.killed) {
-      lean.kill();
+      setTimeout(() => {
+        if (!lean.killed) {
+          lean.kill();
+        }
+      }, 120);
     }
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       socket.close();
@@ -309,7 +358,11 @@ wsServer.on("connection", (socket) => {
   });
 });
 
-function attachLspProcess(socket, child, state = { expectedClose: false }) {
+function attachLspProcess(
+  socket,
+  child,
+  state = { expectedClose: false, initialized: false, shutdownSent: false },
+) {
   forwardLspFrames(child.stdout, (message) => {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(message);
@@ -318,14 +371,20 @@ function attachLspProcess(socket, child, state = { expectedClose: false }) {
 
   socket.on("message", (message) => {
     const payload = Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8");
+    noteClientLspMessage(state, payload);
     child.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
     child.stdin.write(payload);
   });
 
   const shutdown = () => {
     state.expectedClose = true;
+    requestGracefulShutdown(child, state);
     if (!child.killed) {
-      child.kill();
+      setTimeout(() => {
+        if (!child.killed) {
+          child.kill();
+        }
+      }, 120);
     }
     if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
       socket.close();
@@ -365,7 +424,7 @@ httpServer.on("upgrade", (req, socket, head) => {
         cwd: rootPath,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      const state = { expectedClose: false };
+      const state = { expectedClose: false, initialized: false, shutdownSent: false };
       pipeServerStderr(rustAnalyzer.stderr, state);
       attachLspProcess(connection, rustAnalyzer, state);
     });
