@@ -156,8 +156,8 @@ function createRustInlineHandle(
   let diagnosticPullTimer: ReturnType<typeof setTimeout> | null = null;
   let diagnosticPullEpoch = 0;
   let currentDocVersion = 1;
-  let lastAppliedDiagnosticVersion = 0;
-  let awaitingDiagnosticsVersion: number | null = null;
+  let pendingDiagnosticsVersion: number | null = null;
+  let resolvedDiagnosticsVersion = 0;
   let syncingFromOuter = false;
   let latestCode = options.block.code;
   let latestDiagnostics = [] as Array<{
@@ -214,10 +214,15 @@ function createRustInlineHandle(
     options.outerView.requestMeasure();
   }
 
-  function updateDiagnostics(
+  function updateDiagnosticsForVersion(
+    version: number,
     diagnostics: typeof latestDiagnostics,
     optionsForUpdate: { log: boolean },
   ): void {
+    if (version <= resolvedDiagnosticsVersion) {
+      return;
+    }
+    resolvedDiagnosticsVersion = version;
     const stamp = diagnosticsStamp(diagnostics);
     if (stamp === lastDiagnosticStamp) {
       return;
@@ -240,7 +245,7 @@ function createRustInlineHandle(
       !client ||
       destroyed ||
       epoch !== diagnosticPullEpoch ||
-      awaitingDiagnosticsVersion !== expectedVersion
+      pendingDiagnosticsVersion !== expectedVersion
     ) {
       return;
     }
@@ -254,18 +259,17 @@ function createRustInlineHandle(
     if (
       destroyed ||
       epoch !== diagnosticPullEpoch ||
-      awaitingDiagnosticsVersion !== expectedVersion ||
+      pendingDiagnosticsVersion !== expectedVersion ||
       report.kind !== "full"
     ) {
       return;
     }
     const pulled = Array.isArray(report.items) ? report.items : [];
-    awaitingDiagnosticsVersion = null;
-    updateDiagnostics(pulled, { log: true });
     if (pulled.length > 0 || attempt >= 11) {
+      pendingDiagnosticsVersion = null;
+      updateDiagnosticsForVersion(expectedVersion, pulled, { log: true });
       return;
     }
-    awaitingDiagnosticsVersion = expectedVersion;
     diagnosticPullTimer = setTimeout(() => {
       diagnosticPullTimer = null;
       void requestDiagnostics(session, epoch, expectedVersion, attempt + 1).catch(() => {});
@@ -292,7 +296,7 @@ function createRustInlineHandle(
       text: latestCode,
       textDocument: { uri: session.documentUri },
     });
-    awaitingDiagnosticsVersion = expectedVersion;
+    pendingDiagnosticsVersion = expectedVersion;
     if (diagnosticPullTimer) {
       clearTimeout(diagnosticPullTimer);
     }
@@ -336,26 +340,25 @@ function createRustInlineHandle(
             if (params?.uri !== session.documentUri) {
               return false;
             }
-            const version = typeof params.version === "number" ? params.version : null;
-            if (version !== null && version < lastAppliedDiagnosticVersion) {
+            const version =
+              typeof params.version === "number"
+                ? params.version
+                : pendingDiagnosticsVersion ?? currentDocVersion;
+            if (version <= resolvedDiagnosticsVersion) {
               return true;
             }
-            if (version !== null) {
-              lastAppliedDiagnosticVersion = version;
-            }
             if (
-              version !== null &&
-              awaitingDiagnosticsVersion !== null &&
-              version >= awaitingDiagnosticsVersion
+              pendingDiagnosticsVersion !== null &&
+              version >= pendingDiagnosticsVersion
             ) {
-              awaitingDiagnosticsVersion = null;
+              pendingDiagnosticsVersion = null;
               diagnosticPullEpoch += 1;
               if (diagnosticPullTimer) {
                 clearTimeout(diagnosticPullTimer);
                 diagnosticPullTimer = null;
               }
             }
-            updateDiagnostics(Array.isArray(params.diagnostics) ? params.diagnostics : [], {
+            updateDiagnosticsForVersion(version, Array.isArray(params.diagnostics) ? params.diagnostics : [], {
               log: true,
             });
             return true;
