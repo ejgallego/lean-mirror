@@ -22,12 +22,26 @@ test.beforeEach(async ({ page }) => {
 async function clickButtonByText(page: Page, text: string) {
   await page.evaluate((label) => {
     const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-      (candidate) => candidate.textContent?.trim() === label,
+      (candidate) =>
+        candidate.getAttribute("aria-label") === label ||
+        candidate.textContent?.trim() === label ||
+        candidate.title === label,
     );
     if (!button) {
       throw new Error(`Missing button: ${label}`);
     }
     button.click();
+  }, text);
+}
+
+async function hasButtonByText(page: Page, text: string) {
+  return page.evaluate((label) => {
+    return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).some(
+      (candidate) =>
+        candidate.getAttribute("aria-label") === label ||
+        candidate.textContent?.trim() === label ||
+        candidate.title === label,
+    );
   }, text);
 }
 
@@ -96,7 +110,7 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   for (let i = 0; i < 2; i += 1) {
     await clickButtonByText(page, "Disable widget");
     await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
-    await expect(page.locator("button")).toContainText(["Enable widget"]);
+    await expect.poll(() => hasButtonByText(page, "Enable widget")).toBe(true);
     await expect(page.locator(".cm-content")).toContainText("/-!");
     await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
     expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
