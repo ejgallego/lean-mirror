@@ -5,6 +5,20 @@ const leanAvailable = spawnSync("lean", ["--version"], { stdio: "ignore" }).stat
 
 test.skip(!leanAvailable, "Lean is required for the browser E2E test.");
 
+test.beforeEach(async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      errors.push(message.text());
+    }
+  });
+  await page.exposeFunction("__consumeConsoleErrors", () => {
+    const snapshot = [...errors];
+    errors.length = 0;
+    return snapshot;
+  });
+});
+
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
 
@@ -71,4 +85,6 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
 
   await page.getByRole("button", { name: "Enable widgets" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
+
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
 });

@@ -22,11 +22,19 @@ export interface EmbeddedBlockInlineHandle {
   sync(code: string, title: string): void;
 }
 
+export interface EmbeddedBlockInlineCreateOptions<TBlock extends EmbeddedBlock> {
+  block: TBlock;
+  log(message: string): void;
+  outerView: EditorView;
+  syncOuter(code: string): void;
+}
+
 export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
   createInline(view: EditorView, block: TBlock): EmbeddedBlockInlineHandle | null;
 }
 
 export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
+  createInlineHandle?(options: EmbeddedBlockInlineCreateOptions<TBlock>): EmbeddedBlockInlineHandle;
   kind: string;
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];

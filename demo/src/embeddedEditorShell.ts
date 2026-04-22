@@ -29,8 +29,51 @@ export function createEmbeddedEditorShell(
     adapter: AnyEmbeddedBlockEditorAdapter,
     block: EmbeddedBlock,
   ): EmbeddedBlockInlineHandle {
+    if (adapter.createInlineHandle) {
+      return adapter.createInlineHandle({
+        block,
+        log(message) {
+          options.log(message);
+        },
+        outerView,
+        syncOuter(code) {
+          const target = findEmbeddedBlockByKey(
+            outerView.state.doc.toString(),
+            block.key,
+            adapter.parse,
+          );
+          if (!target) {
+            return;
+          }
+          outerView.dispatch({
+            changes: {
+              from: target.from,
+              insert: adapter.serialize(target, code),
+              to: target.to,
+            },
+          });
+        },
+      });
+    }
+
     const container = document.createElement("div");
     container.className = "cm-embedded-block-inline";
+    for (const eventName of [
+      "mouseenter",
+      "mouseleave",
+      "mousemove",
+      "mouseover",
+      "mouseout",
+      "pointerenter",
+      "pointerleave",
+      "pointermove",
+      "pointerover",
+      "pointerout",
+    ]) {
+      container.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    }
 
     let syncingFromOuter = false;
     const nestedView = new EditorView({
@@ -53,6 +96,7 @@ export function createEmbeddedEditorShell(
       if (!target) {
         return;
       }
+      options.log(`Expanded embedded block ${block.title}`);
       outerView.dispatch({
         changes: {
           from: target.from,

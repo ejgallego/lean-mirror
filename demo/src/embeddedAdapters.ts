@@ -1,6 +1,9 @@
+import type { DemoSessionApi } from "./demoSession.js";
 import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
-import { embeddedRustAdapter } from "./embeddedRust.js";
+import { createEmbeddedRustAdapter } from "./embeddedRust.js";
 
-export const demoEmbeddedAdapters: readonly AnyEmbeddedBlockEditorAdapter[] = [
-  embeddedRustAdapter,
-];
+export function createDemoEmbeddedAdapters(
+  sessionApi: DemoSessionApi,
+): readonly AnyEmbeddedBlockEditorAdapter[] {
+  return [createEmbeddedRustAdapter(sessionApi)];
+}

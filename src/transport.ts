@@ -18,6 +18,7 @@ function decodeMessage(data: unknown): string {
 }
 
 export interface WebSocketLike {
+  readyState?: number;
   send(data: string): void;
   addEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
   removeEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
@@ -31,7 +32,14 @@ export function createWebSocketTransport(socket: WebSocketLike): Transport {
   const handlers = new Map<MessageHandler, (event: MessageEventLike) => void>();
   return {
     send(message) {
-      socket.send(message);
+      if (typeof socket.readyState === "number" && socket.readyState !== 1) {
+        return;
+      }
+      try {
+        socket.send(message);
+      } catch {
+        // Ignore late sends during connection teardown.
+      }
     },
     subscribe(handler) {
       const wrapped = (event: MessageEventLike) => {

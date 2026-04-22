@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
 
@@ -52,6 +52,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
 
   const embeddedBlockExtensions = embeddedEditors.extensionsFor(options.embeddedAdapters);
   const embeddedBlockSourceExtensions = embeddedBlockSourceMode(options.embeddedAdapters);
+  const widgetsCompartment = new Compartment();
   const demoBridge = createDemoBridge({
     currentUri() {
       return currentUri;
@@ -82,9 +83,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
           utilities: {
             lineWrapping: true,
           },
-          extraExtensions: widgetsEnabled
-            ? [options.editorTheme, ...embeddedBlockExtensions]
-            : [options.editorTheme, embeddedBlockSourceExtensions],
+          extraExtensions: [
+            options.editorTheme,
+            widgetsCompartment.of(
+              widgetsEnabled ? embeddedBlockExtensions : embeddedBlockSourceExtensions,
+            ),
+          ],
         }),
       }),
     });
@@ -134,8 +138,13 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
     widgetsEnabled = !widgetsEnabled;
     options.ui.setWidgetsEnabled(widgetsEnabled);
     options.ui.logEvent(`Embedded widgets ${widgetsEnabled ? "enabled" : "disabled"}.`);
-    if (currentView && currentUri) {
-      void mountDocument(currentUri, currentView.state.doc.toString());
+    if (currentView) {
+      embeddedEditors.close();
+      currentView.dispatch({
+        effects: widgetsCompartment.reconfigure(
+          widgetsEnabled ? embeddedBlockExtensions : embeddedBlockSourceExtensions,
+        ),
+      });
     }
   });
 

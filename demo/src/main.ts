@@ -1,5 +1,5 @@
 import {
-  demoEmbeddedAdapters,
+  createDemoEmbeddedAdapters,
 } from "./embeddedAdapters.js";
 import { bootDemoRuntime } from "./demoRuntime.js";
 import { createDemoSessionApi } from "./demoSession.js";
@@ -19,7 +19,7 @@ let apiBase = import.meta.env.VITE_LEAN_DEMO_API ?? "http://127.0.0.1:7357";
 const sessionApi = createDemoSessionApi(apiBase);
 void bootDemoRuntime({
   editorTheme: demoTheme(),
-  embeddedAdapters: demoEmbeddedAdapters,
+  embeddedAdapters: createDemoEmbeddedAdapters(sessionApi),
   sessionApi,
   ui: demoUi,
 }).catch((error) => {
