@@ -70,6 +70,67 @@ export function createEmbeddedEditorShell(
     }
   }
 
+  function createRustLogoIcon(): SVGSVGElement {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "cm-embedded-gutter-logo");
+    svg.setAttribute("viewBox", "0 0 64 64");
+    svg.setAttribute("aria-hidden", "true");
+
+    const ring = document.createElementNS(ns, "circle");
+    ring.setAttribute("cx", "32");
+    ring.setAttribute("cy", "32");
+    ring.setAttribute("r", "18");
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", "currentColor");
+    ring.setAttribute("stroke-width", "3.5");
+    svg.append(ring);
+
+    for (let angle = 0; angle < 360; angle += 45) {
+      const tooth = document.createElementNS(ns, "rect");
+      tooth.setAttribute("x", "29");
+      tooth.setAttribute("y", "1.5");
+      tooth.setAttribute("width", "6");
+      tooth.setAttribute("height", "10");
+      tooth.setAttribute("rx", "1.5");
+      tooth.setAttribute("fill", "currentColor");
+      tooth.setAttribute("transform", `rotate(${angle} 32 32)`);
+      svg.append(tooth);
+    }
+
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", "32");
+    text.setAttribute("y", "40");
+    text.setAttribute("fill", "currentColor");
+    text.setAttribute("font-family", "Iosevka Term, IBM Plex Mono, monospace");
+    text.setAttribute("font-size", "24");
+    text.setAttribute("font-weight", "700");
+    text.setAttribute("text-anchor", "middle");
+    text.textContent = "R";
+    svg.append(text);
+
+    return svg;
+  }
+
+  function createGutterButton(
+    label: string,
+    className: string,
+    title: string,
+  ): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.className = `cm-embedded-gutter-action ${className}`;
+    button.setAttribute("aria-label", label);
+    button.title = title;
+    button.type = "button";
+
+    const icon = document.createElement("span");
+    icon.className = "cm-embedded-gutter-icon";
+    icon.append(createRustLogoIcon());
+
+    button.append(icon);
+    return button;
+  }
+
   function nextRustLabel(source: string): string {
     const blocks = collectEmbeddedBlocks(source, adaptersRef).filter((block) =>
       block.key.startsWith("rust:"),
@@ -162,11 +223,12 @@ export function createEmbeddedEditorShell(
     }
 
     override toDOM(view: EditorView): HTMLElement {
-      const button = document.createElement("button");
-      button.className = "cm-embedded-gutter-action cm-embedded-gutter-toggle";
-      button.textContent = this.disabled ? "Enable widget" : "Disable widget";
-      button.title = this.disabled ? "Enable Rust widget" : "Disable Rust widget";
-      button.type = "button";
+      const button = createGutterButton(
+        this.disabled ? "Enable widget" : "Disable widget",
+        "cm-embedded-gutter-toggle",
+        this.disabled ? "Enable Rust widget" : "Disable Rust widget",
+      );
+      button.dataset.state = this.disabled ? "disabled" : "enabled";
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -187,11 +249,11 @@ export function createEmbeddedEditorShell(
     }
 
     override toDOM(view: EditorView): HTMLElement {
-      const button = document.createElement("button");
-      button.className = "cm-embedded-gutter-action cm-embedded-gutter-add";
-      button.textContent = "Add Rust";
-      button.title = "Insert Rust code scaffold";
-      button.type = "button";
+      const button = createGutterButton(
+        "Add Rust",
+        "cm-embedded-gutter-add",
+        "Insert Rust code scaffold",
+      );
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -205,7 +267,7 @@ export function createEmbeddedEditorShell(
     override toDOM(): HTMLElement {
       const spacer = document.createElement("div");
       spacer.className = "cm-embedded-gutter-spacer";
-      spacer.textContent = "Add Rust";
+      spacer.textContent = "Disable widget";
       return spacer;
     }
   }
