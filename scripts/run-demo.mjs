@@ -1,57 +1,218 @@
 import { spawn } from "node:child_process";
+import { relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createServer } from "vite";
 
-const children = [];
+import { readDemoConfig } from "./demo-config.mjs";
+
+const rootDir = fileURLToPath(new URL("..", import.meta.url));
+const demo = readDemoConfig(process.env);
+
+process.env.DEMO_BACKEND_HOST = demo.backendHost;
+process.env.DEMO_BACKEND_PORT = demo.backendPort;
+process.env.DEMO_FRONTEND_HOST = demo.frontendHost;
+process.env.DEMO_FRONTEND_PORT = demo.frontendPort;
+process.env.VITE_LEAN_DEMO_API = demo.apiBase;
+
+let backendChild = null;
+let backendStopping = false;
+let restartTimer = null;
+let restartReason = null;
+let restartPromise = Promise.resolve();
 let shuttingDown = false;
-const backendHost = process.env.DEMO_BACKEND_HOST ?? "127.0.0.1";
-const backendPort = process.env.DEMO_BACKEND_PORT ?? "7357";
-const frontendHost = process.env.DEMO_FRONTEND_HOST ?? "127.0.0.1";
-const frontendPort = process.env.DEMO_FRONTEND_PORT ?? "5173";
+let viteServer = null;
+let watchReady = false;
 
-function start(name, command, args, env = {}) {
-  const child = spawn(command, args, {
-    env: { ...process.env, ...env },
-    stdio: "inherit",
-    shell: false,
-  });
-  children.push(child);
-  child.on("exit", (code) => {
-    if (!shuttingDown) {
-      shuttingDown = true;
-      shutdown();
-    }
-    if (code && code !== 0) {
-      process.exitCode = code;
-    }
-  });
-  return child;
+function shortPath(path) {
+  return relative(rootDir, path).replace(/\\/g, "/");
 }
 
-function shutdown() {
-  for (const child of children) {
+function shouldRestartBridges(path) {
+  const file = shortPath(path);
+  if (
+    file.startsWith("demo/rust-blocks/") ||
+    file.startsWith("demo/dist/") ||
+    file.startsWith("demo/workspace/.lake/") ||
+    file === "demo/workspace/lake-manifest.json" ||
+    file.endsWith(".olean")
+  ) {
+    return false;
+  }
+  return (
+    file === "demo/index.html" ||
+    file === "demo/server.mjs" ||
+    file.startsWith("demo/src/") ||
+    file.startsWith("demo/workspace/") ||
+    file.startsWith("src/")
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForBackendReady(timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${demo.backendUrl}/session`);
+      if (response.ok) {
+        return;
+      }
+    } catch {}
+    await delay(120);
+  }
+  throw new Error(`Timed out waiting for demo backend at ${demo.backendUrl}`);
+}
+
+function spawnBackend() {
+  const child = spawn(process.execPath, ["./demo/server.mjs"], {
+    cwd: rootDir,
+    env: {
+      ...process.env,
+      LEAN_DEMO_HOST: demo.backendHost,
+      LEAN_DEMO_PORT: demo.backendPort,
+    },
+    shell: false,
+    stdio: "inherit",
+  });
+
+  backendChild = child;
+  child.on("exit", (code, signal) => {
+    const expected = shuttingDown || backendStopping || child !== backendChild;
+    if (child === backendChild) {
+      backendChild = null;
+    }
+    if (expected) {
+      return;
+    }
+    console.error(
+      `[demo] backend exited unexpectedly (${code ?? signal ?? "unknown"}); shutting down demo stack`,
+    );
+    void shutdown(typeof code === "number" ? code : 1);
+  });
+}
+
+async function stopBackend() {
+  const child = backendChild;
+  if (!child) {
+    return;
+  }
+  backendStopping = true;
+  backendChild = null;
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(undefined);
+    };
+    const timeout = setTimeout(() => {
+      if (!child.killed) {
+        child.kill("SIGKILL");
+      }
+      finish();
+    }, 3_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      finish();
+    });
     if (!child.killed) {
       child.kill("SIGTERM");
     }
+  });
+  backendStopping = false;
+}
+
+async function startBackend() {
+  spawnBackend();
+  await waitForBackendReady();
+}
+
+function scheduleBridgeRestart(reason) {
+  if (shuttingDown) {
+    return;
+  }
+  restartReason = reason;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+  }
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    const currentReason = restartReason ?? "file change";
+    restartReason = null;
+    restartPromise = restartPromise
+      .then(async () => {
+        if (shuttingDown) {
+          return;
+        }
+        console.log(`[demo] restarting LSP bridges after ${currentReason}`);
+        await stopBackend();
+        await startBackend();
+        viteServer?.ws.send({ type: "full-reload" });
+      })
+      .catch((error) => {
+        console.error(
+          `[demo] failed to restart bridges: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return shutdown(1);
+      });
+  }, 120);
+}
+
+async function shutdown(exitCode = 0) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+  try {
+    await stopBackend();
+    await viteServer?.close();
+  } finally {
+    process.exit(exitCode);
   }
 }
 
 process.on("SIGINT", () => {
-  shuttingDown = true;
-  shutdown();
-  process.exit(130);
+  void shutdown(130);
 });
 
 process.on("SIGTERM", () => {
-  shuttingDown = true;
-  shutdown();
-  process.exit(143);
+  void shutdown(143);
 });
 
-start("backend", process.execPath, ["./demo/server.mjs"], {
-  LEAN_DEMO_HOST: backendHost,
-  LEAN_DEMO_PORT: backendPort,
+await startBackend();
+
+viteServer = await createServer({
+  configFile: resolve(rootDir, "demo/vite.config.ts"),
 });
-start(process.platform === "win32" ? "frontend" : "frontend", process.platform === "win32" ? "npm.cmd" : "npm", ["run", "demo:frontend"], {
-  DEMO_FRONTEND_HOST: frontendHost,
-  DEMO_FRONTEND_PORT: frontendPort,
-  VITE_LEAN_DEMO_API: `http://${backendHost}:${backendPort}`,
+
+viteServer.watcher.add([
+  resolve(rootDir, "demo/server.mjs"),
+  resolve(rootDir, "demo/index.html"),
+  resolve(rootDir, "demo/src"),
+  resolve(rootDir, "demo/workspace"),
+  resolve(rootDir, "src"),
+]);
+
+viteServer.watcher.on("all", (event, path) => {
+  if (!watchReady) {
+    return;
+  }
+  if (!shouldRestartBridges(path)) {
+    return;
+  }
+  scheduleBridgeRestart(`${event} ${shortPath(path)}`);
 });
+
+await viteServer.listen();
+watchReady = true;
+
+console.log(`Demo frontend listening on ${demo.frontendUrl}`);
+console.log(`Demo backend listening on ${demo.backendUrl}`);

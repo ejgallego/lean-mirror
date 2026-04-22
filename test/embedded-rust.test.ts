@@ -5,22 +5,24 @@ import {
   serializeEmbeddedRustBlock,
 } from "../demo/src/embeddedRust.js";
 import {
-  createCommentFencedAdapter,
-  parseCommentFencedBlocks,
-  serializeCommentFencedBlock,
+  createVersoCommentAdapter,
+  parseVersoCommentBlocks,
+  serializeVersoCommentBlock,
   type EmbeddedBlock,
 } from "../demo/src/embeddedBlocks.js";
 
 describe("embeddedRust", () => {
-  it("parses comment-delimited Rust blocks from a Lean document", () => {
+  it("parses verso-comment Rust blocks from a Lean document", () => {
     const source = [
       "#check Nat.succ",
       "",
-      "-- ```rust demo",
-      "-- fn add(a: i32, b: i32) -> i32 {",
-      "--     a + b",
-      "-- }",
-      "-- ```",
+      "/-!",
+      "```rust demo",
+      "fn add(a: i32, b: i32) -> i32 {",
+      "    a + b",
+      "}",
+      "```",
+      "-/",
       "",
     ].join("\n");
 
@@ -30,11 +32,13 @@ describe("embeddedRust", () => {
     expect(blocks[0]?.code).toContain("fn add");
   });
 
-  it("serializes an updated Rust block back into Lean comment form", () => {
+  it("serializes an updated Rust block back into a Lean verso comment", () => {
     const source = [
-      "-- ```rust demo",
-      "-- fn demo() {}",
-      "-- ```",
+      "/-!",
+      "```rust demo",
+      "fn demo() {}",
+      "```",
+      "-/",
       "",
     ].join("\n");
 
@@ -46,21 +50,25 @@ describe("embeddedRust", () => {
       'fn demo() {\n    println!("hi");\n}',
     );
 
-    expect(serialized).toContain("-- ```rust demo");
-    expect(serialized).toContain('--     println!("hi");');
-    expect(serialized).toContain("-- ```");
+    expect(serialized).toContain("/-!");
+    expect(serialized).toContain("```rust demo");
+    expect(serialized).toContain('    println!("hi");');
+    expect(serialized).toContain("```");
+    expect(serialized).toContain("-/");
   });
 
-  it("generic comment-fenced block helpers work independently of Rust", () => {
+  it("generic verso-comment block helpers work independently of Rust", () => {
     const source = [
-      "-- ```demo card",
-      "-- hello",
-      "-- world",
-      "-- ```",
+      "/-!",
+      "```demo card",
+      "hello",
+      "world",
+      "```",
+      "-/",
       "",
     ].join("\n");
 
-    const blocks = parseCommentFencedBlocks(source, {
+    const blocks = parseVersoCommentBlocks(source, {
       defaultTitle(block) {
         return block.label ?? `Demo ${block.ordinal}`;
       },
@@ -70,14 +78,15 @@ describe("embeddedRust", () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.key).toBe("demo:card");
 
-    const serialized = serializeCommentFencedBlock(blocks[0]!, "demo", "alpha\nbeta");
-    expect(serialized).toContain("-- ```demo card");
-    expect(serialized).toContain("-- alpha");
-    expect(serialized).toContain("-- beta");
+    const serialized = serializeVersoCommentBlock(blocks[0]!, "demo", "alpha\nbeta");
+    expect(serialized).toContain("/-!");
+    expect(serialized).toContain("```demo card");
+    expect(serialized).toContain("alpha");
+    expect(serialized).toContain("beta");
   });
 
-  it("builds adapters from the generic comment-fenced adapter factory", () => {
-    const adapter = createCommentFencedAdapter({
+  it("builds adapters from the generic verso-comment adapter factory", () => {
+    const adapter = createVersoCommentAdapter({
       defaultTitle(block: EmbeddedBlock) {
         return block.label ?? `Demo ${block.ordinal}`;
       },
@@ -87,9 +96,24 @@ describe("embeddedRust", () => {
       kind: "demo",
     });
 
-    const blocks = adapter.parseBlocks(["-- ```demo sample", "-- alpha", "-- ```", ""].join("\n"));
+    const blocks = adapter.parseBlocks(["/-!", "```demo sample", "alpha", "```", "-/", ""].join("\n"));
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.key).toBe("demo:sample");
-    expect(adapter.serializeBlock(blocks[0]!, "beta")).toContain("-- beta");
+    expect(adapter.serializeBlock(blocks[0]!, "beta")).toContain("beta");
+  });
+
+  it("also recognizes /-- doc comments for editor-side detection", () => {
+    const source = [
+      "/--",
+      "```rust demo",
+      "fn add() {}",
+      "```",
+      "-/",
+      "",
+    ].join("\n");
+
+    const blocks = parseEmbeddedRustBlocks(source);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.key).toBe("rust:demo");
   });
 });

@@ -14,9 +14,10 @@ export interface RustSession {
 
 export interface DemoSessionApi {
   connectWebSocket(url: string): Promise<WebSocket>;
+  createRustSession(key: string, code: string): Promise<RustSession>;
   fetchDocument(uri: string): Promise<string>;
   fetchSession(): Promise<DemoSession>;
-  createRustSession(key: string, code: string): Promise<RustSession>;
+  updateRustDocument(key: string, code: string): Promise<void>;
 }
 
 export function createDemoSessionApi(apiBase: string): DemoSessionApi {
@@ -48,6 +49,18 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         throw new Error(`Rust session request failed with ${response.status}`);
       }
       return response.json() as Promise<RustSession>;
+    },
+    async updateRustDocument(key: string, code: string): Promise<void> {
+      const response = await fetch(`${apiBase}/rust-document`, {
+        body: JSON.stringify({ code, key }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(`Rust document update failed with ${response.status}`);
+      }
     },
     async connectWebSocket(url: string): Promise<WebSocket> {
       const socket = new WebSocket(url);

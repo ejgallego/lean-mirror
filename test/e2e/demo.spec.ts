@@ -65,10 +65,16 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
 
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
-    .toContain("-- fn mul(a: i32, b: i32) -> i32 {");
+    .toContain("fn mul(a: i32, b: i32) -> i32 {");
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
   await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-content")).toContainText("a - b");
+
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\nfn bad() -> i32 { \"hi\" }");
+  await expect(page.locator("#events")).toContainText("Saved demo-widget");
+  await expect(page.locator("#events")).toContainText("Rust diagnostics updated");
+  await expect(expandedBlock.locator(".cm-lintRange-error").first()).toBeVisible();
 });
 
 test("demo toggles embedded widgets on and off", async ({ page }) => {
@@ -77,14 +83,18 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "Disable widgets" }).click();
-  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
-  await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
-  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
-  await expect(page.locator(".cm-content")).toContainText("a + b");
+  for (let i = 0; i < 2; i += 1) {
+    await page.getByRole("button", { name: "Disable widget" }).click();
+    await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Enable widget" })).toHaveCount(1);
+    await expect(page.locator(".cm-content")).toContainText("/-!");
+    await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
+    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
+    await expect(page.locator(".cm-content")).toContainText("a + b");
 
-  await page.getByRole("button", { name: "Enable widgets" }).click();
+    await page.getByRole("button", { name: "Enable widget" }).click();
+  }
+
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
-
   expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
 });

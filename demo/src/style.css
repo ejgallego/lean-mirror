@@ -138,22 +138,6 @@ code {
   overflow-wrap: anywhere;
 }
 
-.status-row-toggle {
-  align-items: center;
-}
-
-.toggle-widgets {
-  width: fit-content;
-  border: 1px solid rgba(241, 232, 210, 0.28);
-  border-radius: 999px;
-  background: rgba(255, 249, 238, 0.12);
-  color: #f8fbf9;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-  padding: 8px 14px;
-}
-
 .panel-notes {
   padding-bottom: 16px;
 }

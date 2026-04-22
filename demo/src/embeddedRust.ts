@@ -8,7 +8,7 @@ import { leanUtilities } from "../../src/index.js";
 import { EditorView } from "@codemirror/view";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import {
-  createCommentFencedAdapter,
+  createVersoCommentAdapter,
   type EmbeddedBlockInlineCreateOptions,
   type EmbeddedBlock,
   type EmbeddedBlockInlineHandle,
@@ -17,7 +17,7 @@ import type { DemoSessionApi } from "./demoSession.js";
 
 export interface EmbeddedRustBlock extends EmbeddedBlock {}
 
-const baseRustAdapter = createCommentFencedAdapter<EmbeddedRustBlock>({
+const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   defaultTitle(block) {
     return block.label ?? `Rust Block ${block.ordinal}`;
   },
@@ -55,8 +55,9 @@ function createRustInlineHandle(
   container.append(status);
 
   let destroyed = false;
-  let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null;
-  let latestDiagnosticResultId: string | undefined;
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticPullTimer: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticPullEpoch = 0;
   let syncingFromOuter = false;
   let latestCode = options.block.code;
   let latestDiagnostics = [] as Array<{
@@ -64,6 +65,7 @@ function createRustInlineHandle(
     range: { start: { line: number; character: number }; end: { line: number; character: number } };
     severity?: number;
   }>;
+  let lastDiagnosticStamp = "";
   let nestedView: EditorView | null = null;
   let socket: WebSocket | null = null;
   let client: LSPClient | null = null;
@@ -96,63 +98,92 @@ function createRustInlineHandle(
         })),
       ),
     );
+    options.outerView.requestMeasure();
   }
 
-  async function requestDiagnostics(session: {
-    documentUri: string;
-  }): Promise<void> {
-    if (!client || destroyed) {
+  async function requestDiagnostics(
+    session: { documentUri: string },
+    epoch: number,
+    attempt = 0,
+  ): Promise<void> {
+    if (!client || destroyed || epoch !== diagnosticPullEpoch) {
       return;
     }
     client.sync();
-    const params: {
-      previousResultId?: string;
-      textDocument: { uri: string };
-    } = {
-      textDocument: { uri: session.documentUri },
-    };
-    if (latestDiagnosticResultId !== undefined) {
-      params.previousResultId = latestDiagnosticResultId;
-    }
-
     const report = await client.request<
-      {
-        previousResultId?: string;
-        textDocument: { uri: string };
-      },
-      {
-        items?: typeof latestDiagnostics;
-        kind: "full" | "unchanged";
-        resultId?: string;
+      { textDocument: { uri: string } },
+      { items?: typeof latestDiagnostics; kind: "full" | "unchanged" }
+    >("textDocument/diagnostic", {
+      textDocument: { uri: session.documentUri },
+    });
+    if (destroyed || epoch !== diagnosticPullEpoch || report.kind !== "full") {
+      return;
+    }
+    const pulled = Array.isArray(report.items) ? report.items : [];
+    if (pulled.length > 0) {
+      latestDiagnostics = pulled;
+      applyDiagnostics();
+      const stamp = JSON.stringify(
+        latestDiagnostics.map((diagnostic) => ({
+          message: diagnostic.message,
+          severity: diagnostic.severity,
+        })),
+      );
+      if (stamp !== lastDiagnosticStamp) {
+        options.log(`Rust diagnostics updated (${latestDiagnostics.length})`);
       }
-    >("textDocument/diagnostic", params);
+      lastDiagnosticStamp = stamp;
+      return;
+    }
+    if (attempt >= 3) {
+      return;
+    }
+    diagnosticPullTimer = setTimeout(() => {
+      diagnosticPullTimer = null;
+      void requestDiagnostics(session, epoch, attempt + 1).catch(() => {});
+    }, 250);
+  }
+
+  async function persistDocument(session: { documentUri: string }): Promise<void> {
+    if (!client || destroyed) {
+      return;
+    }
+    await sessionApi.updateRustDocument(options.block.key, latestCode);
     if (destroyed) {
       return;
     }
-    if (report.kind === "full") {
-      latestDiagnostics = Array.isArray(report.items) ? report.items : [];
-      latestDiagnosticResultId = report.resultId;
-      applyDiagnostics();
-    } else if (report.kind === "unchanged") {
-      latestDiagnosticResultId = report.resultId;
+    options.log(`Saved ${options.block.title}`);
+    client.sync();
+    client.notification("textDocument/didSave", {
+      textDocument: { uri: session.documentUri },
+    });
+    if (diagnosticPullTimer) {
+      clearTimeout(diagnosticPullTimer);
     }
+    const epoch = ++diagnosticPullEpoch;
+    diagnosticPullTimer = setTimeout(() => {
+      diagnosticPullTimer = null;
+      void requestDiagnostics(session, epoch).catch(() => {});
+    }, 250);
   }
 
-  function scheduleDiagnostics(session: { documentUri: string }): void {
-    if (diagnosticsTimer) {
-      clearTimeout(diagnosticsTimer);
+  function schedulePersist(session: { documentUri: string }): void {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
     }
-    diagnosticsTimer = setTimeout(() => {
-      diagnosticsTimer = null;
-      void requestDiagnostics(session).catch((error) => {
-        if (!destroyed) {
-          status.textContent =
-            error instanceof Error
-              ? `rust-analyzer diagnostics failed: ${error.message}`
-              : "rust-analyzer diagnostics failed";
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      void persistDocument(session).catch((error) => {
+        if (destroyed) {
+          return;
         }
+        options.log(
+          error instanceof Error
+            ? `Rust widget save failed: ${error.message}`
+            : "Rust widget save failed.",
+        );
       });
-    }, 300);
+    }, 350);
   }
 
   void (async () => {
@@ -171,6 +202,16 @@ function createRustInlineHandle(
             }
             latestDiagnostics = Array.isArray(params.diagnostics) ? params.diagnostics : [];
             applyDiagnostics();
+            const stamp = JSON.stringify(
+              latestDiagnostics.map((diagnostic) => ({
+                message: diagnostic.message,
+                severity: diagnostic.severity,
+              })),
+            );
+            if (latestDiagnostics.length > 0 && stamp !== lastDiagnosticStamp) {
+              options.log(`Rust diagnostics updated (${latestDiagnostics.length})`);
+            }
+            lastDiagnosticStamp = stamp;
             return true;
           },
         },
@@ -197,14 +238,14 @@ function createRustInlineHandle(
               }
               latestCode = update.state.doc.toString();
               options.syncOuter(latestCode);
-              scheduleDiagnostics(session);
+              schedulePersist(session);
             }),
           ],
         }),
       });
       applyDiagnostics();
       status.remove();
-      scheduleDiagnostics(session);
+      options.outerView.requestMeasure();
     } catch (error) {
       status.textContent =
         error instanceof Error ? `rust-analyzer failed: ${error.message}` : "rust-analyzer failed";
@@ -214,8 +255,11 @@ function createRustInlineHandle(
   return {
     destroy() {
       destroyed = true;
-      if (diagnosticsTimer) {
-        clearTimeout(diagnosticsTimer);
+      if (persistTimer) {
+        clearTimeout(persistTimer);
+      }
+      if (diagnosticPullTimer) {
+        clearTimeout(diagnosticPullTimer);
       }
       nestedView?.destroy();
       client?.disconnect();
@@ -240,8 +284,9 @@ function createRustInlineHandle(
         syncingFromOuter = false;
       }
       if (sessionInfo) {
-        scheduleDiagnostics(sessionInfo);
+        schedulePersist(sessionInfo);
       }
+      options.outerView.requestMeasure();
     },
   };
 }

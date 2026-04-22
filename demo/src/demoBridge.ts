@@ -1,6 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 
 export interface DemoBridge {
+  clear(): void;
   install(openDocument: (uri: string) => Promise<void>): void;
 }
 
@@ -27,6 +28,9 @@ export interface DemoBridgeOptions {
 
 export function createDemoBridge(options: DemoBridgeOptions): DemoBridge {
   return {
+    clear() {
+      delete window.__leanDemo;
+    },
     install(openDocument) {
       window.__leanDemo = {
         currentUri: () => options.currentUri(),

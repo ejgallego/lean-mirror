@@ -17,13 +17,13 @@ const documentUri = pathToFileURL(documentPath).toString();
 const helperUri = pathToFileURL(helperPath).toString();
 
 function ensureDemoArtifacts() {
-  const result = spawnSync("lean", ["-o", "Helper.olean", "Helper.lean"], {
+  const result = spawnSync("lake", ["build"], {
     cwd: workspaceDir,
     encoding: "utf8",
   });
   if (result.status !== 0) {
     throw new Error(
-      `Failed to build demo/workspace/Helper.olean\n${result.stderr ?? result.stdout ?? ""}`.trim(),
+      `Failed to build demo/workspace with lake build\n${result.stderr ?? result.stdout ?? ""}`.trim(),
     );
   }
 }
@@ -90,6 +90,11 @@ async function ensureRustBlockWorkspace(key, code) {
   };
 }
 
+async function updateRustBlockDocument(key, code) {
+  const { documentPath } = rustBlockPaths(key);
+  await writeFile(documentPath, code, "utf8");
+}
+
 const httpServer = createServer(async (req, res) => {
   if (!req.url) {
     res.writeHead(400, withCorsHeaders());
@@ -141,6 +146,18 @@ const httpServer = createServer(async (req, res) => {
         websocketUrl: `ws://${host}:${port}/rust-lsp?block=${encodeURIComponent(session.slug)}`,
       }),
     );
+    return;
+  }
+  if (req.method === "POST" && req.url === "/rust-document") {
+    const payload = await readJsonBody(req);
+    if (!payload?.key || typeof payload.key !== "string" || typeof payload.code !== "string") {
+      res.writeHead(400, withCorsHeaders());
+      res.end("Invalid rust-document payload");
+      return;
+    }
+    await updateRustBlockDocument(payload.key, payload.code);
+    res.writeHead(204, withCorsHeaders());
+    res.end();
     return;
   }
   if (req.url.startsWith("/document?")) {
@@ -205,7 +222,7 @@ function forwardLspFrames(stream, onMessage) {
 }
 
 wsServer.on("connection", (socket) => {
-  const lean = spawn("lean", ["--server"], {
+  const lean = spawn("lake", ["env", "lean", "--server"], {
     cwd: workspaceDir,
     stdio: ["pipe", "pipe", "inherit"],
   });

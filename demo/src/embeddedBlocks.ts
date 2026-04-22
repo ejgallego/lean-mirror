@@ -11,7 +11,7 @@ export interface EmbeddedBlock {
   to: number;
 }
 
-export interface CommentFenceSpec {
+export interface VersoCommentSpec {
   defaultTitle(block: EmbeddedBlock): string;
   kind: string;
 }
@@ -31,6 +31,7 @@ export interface EmbeddedBlockInlineCreateOptions<TBlock extends EmbeddedBlock> 
 
 export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
   createInline(view: EditorView, block: TBlock): EmbeddedBlockInlineHandle | null;
+  enabled(state: EditorState, block: TBlock): boolean;
 }
 
 export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
@@ -44,22 +45,20 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
 
 export type AnyEmbeddedBlockEditorAdapter = EmbeddedBlockEditorAdapter<any>;
 
-export interface CommentFencedAdapterSpec<TBlock extends EmbeddedBlock> {
+export interface VersoCommentAdapterSpec<TBlock extends EmbeddedBlock> {
   defaultTitle(block: EmbeddedBlock): string;
   editorExtensions(): Extension[];
   kind: string;
 }
 
-function uncommentLine(line: string): string {
-  if (line === "--") {
-    return "";
-  }
-  return line.replace(/^--\s?/, "");
+function isVersoCommentStart(line: string): boolean {
+  return /^\s*(?:\/-!|\/--)\s*$/.test(line);
 }
 
-export function parseCommentFencedBlocks(
+// Demo-side heuristic: treat standalone Lean doc comments with a single fenced block as embeddable.
+export function parseVersoCommentBlocks(
   source: string,
-  spec: Pick<CommentFenceSpec, "defaultTitle" | "kind">,
+  spec: Pick<VersoCommentSpec, "defaultTitle" | "kind">,
 ): EmbeddedBlock[] {
   const lines = source.split("\n");
   const blocks: EmbeddedBlock[] = [];
@@ -70,24 +69,38 @@ export function parseCommentFencedBlocks(
     const line = lines[index] ?? "";
     const newlineSize = offset + line.length < source.length ? 1 : 0;
     const nextOffset = offset + line.length + newlineSize;
-    const start = new RegExp(`^--\\s*\`\`\`${spec.kind}(?:\\s+(.+))?\\s*$`).exec(line);
-    if (!start) {
+    if (!isVersoCommentStart(line)) {
+      offset = nextOffset;
+      continue;
+    }
+
+    const headerLine = lines[index + 1] ?? "";
+    const header = new RegExp(`^\\s*\`\`\`${spec.kind}(?:\\s+(.+))?\\s*$`).exec(headerLine);
+    if (!header) {
       offset = nextOffset;
       continue;
     }
 
     const from = offset;
-    const label = start[1]?.trim() || null;
+    const label = header[1]?.trim() || null;
     const codeLines: string[] = [];
-    let endOffset = nextOffset;
+    const headerNewlineSize = nextOffset + headerLine.length < source.length ? 1 : 0;
+    let endOffset = nextOffset + headerLine.length + headerNewlineSize;
     let foundEnd = false;
 
-    for (let inner = index + 1; inner < lines.length; inner += 1) {
+    for (let inner = index + 2; inner < lines.length; inner += 1) {
       const innerLine = lines[inner] ?? "";
       const innerStart = endOffset;
       const innerNewlineSize = innerStart + innerLine.length < source.length ? 1 : 0;
       endOffset = innerStart + innerLine.length + innerNewlineSize;
-      if (/^--\s*```\s*$/.test(innerLine)) {
+      if (/^\s*```\s*$/.test(innerLine)) {
+        const closingLine = lines[inner + 1] ?? "";
+        const closingStart = endOffset;
+        const closingNewlineSize = closingStart + closingLine.length < source.length ? 1 : 0;
+        const closingEnd = closingStart + closingLine.length + closingNewlineSize;
+        if (!/^\s*-\s*\/\s*$/.test(closingLine)) {
+          break;
+        }
         ordinal += 1;
         const block: EmbeddedBlock = {
           code: codeLines.join("\n"),
@@ -96,15 +109,16 @@ export function parseCommentFencedBlocks(
           label,
           ordinal,
           title: "",
-          to: endOffset,
+          to: closingEnd,
         };
         block.title = spec.defaultTitle(block);
         blocks.push(block);
-        index = inner;
+        index = inner + 1;
         foundEnd = true;
+        endOffset = closingEnd;
         break;
       }
-      codeLines.push(uncommentLine(innerLine));
+      codeLines.push(innerLine);
     }
 
     offset = foundEnd ? endOffset : nextOffset;
@@ -113,14 +127,18 @@ export function parseCommentFencedBlocks(
   return blocks;
 }
 
-export function serializeCommentFencedBlock(
+export function serializeVersoCommentBlock(
   block: EmbeddedBlock,
   kind: string,
   code: string,
 ): string {
-  const header = `-- \`\`\`${kind}${block.label ? ` ${block.label}` : ""}`;
-  const body = code.split("\n").map((line) => (line.length === 0 ? "--" : `-- ${line}`));
-  return [header, ...body, "-- ```"].join("\n") + "\n";
+  return [
+    "/-!",
+    `\`\`\`${kind}${block.label ? ` ${block.label}` : ""}`,
+    code,
+    "```",
+    "-/",
+  ].join("\n") + "\n";
 }
 
 export function findEmbeddedBlockByKey<TBlock extends EmbeddedBlock>(
@@ -140,10 +158,6 @@ export function collectEmbeddedBlocks(
     .sort((left, right) => left.from - right.from || left.to - right.to);
 }
 
-function blockRanges(source: string, adapters: readonly AnyEmbeddedBlockEditorAdapter[]): number[] {
-  return collectEmbeddedBlocks(source, adapters).flatMap((block) => [block.from, block.to]);
-}
-
 class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
   constructor(
     private readonly block: TBlock,
@@ -153,11 +167,7 @@ class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
   }
 
   override eq(other: EmbeddedBlockWidget<TBlock>): boolean {
-    return (
-      this.block.key === other.block.key &&
-      this.block.code === other.block.code &&
-      this.block.title === other.block.title
-    );
+    return this.block.key === other.block.key;
   }
 
   override toDOM(view: EditorView): HTMLElement {
@@ -196,11 +206,15 @@ class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
 
 function decorationsFor<TBlock extends EmbeddedBlock>(
   source: string,
+  state: EditorState,
   config: EmbeddedBlockWidgetConfig<TBlock>,
   parse: (source: string) => TBlock[],
 ): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const block of parse(source)) {
+    if (!config.enabled(state, block)) {
+      continue;
+    }
     builder.add(
       block.from,
       block.to,
@@ -217,10 +231,38 @@ export const embeddedBlockTheme = EditorView.baseTheme({
   ".cm-embedded-block-widget": {
     margin: "4px 0",
   },
+  ".cm-embedded-block-widget-shell": {
+    position: "relative",
+  },
+  ".cm-embedded-block-toggle": {
+    border: "1px solid rgba(61, 47, 20, 0.14)",
+    borderRadius: "999px",
+    background: "rgba(255, 251, 243, 0.92)",
+    color: "#5e4e32",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: "11px",
+    fontWeight: "700",
+    letterSpacing: "0.04em",
+    padding: "5px 9px",
+  },
+  ".cm-embedded-block-widget-shell > .cm-embedded-block-toggle": {
+    position: "absolute",
+    right: "10px",
+    top: "10px",
+    zIndex: "2",
+  },
+  ".cm-embedded-block-source-toggle": {
+    position: "static",
+    display: "inline-flex",
+    alignItems: "center",
+    margin: "6px 0 4px",
+    width: "fit-content",
+  },
   ".cm-embedded-block-inline": {
     borderRadius: "12px",
     border: "1px solid #d9cfbb",
-    overflow: "hidden",
+    overflow: "visible",
     background:
       "linear-gradient(180deg, rgba(255,250,240,0.96) 0%, rgba(246,239,221,0.96) 100%)",
     boxShadow: "0 6px 16px rgba(78, 59, 20, 0.08)",
@@ -245,10 +287,10 @@ export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
     embeddedBlockTheme,
     StateField.define<DecorationSet>({
       create(state) {
-        return decorationsFor(state.doc.toString(), config, parse);
+        return decorationsFor(state.doc.toString(), state, config, parse);
       },
       update(_value, transaction) {
-        return decorationsFor(transaction.state.doc.toString(), config, parse);
+        return decorationsFor(transaction.state.doc.toString(), transaction.state, config, parse);
       },
       provide(field) {
         return EditorView.decorations.from(field);
@@ -257,20 +299,20 @@ export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
   ];
 }
 
-export function createCommentFencedAdapter<TBlock extends EmbeddedBlock = EmbeddedBlock>(
-  spec: CommentFencedAdapterSpec<TBlock>,
+export function createVersoCommentAdapter<TBlock extends EmbeddedBlock = EmbeddedBlock>(
+  spec: VersoCommentAdapterSpec<TBlock>,
 ): EmbeddedBlockEditorAdapter<TBlock> & {
   parseBlocks(source: string): TBlock[];
   serializeBlock(block: TBlock, code: string): string;
 } {
   const parseBlocks = (source: string): TBlock[] =>
-    parseCommentFencedBlocks(source, {
+    parseVersoCommentBlocks(source, {
       defaultTitle: spec.defaultTitle,
       kind: spec.kind,
     }) as TBlock[];
 
   const serializeBlock = (block: TBlock, code: string): string =>
-    serializeCommentFencedBlock(block, spec.kind, code);
+    serializeVersoCommentBlock(block, spec.kind, code);
 
   return {
     kind: spec.kind,
@@ -289,6 +331,10 @@ export function createCommentFencedAdapter<TBlock extends EmbeddedBlock = Embedd
 
 export function embeddedBlockSourceMode(
   adapters: readonly AnyEmbeddedBlockEditorAdapter[],
+  options: {
+    disabled(state: EditorState, block: EmbeddedBlock): boolean;
+    sourceWidget(block: EmbeddedBlock): WidgetType;
+  },
 ): Extension {
   return [
     embeddedBlockTheme,
@@ -296,6 +342,18 @@ export function embeddedBlockSourceMode(
       create(state) {
         const builder = new RangeSetBuilder<Decoration>();
         for (const block of collectEmbeddedBlocks(state.doc.toString(), adapters)) {
+          if (!options.disabled(state, block)) {
+            continue;
+          }
+          builder.add(
+            block.from,
+            block.from,
+            Decoration.widget({
+              block: true,
+              side: -1,
+              widget: options.sourceWidget(block),
+            }),
+          );
           builder.add(
             block.from,
             block.to,
@@ -307,6 +365,18 @@ export function embeddedBlockSourceMode(
       update(_value, transaction) {
         const builder = new RangeSetBuilder<Decoration>();
         for (const block of collectEmbeddedBlocks(transaction.state.doc.toString(), adapters)) {
+          if (!options.disabled(transaction.state, block)) {
+            continue;
+          }
+          builder.add(
+            block.from,
+            block.from,
+            Decoration.widget({
+              block: true,
+              side: -1,
+              widget: options.sourceWidget(block),
+            }),
+          );
           builder.add(
             block.from,
             block.to,
@@ -323,7 +393,9 @@ export function embeddedBlockSourceMode(
       if (!transaction.docChanged) {
         return true;
       }
-      return blockRanges(transaction.startState.doc.toString(), adapters);
+      return collectEmbeddedBlocks(transaction.startState.doc.toString(), adapters)
+        .filter((block) => options.disabled(transaction.startState, block))
+        .flatMap((block) => [block.from, block.to]);
     }),
   ];
 }

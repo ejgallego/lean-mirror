@@ -8,4 +8,6 @@ coverage/
 playwright-report/
 test-results/
 demo/workspace/*.olean
+demo/workspace/.lake/
+demo/workspace/lake-manifest.json
 demo/rust-blocks/

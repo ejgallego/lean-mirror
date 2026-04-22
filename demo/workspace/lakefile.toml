@@ -1,0 +1,6 @@
+name = "lean_mirror_demo"
+version = "0.1.0"
+defaultTargets = ["Helper"]
+
+[[lean_lib]]
+name = "Helper"

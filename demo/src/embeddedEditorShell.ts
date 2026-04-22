@@ -1,7 +1,8 @@
-import { EditorState, StateEffect, type Extension } from "@codemirror/state";
-import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { EditorView, WidgetType, type ViewUpdate } from "@codemirror/view";
 
 import {
+  embeddedBlockSourceMode,
   findEmbeddedBlockByKey,
   type AnyEmbeddedBlockEditorAdapter,
   type EmbeddedBlock,
@@ -23,6 +24,73 @@ export function createEmbeddedEditorShell(
   options: EmbeddedEditorShellOptions,
 ): EmbeddedEditorShell {
   const adapterExtensions = new Map<AnyEmbeddedBlockEditorAdapter, Extension>();
+  const activeHandles = new Map<
+    string,
+    { adapter: AnyEmbeddedBlockEditorAdapter; handle: EmbeddedBlockInlineHandle }
+  >();
+  const toggleBlock = StateEffect.define<string>();
+  const disabledState = StateField.define<Set<string>>({
+    create() {
+      return new Set();
+    },
+    update(value, transaction) {
+      let next = value;
+      for (const effect of transaction.effects) {
+        if (effect.is(toggleBlock)) {
+          next = new Set(next);
+          if (next.has(effect.value)) {
+            next.delete(effect.value);
+          } else {
+            next.add(effect.value);
+          }
+        }
+      }
+      return next;
+    },
+  });
+
+  class SourceToggleWidget extends WidgetType {
+    constructor(private readonly block: EmbeddedBlock) {
+      super();
+    }
+
+    override eq(other: SourceToggleWidget): boolean {
+      return this.block.key === other.block.key;
+    }
+
+    override toDOM(view: EditorView): HTMLElement {
+      const button = document.createElement("button");
+      button.className = "cm-embedded-block-toggle cm-embedded-block-source-toggle";
+      button.textContent = "Enable widget";
+      button.type = "button";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        view.dispatch({ effects: toggleBlock.of(this.block.key) });
+        view.requestMeasure();
+      });
+      return button;
+    }
+  }
+
+  function isolatePointerEvents(dom: HTMLElement): void {
+    for (const eventName of [
+      "mouseenter",
+      "mouseleave",
+      "mousemove",
+      "mouseover",
+      "mouseout",
+      "pointerenter",
+      "pointerleave",
+      "pointermove",
+      "pointerover",
+      "pointerout",
+    ]) {
+      dom.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    }
+  }
 
   function createInlineHandle(
     outerView: EditorView,
@@ -30,7 +98,7 @@ export function createEmbeddedEditorShell(
     block: EmbeddedBlock,
   ): EmbeddedBlockInlineHandle {
     if (adapter.createInlineHandle) {
-      return adapter.createInlineHandle({
+      const handle = adapter.createInlineHandle({
         block,
         log(message) {
           options.log(message);
@@ -54,26 +122,13 @@ export function createEmbeddedEditorShell(
           });
         },
       });
+      isolatePointerEvents(handle.dom);
+      return handle;
     }
 
     const container = document.createElement("div");
     container.className = "cm-embedded-block-inline";
-    for (const eventName of [
-      "mouseenter",
-      "mouseleave",
-      "mousemove",
-      "mouseover",
-      "mouseout",
-      "pointerenter",
-      "pointerleave",
-      "pointermove",
-      "pointerover",
-      "pointerout",
-    ]) {
-      container.addEventListener(eventName, (event) => {
-        event.stopPropagation();
-      });
-    }
+    isolatePointerEvents(container);
 
     let syncingFromOuter = false;
     const nestedView = new EditorView({
@@ -137,9 +192,37 @@ export function createEmbeddedEditorShell(
   }
 
   return {
-    close() {},
+    close() {
+      for (const { handle } of activeHandles.values()) {
+        handle.destroy();
+      }
+      activeHandles.clear();
+    },
     extensionsFor(adapters) {
-      return adapters.map((adapter) => {
+      return [
+        disabledState,
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged) {
+            return;
+          }
+          const source = update.state.doc.toString();
+          for (const [key, entry] of activeHandles) {
+            const block = findEmbeddedBlockByKey(source, key, entry.adapter.parse);
+            if (!block) {
+              continue;
+            }
+            entry.handle.sync(block.code, block.title);
+          }
+        }),
+        embeddedBlockSourceMode(adapters, {
+          disabled(state, block) {
+            return state.field(disabledState).has(block.key);
+          },
+          sourceWidget(block) {
+            return new SourceToggleWidget(block);
+          },
+        }),
+        ...adapters.map((adapter) => {
           const cached = adapterExtensions.get(adapter);
           if (cached) {
             return cached;
@@ -147,13 +230,62 @@ export function createEmbeddedEditorShell(
           const extension = [
             adapter.widgetExtension({
               createInline(view, block) {
-                return createInlineHandle(view, adapter, block);
+                const shell = document.createElement("div");
+                shell.className = "cm-embedded-block-widget-shell";
+                const button = document.createElement("button");
+                button.className = "cm-embedded-block-toggle";
+                button.textContent = "Disable widget";
+                button.type = "button";
+                button.addEventListener("click", (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  view.dispatch({ effects: toggleBlock.of(block.key) });
+                  view.requestMeasure();
+                });
+
+                const handle = createInlineHandle(view, adapter, block);
+                let destroyed = false;
+                const trackedHandle: EmbeddedBlockInlineHandle = {
+                  destroy() {
+                    if (destroyed) {
+                      return;
+                    }
+                    destroyed = true;
+                    const entry = activeHandles.get(block.key);
+                    if (entry?.handle === trackedHandle) {
+                      activeHandles.delete(block.key);
+                    }
+                    handle.destroy();
+                  },
+                  dom: handle.dom,
+                  sync(code, title) {
+                    if (destroyed) {
+                      return;
+                    }
+                    handle.sync(code, title);
+                  },
+                };
+                activeHandles.set(block.key, { adapter, handle: trackedHandle });
+                shell.append(button, handle.dom);
+                return {
+                  destroy() {
+                    trackedHandle.destroy();
+                  },
+                  dom: shell,
+                  sync(code, title) {
+                    trackedHandle.sync(code, title);
+                  },
+                };
+              },
+              enabled(state, block) {
+                return !state.field(disabledState).has(block.key);
               },
             }),
           ];
           adapterExtensions.set(adapter, extension);
           return extension;
-        });
+        }),
+      ];
     },
   };
 }

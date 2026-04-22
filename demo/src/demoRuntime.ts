@@ -1,4 +1,4 @@
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
 
@@ -13,10 +13,7 @@ import { createDemoBridge } from "./demoBridge.js";
 import type { DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
 import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
-import {
-  embeddedBlockSourceMode,
-  type AnyEmbeddedBlockEditorAdapter,
-} from "./embeddedBlocks.js";
+import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
 
 export interface DemoRuntimeOptions {
   editorTheme: Extension;
@@ -25,12 +22,17 @@ export interface DemoRuntimeOptions {
   ui: DemoUi;
 }
 
-export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void> {
+export interface DemoRuntime {
+  dispose(): void;
+}
+
+export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
   let currentView: EditorView | null = null;
   let currentUri: string | null = null;
   let workspace: LeanWorkspace | null = null;
   let client: ReturnType<typeof createLeanLspClient> | null = null;
-  let widgetsEnabled = true;
+  let socket: WebSocket | null = null;
+  let disposed = false;
 
   function setCurrentUri(uri: string): void {
     currentUri = uri;
@@ -51,8 +53,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   });
 
   const embeddedBlockExtensions = embeddedEditors.extensionsFor(options.embeddedAdapters);
-  const embeddedBlockSourceExtensions = embeddedBlockSourceMode(options.embeddedAdapters);
-  const widgetsCompartment = new Compartment();
   const demoBridge = createDemoBridge({
     currentUri() {
       return currentUri;
@@ -69,9 +69,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   });
 
   async function mountDocument(uri: string, doc: string): Promise<EditorView> {
+    if (disposed) {
+      throw new Error("Demo runtime is disposed.");
+    }
     client?.sync();
-    embeddedEditors.close();
     currentView?.destroy();
+    embeddedEditors.close();
 
     const view = new EditorView({
       parent: options.ui.editorHost,
@@ -83,12 +86,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
           utilities: {
             lineWrapping: true,
           },
-          extraExtensions: [
-            options.editorTheme,
-            widgetsCompartment.of(
-              widgetsEnabled ? embeddedBlockExtensions : embeddedBlockSourceExtensions,
-            ),
-          ],
+          extraExtensions: [options.editorTheme, ...embeddedBlockExtensions],
         }),
       }),
     });
@@ -98,13 +96,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   }
 
   options.ui.setStatus("Loading session");
-  options.ui.setWidgetsEnabled(widgetsEnabled);
   const session = await options.sessionApi.fetchSession();
   options.ui.setRootUri(session.rootUri);
   options.ui.setCurrentDocument(session.documentUri);
 
   options.ui.setStatus("Connecting to Lean");
-  const socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
+  socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
   client = createLeanLspClient({
     rootUri: session.rootUri,
     workspace: createLeanWorkspace({
@@ -134,39 +131,55 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
     options.ui.logEvent(`Opened ${uri.split("/").at(-1) ?? uri}`);
   };
 
-  options.ui.bindToggleWidgets(() => {
-    widgetsEnabled = !widgetsEnabled;
-    options.ui.setWidgetsEnabled(widgetsEnabled);
-    options.ui.logEvent(`Embedded widgets ${widgetsEnabled ? "enabled" : "disabled"}.`);
-    if (currentView) {
-      embeddedEditors.close();
-      currentView.dispatch({
-        effects: widgetsCompartment.reconfigure(
-          widgetsEnabled ? embeddedBlockExtensions : embeddedBlockSourceExtensions,
-        ),
-      });
-    }
-  });
-
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);
   await mountDocument(session.documentUri, session.initialDoc);
 
-  socket.addEventListener("close", () => {
+  const handleSocketClose = () => {
+    if (disposed) {
+      return;
+    }
     options.ui.setStatus("Disconnected");
     options.ui.logEvent("Lean server connection closed.");
-  });
-  socket.addEventListener("error", () => {
+  };
+  const handleSocketError = () => {
+    if (disposed) {
+      return;
+    }
     options.ui.setStatus("Transport error");
     options.ui.logEvent("WebSocket transport failed.");
-  });
-  window.addEventListener("beforeunload", () => {
-    embeddedEditors.close();
-    currentView?.destroy();
-    client?.disconnect();
-    socket.close();
-  });
+  };
+  const handleBeforeUnload = () => {
+    runtime.dispose();
+  };
+
+  socket.addEventListener("close", handleSocketClose);
+  socket.addEventListener("error", handleSocketError);
+  window.addEventListener("beforeunload", handleBeforeUnload);
 
   options.ui.setStatus("Ready");
   options.ui.logEvent("Lean server initialized.");
+
+  const runtime: DemoRuntime = {
+    dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      socket?.removeEventListener("close", handleSocketClose);
+      socket?.removeEventListener("error", handleSocketError);
+      embeddedEditors.close();
+      currentView?.destroy();
+      currentView = null;
+      demoBridge.clear();
+      client?.disconnect();
+      socket?.close();
+      socket = null;
+      workspace = null;
+      client = null;
+    },
+  };
+
+  return runtime;
 }
