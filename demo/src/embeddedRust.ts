@@ -2,11 +2,23 @@ import type { Extension } from "@codemirror/state";
 import { EditorState } from "@codemirror/state";
 import { rust } from "@codemirror/lang-rust";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { LSPClient, languageServerExtensions } from "@codemirror/lsp-client";
+import {
+  LSPClient,
+  LSPPlugin,
+  type LSPClientExtension,
+  findReferencesKeymap,
+  formatKeymap,
+  jumpToDefinitionKeymap,
+  renameKeymap,
+  serverCompletion,
+  serverDiagnostics,
+  signatureHelp,
+} from "@codemirror/lsp-client";
 import { createWebSocketTransport } from "../../src/index.js";
 import { leanUtilities } from "../../src/index.js";
-import { EditorView } from "@codemirror/view";
+import { EditorView, hoverTooltip, keymap, type Tooltip } from "@codemirror/view";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import type * as lsp from "vscode-languageserver-protocol";
 import {
   createVersoCommentAdapter,
   type EmbeddedBlockInlineCreateOptions,
@@ -42,6 +54,93 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   },
   kind: "rust",
 });
+
+function stripRustHoverPrefix(text: string): string {
+  return text.replace(/^(?:widget|embedded_[a-z0-9_]+)\r?\n\r?\n/, "");
+}
+
+function normalizeRustHover(
+  contents: string | lsp.MarkupContent | lsp.MarkedString | lsp.MarkedString[],
+): lsp.MarkupContent | null {
+  if (Array.isArray(contents)) {
+    const parts = contents
+      .map((item) => normalizeRustHover(item))
+      .filter((item): item is lsp.MarkupContent => item !== null)
+      .map((item) => item.value);
+    return parts.length > 0 ? { kind: "markdown", value: parts.join("\n\n") } : null;
+  }
+  if (typeof contents === "string") {
+    return { kind: "markdown", value: stripRustHoverPrefix(contents) };
+  }
+  if ("language" in contents) {
+    return {
+      kind: "markdown",
+      value: `\`\`\`${contents.language}\n${stripRustHoverPrefix(contents.value)}\n\`\`\``,
+    };
+  }
+  return {
+    kind: contents.kind,
+    value: stripRustHoverPrefix(contents.value),
+  };
+}
+
+function rustHoverTooltips(config: { hoverTime?: number } = {}): Extension {
+  return hoverTooltip((view, pos): Promise<Tooltip | null> => {
+    const plugin = LSPPlugin.get(view);
+    if (!plugin || plugin.client.serverCapabilities?.hoverProvider === false) {
+      return Promise.resolve(null);
+    }
+    plugin.client.sync();
+    return plugin.client
+      .request<lsp.HoverParams, lsp.Hover | null>("textDocument/hover", {
+        position: plugin.toPosition(pos),
+        textDocument: { uri: plugin.uri },
+      })
+      .then((result) => {
+        if (!result) {
+          return null;
+        }
+        const contents = normalizeRustHover(result.contents);
+        if (!contents) {
+          return null;
+        }
+        return {
+          pos: result.range ? plugin.fromPosition(result.range.start) : pos,
+          end: result.range ? plugin.fromPosition(result.range.end) : pos,
+          above: true,
+          create() {
+            const dom = document.createElement("div");
+            dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
+            dom.innerHTML = plugin.docToHTML(contents);
+            return { dom };
+          },
+        };
+      })
+      .catch((error: unknown) => {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: unknown }).code === -32801
+        ) {
+          return null;
+        }
+        throw error;
+      });
+  }, config.hoverTime === undefined
+    ? { hideOn: (transaction) => transaction.docChanged }
+    : { hideOn: (transaction) => transaction.docChanged, hoverTime: config.hoverTime });
+}
+
+function rustClientExtensions(): readonly (Extension | LSPClientExtension)[] {
+  return [
+    serverCompletion(),
+    rustHoverTooltips(),
+    keymap.of([...formatKeymap, ...renameKeymap, ...jumpToDefinitionKeymap, ...findReferencesKeymap]),
+    signatureHelp(),
+    serverDiagnostics(),
+  ];
+}
 
 function createRustInlineHandle(
   sessionApi: DemoSessionApi,
@@ -83,6 +182,19 @@ function createRustInlineHandle(
     return value === 1 ? "error" : value === 2 ? "warning" : value === 3 ? "info" : "hint";
   }
 
+  function diagnosticsStamp(
+    diagnostics: typeof latestDiagnostics,
+  ): string {
+    return JSON.stringify(
+      diagnostics.map((diagnostic) => ({
+        end: diagnostic.range.end,
+        message: diagnostic.message,
+        severity: diagnostic.severity,
+        start: diagnostic.range.start,
+      })),
+    );
+  }
+
   function applyDiagnostics(): void {
     if (!nestedView) {
       return;
@@ -99,6 +211,22 @@ function createRustInlineHandle(
       ),
     );
     options.outerView.requestMeasure();
+  }
+
+  function updateDiagnostics(
+    diagnostics: typeof latestDiagnostics,
+    optionsForUpdate: { log: boolean },
+  ): void {
+    const stamp = diagnosticsStamp(diagnostics);
+    if (stamp === lastDiagnosticStamp) {
+      return;
+    }
+    latestDiagnostics = diagnostics;
+    lastDiagnosticStamp = stamp;
+    applyDiagnostics();
+    if (optionsForUpdate.log && diagnostics.length > 0) {
+      options.log(`Rust diagnostics updated (${diagnostics.length})`);
+    }
   }
 
   async function requestDiagnostics(
@@ -121,31 +249,24 @@ function createRustInlineHandle(
     }
     const pulled = Array.isArray(report.items) ? report.items : [];
     if (pulled.length > 0) {
-      latestDiagnostics = pulled;
-      applyDiagnostics();
-      const stamp = JSON.stringify(
-        latestDiagnostics.map((diagnostic) => ({
-          message: diagnostic.message,
-          severity: diagnostic.severity,
-        })),
-      );
-      if (stamp !== lastDiagnosticStamp) {
-        options.log(`Rust diagnostics updated (${latestDiagnostics.length})`);
-      }
-      lastDiagnosticStamp = stamp;
+      updateDiagnostics(pulled, { log: true });
       return;
     }
-    if (attempt >= 3) {
+    if (attempt >= 11) {
       return;
     }
     diagnosticPullTimer = setTimeout(() => {
       diagnosticPullTimer = null;
       void requestDiagnostics(session, epoch, attempt + 1).catch(() => {});
-    }, 250);
+    }, 500);
   }
 
   async function persistDocument(session: { documentUri: string }): Promise<void> {
     if (!client || destroyed) {
+      return;
+    }
+    client.sync();
+    if (destroyed) {
       return;
     }
     await sessionApi.updateRustDocument(options.block.key, latestCode);
@@ -153,8 +274,8 @@ function createRustInlineHandle(
       return;
     }
     options.log(`Saved ${options.block.title}`);
-    client.sync();
     client.notification("textDocument/didSave", {
+      text: latestCode,
       textDocument: { uri: session.documentUri },
     });
     if (diagnosticPullTimer) {
@@ -164,7 +285,7 @@ function createRustInlineHandle(
     diagnosticPullTimer = setTimeout(() => {
       diagnosticPullTimer = null;
       void requestDiagnostics(session, epoch).catch(() => {});
-    }, 250);
+    }, 500);
   }
 
   function schedulePersist(session: { documentUri: string }): void {
@@ -194,24 +315,15 @@ function createRustInlineHandle(
         return;
       }
       client = new LSPClient({
-        extensions: languageServerExtensions(),
+        extensions: rustClientExtensions(),
         notificationHandlers: {
           "textDocument/publishDiagnostics": (_client, params) => {
             if (params?.uri !== session.documentUri) {
               return false;
             }
-            latestDiagnostics = Array.isArray(params.diagnostics) ? params.diagnostics : [];
-            applyDiagnostics();
-            const stamp = JSON.stringify(
-              latestDiagnostics.map((diagnostic) => ({
-                message: diagnostic.message,
-                severity: diagnostic.severity,
-              })),
-            );
-            if (latestDiagnostics.length > 0 && stamp !== lastDiagnosticStamp) {
-              options.log(`Rust diagnostics updated (${latestDiagnostics.length})`);
-            }
-            lastDiagnosticStamp = stamp;
+            updateDiagnostics(Array.isArray(params.diagnostics) ? params.diagnostics : [], {
+              log: true,
+            });
             return true;
           },
         },

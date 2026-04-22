@@ -62,7 +62,7 @@ async function readJsonBody(req) {
 
 async function ensureRustBlockWorkspace(key, code) {
   const { documentPath, rootPath, slug } = rustBlockPaths(key);
-  const crateName = `embedded_${slug.replace(/-/g, "_")}`;
+  const crateName = "widget";
   await mkdir(join(rootPath, "src"), { recursive: true });
   await writeFile(
     join(rootPath, "Cargo.toml"),
