@@ -101,11 +101,28 @@ code {
   padding: 16px 20px 20px;
 }
 
-.editor-host .cm-editor {
+.editor-host > .cm-editor {
   height: 100%;
   border: 1px solid #dfd3b9;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.editor-host > .cm-editor > .cm-scroller {
+  border-radius: inherit;
+  overflow: auto;
+}
+
+.editor-host .cm-tooltip,
+.editor-host .cm-panels {
+  z-index: 80;
+}
+
+.editor-host .cm-tooltip {
+  max-height: min(18rem, 50vh);
+  max-width: min(42rem, calc(100vw - 48px));
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .status-card {

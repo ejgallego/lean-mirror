@@ -202,6 +202,15 @@ export function createEmbeddedEditorShell(
       return [
         disabledState,
         EditorView.updateListener.of((update) => {
+          const toggled = update.transactions.some((transaction) =>
+            transaction.effects.some((effect) => effect.is(toggleBlock)),
+          );
+          if (toggled) {
+            update.view.requestMeasure();
+            setTimeout(() => {
+              update.view.requestMeasure();
+            }, 0);
+          }
           if (!update.docChanged) {
             return;
           }

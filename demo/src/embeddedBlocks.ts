@@ -260,6 +260,8 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     width: "fit-content",
   },
   ".cm-embedded-block-inline": {
+    position: "relative",
+    zIndex: "1",
     borderRadius: "12px",
     border: "1px solid #d9cfbb",
     overflow: "visible",
@@ -271,6 +273,17 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     minHeight: "180px",
     border: "none",
     borderRadius: "0",
+    overflow: "visible",
+  },
+  ".cm-embedded-block-inline .cm-scroller": {
+    overflow: "auto",
+  },
+  ".cm-embedded-block-inline .cm-tooltip": {
+    zIndex: "90",
+    maxHeight: "16rem",
+    maxWidth: "36rem",
+    overflow: "auto",
+    overscrollBehavior: "contain",
   },
   ".cm-embedded-block-source": {
     backgroundColor: "rgba(210, 196, 160, 0.26)",
