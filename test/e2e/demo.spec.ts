@@ -13,7 +13,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator("#document-uri")).toContainText("Main.lean");
 
-  const editor = page.locator(".cm-content");
+  const editor = page.locator("#editor > .cm-editor > .cm-scroller > .cm-content");
   await editor.click();
   await page.keyboard.type(`\n${insertedSnippet}`);
 
@@ -40,9 +40,7 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
-  const blockWidget = page.locator(".cm-embedded-block-widget").first();
-  await blockWidget.locator(".cm-embedded-block-open").click();
-  const expandedBlock = page.locator('.cm-embedded-block-widget[data-expanded="true"]');
+  const expandedBlock = page.locator(".cm-embedded-block-widget").first();
   await expect(expandedBlock).toHaveCount(1);
   await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-editor")).toHaveCount(1);
 
@@ -57,4 +55,18 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
   await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-content")).toContainText("a - b");
+});
+
+test("demo toggles embedded widgets on and off", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Disable widgets" }).click();
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+  await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
+
+  await page.getByRole("button", { name: "Enable widgets" }).click();
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 });

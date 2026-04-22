@@ -1,4 +1,4 @@
-import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { EditorState, StateEffect, type Extension } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import {
@@ -22,30 +22,6 @@ export interface EmbeddedEditorShellOptions {
 export function createEmbeddedEditorShell(
   options: EmbeddedEditorShellOptions,
 ): EmbeddedEditorShell {
-  const toggleExpanded = StateEffect.define<string>();
-  const closeAllExpanded = StateEffect.define<void>();
-  const expandedState = StateField.define<Set<string>>({
-    create() {
-      return new Set();
-    },
-    update(value, transaction) {
-      let next = value;
-      for (const effect of transaction.effects) {
-        if (effect.is(closeAllExpanded)) {
-          next = new Set();
-        } else if (effect.is(toggleExpanded)) {
-          next = new Set(next);
-          if (next.has(effect.value)) {
-            next.delete(effect.value);
-          } else {
-            next.add(effect.value);
-          }
-        }
-      }
-      return next;
-    },
-  });
-
   const adapterExtensions = new Map<AnyEmbeddedBlockEditorAdapter, Extension>();
 
   function createInlineHandle(
@@ -117,51 +93,23 @@ export function createEmbeddedEditorShell(
   }
 
   return {
-    close() {
-      const view = options.currentView();
-      if (view) {
-        view.dispatch({ effects: closeAllExpanded.of(undefined) });
-      }
-    },
+    close() {},
     extensionsFor(adapters) {
-      return [
-        expandedState,
-        ...adapters.map((adapter) => {
+      return adapters.map((adapter) => {
           const cached = adapterExtensions.get(adapter);
           if (cached) {
             return cached;
           }
           const extension = [
             adapter.widgetExtension({
-              buttonLabel(block, expanded) {
-                return expanded
-                  ? "Collapse editor"
-                  : `Open ${adapter.widget.kindLabel(block)} editor`;
-              },
-              createExpanded(view, block) {
+              createInline(view, block) {
                 return createInlineHandle(view, adapter, block);
-              },
-              description(block) {
-                return adapter.widget.description(block);
-              },
-              expanded(state, block) {
-                return state.field(expandedState).has(block.key);
-              },
-              kindLabel(block) {
-                return adapter.widget.kindLabel(block);
-              },
-              onToggle(view, block) {
-                view.dispatch({ effects: toggleExpanded.of(block.key) });
-              },
-              preview(code) {
-                return adapter.widget.preview(code);
               },
             }),
           ];
           adapterExtensions.set(adapter, extension);
           return extension;
-        }),
-      ];
+        });
     },
   };
 }

@@ -81,19 +81,10 @@ describe("embeddedRust", () => {
       defaultTitle(block: EmbeddedBlock) {
         return block.label ?? `Demo ${block.ordinal}`;
       },
-      description() {
-        return "Demo adapter";
-      },
       editorExtensions() {
         return [];
       },
       kind: "demo",
-      kindLabel() {
-        return "Embedded Demo";
-      },
-      preview(code: string) {
-        return code;
-      },
     });
 
     const blocks = adapter.parseBlocks(["-- ```demo sample", "-- alpha", "-- ```", ""].join("\n"));

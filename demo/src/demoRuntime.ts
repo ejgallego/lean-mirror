@@ -27,6 +27,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   let currentUri: string | null = null;
   let workspace: LeanWorkspace | null = null;
   let client: ReturnType<typeof createLeanLspClient> | null = null;
+  let widgetsEnabled = true;
 
   function setCurrentUri(uri: string): void {
     currentUri = uri;
@@ -77,7 +78,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
           utilities: {
             lineWrapping: true,
           },
-          extraExtensions: [options.editorTheme, ...embeddedBlockExtensions],
+          extraExtensions: widgetsEnabled
+            ? [options.editorTheme, ...embeddedBlockExtensions]
+            : [options.editorTheme],
         }),
       }),
     });
@@ -87,6 +90,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   }
 
   options.ui.setStatus("Loading session");
+  options.ui.setWidgetsEnabled(widgetsEnabled);
   const session = await options.sessionApi.fetchSession();
   options.ui.setRootUri(session.rootUri);
   options.ui.setCurrentDocument(session.documentUri);
@@ -121,6 +125,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
     await mountDocument(uri, doc);
     options.ui.logEvent(`Opened ${uri.split("/").at(-1) ?? uri}`);
   };
+
+  options.ui.bindToggleWidgets(() => {
+    widgetsEnabled = !widgetsEnabled;
+    options.ui.setWidgetsEnabled(widgetsEnabled);
+    options.ui.logEvent(`Embedded widgets ${widgetsEnabled ? "enabled" : "disabled"}.`);
+    if (currentView && currentUri) {
+      void mountDocument(currentUri, currentView.state.doc.toString());
+    }
+  });
 
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);

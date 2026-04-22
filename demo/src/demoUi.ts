@@ -2,6 +2,7 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
 export interface DemoUi {
+  bindToggleWidgets(handler: () => void): void;
   editorHost: HTMLDivElement;
   logEvent(text: string): void;
   renderDocumentButtons(
@@ -12,6 +13,7 @@ export interface DemoUi {
   setCurrentDocument(uri: string): void;
   setRootUri(uri: string): void;
   setStatus(text: string): void;
+  setWidgetsEnabled(enabled: boolean): void;
 }
 
 export function demoTheme(): Extension {
@@ -52,6 +54,7 @@ export function queryDemoUi(root: ParentNode = document): DemoUi | null {
   const eventsEl = root.querySelector<HTMLDivElement>("#events");
   const editorHost = root.querySelector<HTMLDivElement>("#editor");
   const documentsEl = root.querySelector<HTMLDivElement>("#documents");
+  const toggleWidgetsEl = root.querySelector<HTMLButtonElement>("#toggle-widgets");
 
   if (
     !statusEl ||
@@ -59,12 +62,16 @@ export function queryDemoUi(root: ParentNode = document): DemoUi | null {
     !documentUriEl ||
     !eventsEl ||
     !editorHost ||
-    !documentsEl
+    !documentsEl ||
+    !toggleWidgetsEl
   ) {
     return null;
   }
 
   return {
+    bindToggleWidgets(handler: () => void) {
+      toggleWidgetsEl.addEventListener("click", handler);
+    },
     editorHost,
     logEvent(text: string) {
       const item = document.createElement("div");
@@ -98,6 +105,10 @@ export function queryDemoUi(root: ParentNode = document): DemoUi | null {
     },
     setStatus(text: string) {
       statusEl.textContent = text;
+    },
+    setWidgetsEnabled(enabled: boolean) {
+      toggleWidgetsEl.textContent = enabled ? "Disable widgets" : "Enable widgets";
+      toggleWidgetsEl.dataset.enabled = String(enabled);
     },
   };
 }
