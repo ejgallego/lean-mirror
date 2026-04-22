@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 
 export interface EmbeddedBlock {
@@ -123,6 +123,19 @@ export function findEmbeddedBlockByKey<TBlock extends EmbeddedBlock>(
   return parse(source).find((block) => block.key === key) ?? null;
 }
 
+export function collectEmbeddedBlocks(
+  source: string,
+  adapters: readonly AnyEmbeddedBlockEditorAdapter[],
+): EmbeddedBlock[] {
+  return adapters
+    .flatMap((adapter) => adapter.parse(source))
+    .sort((left, right) => left.from - right.from || left.to - right.to);
+}
+
+function blockRanges(source: string, adapters: readonly AnyEmbeddedBlockEditorAdapter[]): number[] {
+  return collectEmbeddedBlocks(source, adapters).flatMap((block) => [block.from, block.to]);
+}
+
 class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
   constructor(
     private readonly block: TBlock,
@@ -209,6 +222,11 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     border: "none",
     borderRadius: "0",
   },
+  ".cm-embedded-block-source": {
+    backgroundColor: "rgba(210, 196, 160, 0.26)",
+    borderRadius: "4px",
+    color: "#6a5b3f",
+  },
 });
 
 export function embeddedBlockWidgets<TBlock extends EmbeddedBlock>(
@@ -259,4 +277,45 @@ export function createCommentFencedAdapter<TBlock extends EmbeddedBlock = Embedd
       return embeddedBlockWidgets(parseBlocks, config);
     },
   };
+}
+
+export function embeddedBlockSourceMode(
+  adapters: readonly AnyEmbeddedBlockEditorAdapter[],
+): Extension {
+  return [
+    embeddedBlockTheme,
+    StateField.define<DecorationSet>({
+      create(state) {
+        const builder = new RangeSetBuilder<Decoration>();
+        for (const block of collectEmbeddedBlocks(state.doc.toString(), adapters)) {
+          builder.add(
+            block.from,
+            block.to,
+            Decoration.mark({ class: "cm-embedded-block-source" }),
+          );
+        }
+        return builder.finish();
+      },
+      update(_value, transaction) {
+        const builder = new RangeSetBuilder<Decoration>();
+        for (const block of collectEmbeddedBlocks(transaction.state.doc.toString(), adapters)) {
+          builder.add(
+            block.from,
+            block.to,
+            Decoration.mark({ class: "cm-embedded-block-source" }),
+          );
+        }
+        return builder.finish();
+      },
+      provide(field) {
+        return EditorView.decorations.from(field);
+      },
+    }),
+    EditorState.changeFilter.of((transaction) => {
+      if (!transaction.docChanged) {
+        return true;
+      }
+      return blockRanges(transaction.startState.doc.toString(), adapters);
+    }),
+  ];
 }

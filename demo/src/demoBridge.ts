@@ -48,7 +48,7 @@ export function createDemoBridge(options: DemoBridgeOptions): DemoBridge {
               to: index + search.length,
             },
           });
-          return true;
+          return view.state.doc.toString() !== source;
         },
         setCursor(query: string) {
           const view = options.currentView();

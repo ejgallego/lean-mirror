@@ -13,7 +13,10 @@ import { createDemoBridge } from "./demoBridge.js";
 import type { DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
 import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
-import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
+import {
+  embeddedBlockSourceMode,
+  type AnyEmbeddedBlockEditorAdapter,
+} from "./embeddedBlocks.js";
 
 export interface DemoRuntimeOptions {
   editorTheme: Extension;
@@ -48,6 +51,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
   });
 
   const embeddedBlockExtensions = embeddedEditors.extensionsFor(options.embeddedAdapters);
+  const embeddedBlockSourceExtensions = embeddedBlockSourceMode(options.embeddedAdapters);
   const demoBridge = createDemoBridge({
     currentUri() {
       return currentUri;
@@ -80,7 +84,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<void
           },
           extraExtensions: widgetsEnabled
             ? [options.editorTheme, ...embeddedBlockExtensions]
-            : [options.editorTheme],
+            : [options.editorTheme, embeddedBlockSourceExtensions],
         }),
       }),
     });

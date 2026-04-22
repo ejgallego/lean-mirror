@@ -66,6 +66,8 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await page.getByRole("button", { name: "Disable widgets" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
   await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
+  await expect(page.locator(".cm-content")).toContainText("a + b");
 
   await page.getByRole("button", { name: "Enable widgets" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
