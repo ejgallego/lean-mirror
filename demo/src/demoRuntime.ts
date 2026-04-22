@@ -139,15 +139,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     if (disposed) {
       return;
     }
-    options.ui.setStatus("Disconnected");
-    options.ui.logEvent("Lean server connection closed.");
+    options.ui.setStatus("Reconnecting");
+    options.ui.logEvent("Lean server connection closed. Waiting for restart.");
   };
   const handleSocketError = () => {
     if (disposed) {
       return;
     }
-    options.ui.setStatus("Transport error");
-    options.ui.logEvent("WebSocket transport failed.");
+    options.ui.setStatus("Reconnecting");
+    options.ui.logEvent("WebSocket transport interrupted. Retrying.");
   };
   const handleBeforeUnload = () => {
     runtime.dispose();

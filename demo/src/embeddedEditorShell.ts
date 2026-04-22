@@ -1,7 +1,9 @@
 import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
-import { EditorView, WidgetType, type ViewUpdate } from "@codemirror/view";
+import { EditorView, GutterMarker, WidgetType, gutter, type BlockInfo, type ViewUpdate } from "@codemirror/view";
 
 import {
+  EmbeddedBlockWidget,
+  collectEmbeddedBlocks,
   embeddedBlockSourceMode,
   findEmbeddedBlockByKey,
   type AnyEmbeddedBlockEditorAdapter,
@@ -49,30 +51,6 @@ export function createEmbeddedEditorShell(
     },
   });
 
-  class SourceToggleWidget extends WidgetType {
-    constructor(private readonly block: EmbeddedBlock) {
-      super();
-    }
-
-    override eq(other: SourceToggleWidget): boolean {
-      return this.block.key === other.block.key;
-    }
-
-    override toDOM(view: EditorView): HTMLElement {
-      const button = document.createElement("button");
-      button.className = "cm-embedded-block-toggle cm-embedded-block-source-toggle";
-      button.textContent = "Enable widget";
-      button.type = "button";
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        view.dispatch({ effects: toggleBlock.of(this.block.key) });
-        view.requestMeasure();
-      });
-      return button;
-    }
-  }
-
   function isolatePointerEvents(dom: HTMLElement): void {
     for (const eventName of [
       "mouseenter",
@@ -91,6 +69,148 @@ export function createEmbeddedEditorShell(
       });
     }
   }
+
+  function nextRustLabel(source: string): string {
+    const blocks = collectEmbeddedBlocks(source, adaptersRef).filter((block) =>
+      block.key.startsWith("rust:"),
+    );
+    const labels = new Set(blocks.map((block) => block.label).filter((label): label is string => !!label));
+    const base = "demo-widget";
+    if (!labels.has(base)) {
+      return base;
+    }
+    let index = 2;
+    for (;;) {
+      const label = `${base}-${index}`;
+      if (!labels.has(label)) {
+        return label;
+      }
+      index += 1;
+    }
+  }
+
+  function indentLines(text: string, indent: string): string {
+    if (indent.length === 0) {
+      return text;
+    }
+    return text
+      .split("\n")
+      .map((line) => (line.length === 0 ? line : `${indent}${line}`))
+      .join("\n");
+  }
+
+  function insertRustScaffold(view: EditorView, lineFrom: number): void {
+    const adapter = adaptersRef.find((candidate) => candidate.kind === "rust");
+    if (!adapter) {
+      return;
+    }
+    const source = view.state.doc.toString();
+    const label = nextRustLabel(source);
+    const line = view.state.doc.lineAt(lineFrom);
+    const indent = (/^\s*/.exec(line.text)?.[0]) ?? "";
+    const scaffoldBlock: EmbeddedBlock = {
+      code: "",
+      from: line.from,
+      key: `rust:${label}`,
+      label,
+      ordinal: 0,
+      title: label,
+      to: line.from,
+    };
+    const scaffoldCode = ['fn demo() {', '    println!("hello from Rust");', '}'].join("\n");
+    const scaffold = indentLines(adapter.serialize(scaffoldBlock, scaffoldCode), indent);
+    view.dispatch({
+      changes: {
+        from: line.from,
+        insert: `${scaffold}${line.length === 0 ? "" : "\n"}`,
+        to: line.from,
+      },
+    });
+    view.requestMeasure();
+    options.log(`Inserted Rust scaffold ${label}`);
+  }
+
+  function lineBlockInfo(
+    state: EditorState,
+    line: BlockInfo,
+  ): { block: EmbeddedBlock | null; kind: "block-start" | "block-body" | "outside" } {
+    const blocks = collectEmbeddedBlocks(state.doc.toString(), adaptersRef);
+    for (const block of blocks) {
+      const startLine = state.doc.lineAt(block.from);
+      const endLine = state.doc.lineAt(Math.max(block.from, block.to - 1));
+      if (line.from < startLine.from || line.from > endLine.from) {
+        continue;
+      }
+      if (line.from === startLine.from) {
+        return { block, kind: "block-start" };
+      }
+      return { block, kind: "block-body" };
+    }
+    return { block: null, kind: "outside" };
+  }
+
+  class ToggleBlockMarker extends GutterMarker {
+    constructor(
+      private readonly blockKey: string,
+      private readonly disabled: boolean,
+    ) {
+      super();
+    }
+
+    override eq(other: ToggleBlockMarker): boolean {
+      return this.blockKey === other.blockKey && this.disabled === other.disabled;
+    }
+
+    override toDOM(view: EditorView): HTMLElement {
+      const button = document.createElement("button");
+      button.className = "cm-embedded-gutter-action cm-embedded-gutter-toggle";
+      button.textContent = this.disabled ? "Enable widget" : "Disable widget";
+      button.title = this.disabled ? "Enable Rust widget" : "Disable Rust widget";
+      button.type = "button";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        view.dispatch({ effects: toggleBlock.of(this.blockKey) });
+        view.requestMeasure();
+      });
+      return button;
+    }
+  }
+
+  class AddRustMarker extends GutterMarker {
+    constructor(private readonly lineFrom: number) {
+      super();
+    }
+
+    override eq(other: AddRustMarker): boolean {
+      return this.lineFrom === other.lineFrom;
+    }
+
+    override toDOM(view: EditorView): HTMLElement {
+      const button = document.createElement("button");
+      button.className = "cm-embedded-gutter-action cm-embedded-gutter-add";
+      button.textContent = "Add Rust";
+      button.title = "Insert Rust code scaffold";
+      button.type = "button";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        insertRustScaffold(view, this.lineFrom);
+      });
+      return button;
+    }
+  }
+
+  class EmbeddedGutterSpacer extends GutterMarker {
+    override toDOM(): HTMLElement {
+      const spacer = document.createElement("div");
+      spacer.className = "cm-embedded-gutter-spacer";
+      spacer.textContent = "Add Rust";
+      return spacer;
+    }
+  }
+
+  const adaptersRef: AnyEmbeddedBlockEditorAdapter[] = [];
 
   function createInlineHandle(
     outerView: EditorView,
@@ -199,8 +319,42 @@ export function createEmbeddedEditorShell(
       activeHandles.clear();
     },
     extensionsFor(adapters) {
+      adaptersRef.splice(0, adaptersRef.length, ...adapters);
       return [
         disabledState,
+        gutter({
+          class: "cm-embedded-block-gutter",
+          initialSpacer() {
+            return new EmbeddedGutterSpacer();
+          },
+          lineMarker(view, line) {
+            const info = lineBlockInfo(view.state, line);
+            if (info.kind === "block-start" && info.block) {
+              if (view.state.field(disabledState).has(info.block.key)) {
+                return new ToggleBlockMarker(info.block.key, true);
+              }
+              return null;
+            }
+            if (info.kind === "outside") {
+              return new AddRustMarker(line.from);
+            }
+            return null;
+          },
+          widgetMarker(view, widget) {
+            if (!(widget instanceof EmbeddedBlockWidget)) {
+              return null;
+            }
+            return new ToggleBlockMarker(
+              widget.block.key,
+              view.state.field(disabledState).has(widget.block.key),
+            );
+          },
+          lineMarkerChange(update) {
+            return update.docChanged || update.transactions.some((transaction) =>
+              transaction.effects.some((effect) => effect.is(toggleBlock)),
+            );
+          },
+        }),
         EditorView.updateListener.of((update) => {
           const toggled = update.transactions.some((transaction) =>
             transaction.effects.some((effect) => effect.is(toggleBlock)),
@@ -227,9 +381,6 @@ export function createEmbeddedEditorShell(
           disabled(state, block) {
             return state.field(disabledState).has(block.key);
           },
-          sourceWidget(block) {
-            return new SourceToggleWidget(block);
-          },
         }),
         ...adapters.map((adapter) => {
           const cached = adapterExtensions.get(adapter);
@@ -239,19 +390,6 @@ export function createEmbeddedEditorShell(
           const extension = [
             adapter.widgetExtension({
               createInline(view, block) {
-                const shell = document.createElement("div");
-                shell.className = "cm-embedded-block-widget-shell";
-                const button = document.createElement("button");
-                button.className = "cm-embedded-block-toggle";
-                button.textContent = "Disable widget";
-                button.type = "button";
-                button.addEventListener("click", (event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  view.dispatch({ effects: toggleBlock.of(block.key) });
-                  view.requestMeasure();
-                });
-
                 const handle = createInlineHandle(view, adapter, block);
                 let destroyed = false;
                 const trackedHandle: EmbeddedBlockInlineHandle = {
@@ -275,12 +413,11 @@ export function createEmbeddedEditorShell(
                   },
                 };
                 activeHandles.set(block.key, { adapter, handle: trackedHandle });
-                shell.append(button, handle.dom);
                 return {
                   destroy() {
                     trackedHandle.destroy();
                   },
-                  dom: shell,
+                  dom: handle.dom,
                   sync(code, title) {
                     trackedHandle.sync(code, title);
                   },

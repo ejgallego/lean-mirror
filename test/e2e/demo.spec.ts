@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const leanAvailable = spawnSync("lean", ["--version"], { stdio: "ignore" }).status === 0;
 
@@ -18,6 +18,18 @@ test.beforeEach(async ({ page }) => {
     return snapshot;
   });
 });
+
+async function clickButtonByText(page: Page, text: string) {
+  await page.evaluate((label) => {
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent?.trim() === label,
+    );
+    if (!button) {
+      throw new Error(`Missing button: ${label}`);
+    }
+    button.click();
+  }, text);
+}
 
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
@@ -82,17 +94,32 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
-    await page.getByRole("button", { name: "Disable widget" }).click();
+    await clickButtonByText(page, "Disable widget");
     await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Enable widget" })).toHaveCount(1);
+    await expect(page.locator("button")).toContainText(["Enable widget"]);
     await expect(page.locator(".cm-content")).toContainText("/-!");
     await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
     expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
     await expect(page.locator(".cm-content")).toContainText("a + b");
 
-    await page.getByRole("button", { name: "Enable widget" }).click();
+    await clickButtonByText(page, "Enable widget");
   }
 
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
   expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
+
+  await clickButtonByText(page, "Add Rust");
+
+  await expect
+    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
+    .toContain("```rust demo-widget-2");
+
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
 });

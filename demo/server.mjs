@@ -16,6 +16,11 @@ const rootUri = pathToFileURL(workspaceDir).toString();
 const documentUri = pathToFileURL(documentPath).toString();
 const helperUri = pathToFileURL(helperPath).toString();
 
+const expectedClosePatterns = [
+  /Watchdog error: Cannot read LSP (?:message|notification): Stream was closed/,
+  /client exited without proper shutdown sequence/,
+];
+
 function ensureDemoArtifacts() {
   const result = spawnSync("lake", ["build"], {
     cwd: workspaceDir,
@@ -221,11 +226,57 @@ function forwardLspFrames(stream, onMessage) {
   });
 }
 
+function pipeServerStderr(stream, state) {
+  let buffer = "";
+  let skipBlock = false;
+
+  function emit(line) {
+    const text = line.replace(/\r$/, "");
+    if (skipBlock) {
+      if (text.trim().length === 0) {
+        skipBlock = false;
+      }
+      return;
+    }
+    if (state.expectedClose && expectedClosePatterns.some((pattern) => pattern.test(text))) {
+      if (text.includes("client exited without proper shutdown sequence")) {
+        skipBlock = true;
+      }
+      return;
+    }
+    if (text.trim().length === 0) {
+      return;
+    }
+    console.error(text);
+  }
+
+  stream.on("data", (chunk) => {
+    buffer += chunk.toString("utf8");
+    for (;;) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) {
+        break;
+      }
+      emit(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+    }
+  });
+
+  stream.on("end", () => {
+    if (buffer.length > 0) {
+      emit(buffer);
+      buffer = "";
+    }
+  });
+}
+
 wsServer.on("connection", (socket) => {
   const lean = spawn("lake", ["env", "lean", "--server"], {
     cwd: workspaceDir,
-    stdio: ["pipe", "pipe", "inherit"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
+  const state = { expectedClose: false };
+  pipeServerStderr(lean.stderr, state);
 
   forwardLspFrames(lean.stdout, (message) => {
     if (socket.readyState === WebSocket.OPEN) {
@@ -240,6 +291,7 @@ wsServer.on("connection", (socket) => {
   });
 
   const shutdown = () => {
+    state.expectedClose = true;
     if (!lean.killed) {
       lean.kill();
     }
@@ -257,7 +309,7 @@ wsServer.on("connection", (socket) => {
   });
 });
 
-function attachLspProcess(socket, child) {
+function attachLspProcess(socket, child, state = { expectedClose: false }) {
   forwardLspFrames(child.stdout, (message) => {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(message);
@@ -271,6 +323,7 @@ function attachLspProcess(socket, child) {
   });
 
   const shutdown = () => {
+    state.expectedClose = true;
     if (!child.killed) {
       child.kill();
     }
@@ -310,9 +363,11 @@ httpServer.on("upgrade", (req, socket, head) => {
     wsServer.handleUpgrade(req, socket, head, (connection) => {
       const rustAnalyzer = spawn("rust-analyzer", [], {
         cwd: rootPath,
-        stdio: ["pipe", "pipe", "inherit"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
-      attachLspProcess(connection, rustAnalyzer);
+      const state = { expectedClose: false };
+      pipeServerStderr(rustAnalyzer.stderr, state);
+      attachLspProcess(connection, rustAnalyzer, state);
     });
     return;
   }

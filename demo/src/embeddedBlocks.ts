@@ -158,9 +158,9 @@ export function collectEmbeddedBlocks(
     .sort((left, right) => left.from - right.from || left.to - right.to);
 }
 
-class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
+export class EmbeddedBlockWidget<TBlock extends EmbeddedBlock> extends WidgetType {
   constructor(
-    private readonly block: TBlock,
+    readonly block: TBlock,
     private readonly config: EmbeddedBlockWidgetConfig<TBlock>,
   ) {
     super();
@@ -231,10 +231,14 @@ export const embeddedBlockTheme = EditorView.baseTheme({
   ".cm-embedded-block-widget": {
     margin: "4px 0",
   },
-  ".cm-embedded-block-widget-shell": {
-    position: "relative",
+  ".cm-embedded-block-gutter": {
+    width: "88px",
   },
-  ".cm-embedded-block-toggle": {
+  ".cm-embedded-block-gutter .cm-gutterElement": {
+    padding: "0 6px",
+  },
+  ".cm-embedded-gutter-action": {
+    width: "100%",
     border: "1px solid rgba(61, 47, 20, 0.14)",
     borderRadius: "999px",
     background: "rgba(255, 251, 243, 0.92)",
@@ -244,20 +248,29 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     fontSize: "11px",
     fontWeight: "700",
     letterSpacing: "0.04em",
-    padding: "5px 9px",
+    lineHeight: "1.2",
+    padding: "4px 8px",
+    whiteSpace: "nowrap",
   },
-  ".cm-embedded-block-widget-shell > .cm-embedded-block-toggle": {
-    position: "absolute",
-    right: "10px",
-    top: "10px",
-    zIndex: "2",
+  ".cm-embedded-gutter-toggle": {
+    opacity: "1",
   },
-  ".cm-embedded-block-source-toggle": {
-    position: "static",
-    display: "inline-flex",
-    alignItems: "center",
-    margin: "6px 0 4px",
-    width: "fit-content",
+  ".cm-embedded-gutter-add": {
+    opacity: "0",
+    pointerEvents: "none",
+    transition: "opacity 120ms ease",
+  },
+  ".cm-embedded-block-gutter .cm-gutterElement:hover .cm-embedded-gutter-add": {
+    opacity: "1",
+    pointerEvents: "auto",
+  },
+  ".cm-embedded-gutter-spacer": {
+    visibility: "hidden",
+    whiteSpace: "nowrap",
+    fontSize: "11px",
+    fontWeight: "700",
+    letterSpacing: "0.04em",
+    padding: "4px 8px",
   },
   ".cm-embedded-block-inline": {
     position: "relative",
@@ -346,7 +359,6 @@ export function embeddedBlockSourceMode(
   adapters: readonly AnyEmbeddedBlockEditorAdapter[],
   options: {
     disabled(state: EditorState, block: EmbeddedBlock): boolean;
-    sourceWidget(block: EmbeddedBlock): WidgetType;
   },
 ): Extension {
   return [
@@ -358,15 +370,6 @@ export function embeddedBlockSourceMode(
           if (!options.disabled(state, block)) {
             continue;
           }
-          builder.add(
-            block.from,
-            block.from,
-            Decoration.widget({
-              block: true,
-              side: -1,
-              widget: options.sourceWidget(block),
-            }),
-          );
           builder.add(
             block.from,
             block.to,
@@ -381,15 +384,6 @@ export function embeddedBlockSourceMode(
           if (!options.disabled(transaction.state, block)) {
             continue;
           }
-          builder.add(
-            block.from,
-            block.from,
-            Decoration.widget({
-              block: true,
-              side: -1,
-              widget: options.sourceWidget(block),
-            }),
-          );
           builder.add(
             block.from,
             block.to,
