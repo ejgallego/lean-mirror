@@ -11,7 +11,6 @@ import {
   jumpToDefinitionKeymap,
   renameKeymap,
   serverCompletion,
-  serverDiagnostics,
   signatureHelp,
 } from "@codemirror/lsp-client";
 import { createWebSocketTransport } from "../../src/index.js";
@@ -138,7 +137,6 @@ function rustClientExtensions(): readonly (Extension | LSPClientExtension)[] {
     rustHoverTooltips(),
     keymap.of([...formatKeymap, ...renameKeymap, ...jumpToDefinitionKeymap, ...findReferencesKeymap]),
     signatureHelp(),
-    serverDiagnostics(),
   ];
 }
 
@@ -157,6 +155,9 @@ function createRustInlineHandle(
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   let diagnosticPullTimer: ReturnType<typeof setTimeout> | null = null;
   let diagnosticPullEpoch = 0;
+  let currentDocVersion = 1;
+  let lastAppliedDiagnosticVersion = 0;
+  let awaitingDiagnosticsVersion: number | null = null;
   let syncingFromOuter = false;
   let latestCode = options.block.code;
   let latestDiagnostics = [] as Array<{
@@ -232,9 +233,15 @@ function createRustInlineHandle(
   async function requestDiagnostics(
     session: { documentUri: string },
     epoch: number,
+    expectedVersion: number,
     attempt = 0,
   ): Promise<void> {
-    if (!client || destroyed || epoch !== diagnosticPullEpoch) {
+    if (
+      !client ||
+      destroyed ||
+      epoch !== diagnosticPullEpoch ||
+      awaitingDiagnosticsVersion !== expectedVersion
+    ) {
       return;
     }
     client.sync();
@@ -244,24 +251,31 @@ function createRustInlineHandle(
     >("textDocument/diagnostic", {
       textDocument: { uri: session.documentUri },
     });
-    if (destroyed || epoch !== diagnosticPullEpoch || report.kind !== "full") {
+    if (
+      destroyed ||
+      epoch !== diagnosticPullEpoch ||
+      awaitingDiagnosticsVersion !== expectedVersion ||
+      report.kind !== "full"
+    ) {
       return;
     }
     const pulled = Array.isArray(report.items) ? report.items : [];
-    if (pulled.length > 0) {
-      updateDiagnostics(pulled, { log: true });
+    awaitingDiagnosticsVersion = null;
+    updateDiagnostics(pulled, { log: true });
+    if (pulled.length > 0 || attempt >= 11) {
       return;
     }
-    if (attempt >= 11) {
-      return;
-    }
+    awaitingDiagnosticsVersion = expectedVersion;
     diagnosticPullTimer = setTimeout(() => {
       diagnosticPullTimer = null;
-      void requestDiagnostics(session, epoch, attempt + 1).catch(() => {});
+      void requestDiagnostics(session, epoch, expectedVersion, attempt + 1).catch(() => {});
     }, 500);
   }
 
-  async function persistDocument(session: { documentUri: string }): Promise<void> {
+  async function persistDocument(
+    session: { documentUri: string },
+    expectedVersion: number,
+  ): Promise<void> {
     if (!client || destroyed) {
       return;
     }
@@ -278,23 +292,24 @@ function createRustInlineHandle(
       text: latestCode,
       textDocument: { uri: session.documentUri },
     });
+    awaitingDiagnosticsVersion = expectedVersion;
     if (diagnosticPullTimer) {
       clearTimeout(diagnosticPullTimer);
     }
     const epoch = ++diagnosticPullEpoch;
     diagnosticPullTimer = setTimeout(() => {
       diagnosticPullTimer = null;
-      void requestDiagnostics(session, epoch).catch(() => {});
-    }, 500);
+      void requestDiagnostics(session, epoch, expectedVersion).catch(() => {});
+    }, 900);
   }
 
-  function schedulePersist(session: { documentUri: string }): void {
+  function schedulePersist(session: { documentUri: string }, expectedVersion: number): void {
     if (persistTimer) {
       clearTimeout(persistTimer);
     }
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      void persistDocument(session).catch((error) => {
+      void persistDocument(session, expectedVersion).catch((error) => {
         if (destroyed) {
           return;
         }
@@ -320,6 +335,25 @@ function createRustInlineHandle(
           "textDocument/publishDiagnostics": (_client, params) => {
             if (params?.uri !== session.documentUri) {
               return false;
+            }
+            const version = typeof params.version === "number" ? params.version : null;
+            if (version !== null && version < lastAppliedDiagnosticVersion) {
+              return true;
+            }
+            if (version !== null) {
+              lastAppliedDiagnosticVersion = version;
+            }
+            if (
+              version !== null &&
+              awaitingDiagnosticsVersion !== null &&
+              version >= awaitingDiagnosticsVersion
+            ) {
+              awaitingDiagnosticsVersion = null;
+              diagnosticPullEpoch += 1;
+              if (diagnosticPullTimer) {
+                clearTimeout(diagnosticPullTimer);
+                diagnosticPullTimer = null;
+              }
             }
             updateDiagnostics(Array.isArray(params.diagnostics) ? params.diagnostics : [], {
               log: true,
@@ -348,9 +382,10 @@ function createRustInlineHandle(
               if (!update.docChanged || syncingFromOuter) {
                 return;
               }
+              currentDocVersion += 1;
               latestCode = update.state.doc.toString();
               options.syncOuter(latestCode);
-              schedulePersist(session);
+              schedulePersist(session, currentDocVersion);
             }),
           ],
         }),
@@ -396,7 +431,8 @@ function createRustInlineHandle(
         syncingFromOuter = false;
       }
       if (sessionInfo) {
-        schedulePersist(sessionInfo);
+        currentDocVersion += 1;
+        schedulePersist(sessionInfo, currentDocVersion);
       }
       options.outerView.requestMeasure();
     },
