@@ -101,4 +101,5 @@ That starts:
 
 - a Vite frontend in `demo/`
 - a small WebSocket bridge that proxies browser JSON-RPC frames to `lean --server`
-- a multi-file editor demo that can switch between `Main.lean` and `Helper.lean`
+- a multi-file editor demo that can switch between `Main.lean`, `Helper.lean`, `Main.rs`, and the concatenated Lean snippets extracted from Rust comments
+- a pure Rust-driver path where edits to `Main.rs` refresh `RustSnippets.lean` without importing generated Aeneas output

@@ -19,7 +19,15 @@ export interface VersoCommentSpec {
 export interface EmbeddedBlockInlineHandle {
   destroy(): void;
   dom: HTMLElement;
+  setDiagnostics?(diagnostics: readonly EmbeddedBlockDiagnostic[]): void;
   sync(code: string, title: string): void;
+}
+
+export interface EmbeddedBlockDiagnostic {
+  from: number;
+  message: string;
+  severity?: "error" | "warning" | "info" | "hint";
+  to: number;
 }
 
 export interface EmbeddedBlockInlineCreateOptions<TBlock extends EmbeddedBlock> {
@@ -36,9 +44,12 @@ export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
 
 export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
   createInlineHandle?(options: EmbeddedBlockInlineCreateOptions<TBlock>): EmbeddedBlockInlineHandle;
+  displayName?: string;
+  hostLanguageIds?: readonly string[];
   kind: string;
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];
+  scaffold?: EmbeddedBlockScaffold<TBlock>;
   serialize(block: TBlock, code: string): string;
   widgetExtension(config: EmbeddedBlockWidgetConfig<TBlock>): Extension;
 }
@@ -47,8 +58,38 @@ export type AnyEmbeddedBlockEditorAdapter = EmbeddedBlockEditorAdapter<any>;
 
 export interface VersoCommentAdapterSpec<TBlock extends EmbeddedBlock> {
   defaultTitle(block: EmbeddedBlock): string;
+  displayName?: string;
   editorExtensions(): Extension[];
+  hostLanguageIds?: readonly string[];
   kind: string;
+  scaffold?: EmbeddedBlockScaffold<TBlock>;
+}
+
+export interface EmbeddedBlockScaffold<TBlock extends EmbeddedBlock> {
+  baseLabel: string;
+  code(label: string): string;
+  createBlock?(label: string): TBlock;
+}
+
+export interface LineCommentEmbeddedBlock extends EmbeddedBlock {
+  codeLineStarts?: readonly number[];
+  indent: string;
+  linePrefix: string;
+}
+
+export interface LineCommentAdapterSpec<TBlock extends LineCommentEmbeddedBlock> {
+  defaultTitle(block: EmbeddedBlock): string;
+  displayName?: string;
+  editorExtensions(): Extension[];
+  hostLanguageIds?: readonly string[];
+  kind: string;
+  linePrefixes: readonly string[];
+  preferredLinePrefix: string;
+  scaffold?: EmbeddedBlockScaffold<TBlock>;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isVersoCommentStart(line: string): boolean {
@@ -75,7 +116,7 @@ export function parseVersoCommentBlocks(
     }
 
     const headerLine = lines[index + 1] ?? "";
-    const header = new RegExp(`^\\s*\`\`\`${spec.kind}(?:\\s+(.+))?\\s*$`).exec(headerLine);
+    const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine);
     if (!header) {
       offset = nextOffset;
       continue;
@@ -127,6 +168,103 @@ export function parseVersoCommentBlocks(
   return blocks;
 }
 
+function lineEndOffset(source: string, lineStart: number, line: string): number {
+  return lineStart + line.length + (lineStart + line.length < source.length ? 1 : 0);
+}
+
+function parseLineComment(
+  line: string,
+  prefixes: readonly string[],
+): { content: string; contentOffset: number; indent: string; prefix: string } | null {
+  const ordered = [...prefixes].sort((left, right) => right.length - left.length);
+  for (const prefix of ordered) {
+    const match = new RegExp(`^(\\s*)${escapeRegExp(prefix)}(\\s?)(.*)$`).exec(line);
+    if (match) {
+      const indent = match[1] ?? "";
+      const padding = match[2] ?? "";
+      return {
+        content: match[3] ?? "",
+        contentOffset: indent.length + prefix.length + padding.length,
+        indent,
+        prefix,
+      };
+    }
+  }
+  return null;
+}
+
+export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedBlock = LineCommentEmbeddedBlock>(
+  source: string,
+  spec: Pick<LineCommentAdapterSpec<TBlock>, "defaultTitle" | "kind" | "linePrefixes">,
+): TBlock[] {
+  const lines = source.split("\n");
+  const blocks: TBlock[] = [];
+  let ordinal = 0;
+  let offset = 0;
+  const headerPattern = new RegExp(`^\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const nextOffset = lineEndOffset(source, offset, line);
+    const parsed = parseLineComment(line, spec.linePrefixes);
+    if (!parsed) {
+      offset = nextOffset;
+      continue;
+    }
+    const header = headerPattern.exec(parsed.content);
+    if (!header) {
+      offset = nextOffset;
+      continue;
+    }
+
+    const from = offset;
+    const label = header[1]?.trim() || null;
+    const codeLines: string[] = [];
+    const codeLineStarts: number[] = [];
+    let endOffset = nextOffset;
+    let foundEnd = false;
+
+    for (let inner = index + 1; inner < lines.length; inner += 1) {
+      const innerLine = lines[inner] ?? "";
+      const innerStart = endOffset;
+      endOffset = lineEndOffset(source, innerStart, innerLine);
+      const innerParsed = parseLineComment(innerLine, spec.linePrefixes);
+      if (!innerParsed) {
+        break;
+      }
+      if (/^```\s*$/.test(innerParsed.content)) {
+        ordinal += 1;
+        const block = {
+          code: codeLines.join("\n"),
+          from,
+          indent: parsed.indent,
+          key: label ? `${spec.kind}:${label}` : `${spec.kind}:${ordinal}`,
+          label,
+          linePrefix: parsed.prefix,
+          ordinal,
+          title: "",
+          to: endOffset,
+        } as TBlock;
+        block.title = spec.defaultTitle(block);
+        blocks.push(block);
+        index = inner;
+        foundEnd = true;
+        offset = endOffset;
+        break;
+      }
+      codeLineStarts.push(innerStart + innerParsed.contentOffset);
+      codeLines.push(innerParsed.content);
+    }
+
+    if (!foundEnd) {
+      offset = nextOffset;
+      continue;
+    }
+  }
+
+  return blocks;
+}
+
 export function serializeVersoCommentBlock(
   block: EmbeddedBlock,
   kind: string,
@@ -138,6 +276,23 @@ export function serializeVersoCommentBlock(
     code,
     "```",
     "-/",
+  ].join("\n") + "\n";
+}
+
+export function serializeLineCommentFencedBlock(
+  block: Partial<LineCommentEmbeddedBlock> & Pick<EmbeddedBlock, "label">,
+  kind: string,
+  code: string,
+  fallbackPrefix = "//",
+): string {
+  const indent = block.indent ?? "";
+  const prefix = block.linePrefix ?? fallbackPrefix;
+  const commentLine = (content: string): string =>
+    content.length > 0 ? `${indent}${prefix} ${content}` : `${indent}${prefix}`;
+  return [
+    commentLine(`\`\`\`${kind}${block.label ? ` ${block.label}` : ""}`),
+    ...code.split("\n").map(commentLine),
+    commentLine("```"),
   ].join("\n") + "\n";
 }
 
@@ -365,6 +520,43 @@ export function createVersoCommentAdapter<TBlock extends EmbeddedBlock = Embedde
     serializeVersoCommentBlock(block, spec.kind, code);
 
   return {
+    ...(spec.displayName === undefined ? {} : { displayName: spec.displayName }),
+    ...(spec.hostLanguageIds === undefined ? {} : { hostLanguageIds: spec.hostLanguageIds }),
+    ...(spec.scaffold === undefined ? {} : { scaffold: spec.scaffold }),
+    kind: spec.kind,
+    editorExtensions() {
+      return spec.editorExtensions();
+    },
+    parse: parseBlocks,
+    parseBlocks,
+    serialize: serializeBlock,
+    serializeBlock,
+    widgetExtension(config) {
+      return embeddedBlockWidgets(parseBlocks, config);
+    },
+  };
+}
+
+export function createLineCommentAdapter<TBlock extends LineCommentEmbeddedBlock = LineCommentEmbeddedBlock>(
+  spec: LineCommentAdapterSpec<TBlock>,
+): EmbeddedBlockEditorAdapter<TBlock> & {
+  parseBlocks(source: string): TBlock[];
+  serializeBlock(block: TBlock, code: string): string;
+} {
+  const parseBlocks = (source: string): TBlock[] =>
+    parseLineCommentFencedBlocks(source, {
+      defaultTitle: spec.defaultTitle,
+      kind: spec.kind,
+      linePrefixes: spec.linePrefixes,
+    });
+
+  const serializeBlock = (block: TBlock, code: string): string =>
+    serializeLineCommentFencedBlock(block, spec.kind, code, spec.preferredLinePrefix);
+
+  return {
+    ...(spec.displayName === undefined ? {} : { displayName: spec.displayName }),
+    ...(spec.hostLanguageIds === undefined ? {} : { hostLanguageIds: spec.hostLanguageIds }),
+    ...(spec.scaffold === undefined ? {} : { scaffold: spec.scaffold }),
     kind: spec.kind,
     editorExtensions() {
       return spec.editorExtensions();

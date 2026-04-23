@@ -21,6 +21,7 @@ let runtime: DemoRuntime | null = null;
 let runToken = 0;
 let stopped = false;
 let lastReconnectMessage: string | null = null;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,6 +70,19 @@ async function startDemoLoop() {
       runtime = await bootDemoRuntime({
         editorTheme: demoTheme(),
         embeddedAdapters: createDemoEmbeddedAdapters(sessionApi),
+        requestRestart(reason) {
+          if (stopped) {
+            return;
+          }
+          if (restartTimer) {
+            clearTimeout(restartTimer);
+          }
+          restartTimer = setTimeout(() => {
+            restartTimer = null;
+            demoUi.logEvent(`Reconnect requested: ${reason}`);
+            void startDemoLoop();
+          }, 250);
+        },
         sessionApi,
         ui: demoUi,
       });
@@ -93,6 +107,10 @@ async function startDemoLoop() {
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     stopped = true;
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
     runToken += 1;
     runtime?.dispose();
     runtime = null;
@@ -104,6 +122,7 @@ window.addEventListener("unhandledrejection", (event) => {
     return;
   }
   event.preventDefault();
-});
+  event.stopImmediatePropagation();
+}, { capture: true });
 
 void startDemoLoop();

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildEmbeddedLeanDocument,
+  parseEmbeddedLeanBlocks,
+  serializeEmbeddedLeanBlock,
+} from "../demo/src/embeddedLean.js";
+import {
   parseEmbeddedRustBlocks,
   serializeEmbeddedRustBlock,
 } from "../demo/src/embeddedRust.js";
@@ -115,5 +120,64 @@ describe("embeddedRust", () => {
     const blocks = parseEmbeddedRustBlocks(source);
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.key).toBe("rust:demo");
+  });
+
+  it("parses Lean blocks from Rust line comments", () => {
+    const source = [
+      "pub fn add(a: u32, b: u32) -> u32 { a + b }",
+      "",
+      "//! ```lean prelude",
+      "//! import Helper",
+      "//! ```",
+      "",
+      "//! ```lean proof",
+      "//! #check helperValue",
+      "//! #check Nat.succ",
+      "//! ```",
+      "",
+    ].join("\n");
+
+    const blocks = parseEmbeddedLeanBlocks(source);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.key).toBe("lean:prelude");
+    expect(blocks[0]?.role).toBe("prelude");
+    expect(blocks[1]?.key).toBe("lean:proof");
+    expect(blocks[1]?.code).toContain("#check helperValue");
+  });
+
+  it("serializes Lean snippets back into Rust comments", () => {
+    const source = [
+      "//! ```lean proof",
+      "//! #check helperValue",
+      "//! ```",
+      "",
+    ].join("\n");
+    const block = parseEmbeddedLeanBlocks(source)[0];
+    expect(block).toBeDefined();
+
+    const serialized = serializeEmbeddedLeanBlock(block!, "#check Nat.succ");
+    expect(serialized).toContain("//! ```lean proof");
+    expect(serialized).toContain("//! #check Nat.succ");
+    expect(serialized).toContain("//! ```");
+  });
+
+  it("builds one Lean document from Rust-comment prelude and snippets", () => {
+    const source = [
+      "//! ```lean demo",
+      "//! #check helperValue",
+      "//! ```",
+      "//! ```lean prelude",
+      "//! import Helper",
+      "//! ```",
+      "",
+    ].join("\n");
+
+    const document = buildEmbeddedLeanDocument(source, {
+      sourceName: "Main.rs",
+    }).doc;
+
+    expect(document.startsWith("/- prelude from Main.rs:4 -/\nimport Helper")).toBe(true);
+    expect(document.indexOf("import Helper")).toBeLessThan(document.indexOf("#check helperValue"));
+    expect(document).toContain("demo from Main.rs:1");
   });
 });

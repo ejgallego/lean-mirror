@@ -4,3 +4,6 @@ defaultTargets = ["Helper"]
 
 [[lean_lib]]
 name = "Helper"
+
+[[lean_lib]]
+name = "RustSnippets"

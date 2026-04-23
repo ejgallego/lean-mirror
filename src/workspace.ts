@@ -44,6 +44,7 @@ function normalizeLoadedDocument(
 }
 
 export class LeanWorkspaceFile implements WorkspaceFile {
+  serverOpen = false;
   readonly views = new Set<EditorView>();
 
   constructor(
@@ -68,6 +69,12 @@ export class LeanWorkspaceFile implements WorkspaceFile {
 export class LeanWorkspace extends Workspace {
   readonly files: LeanWorkspaceFile[] = [];
   private readonly fileVersions = new Map<string, number>();
+  private readonly pendingUpdates: Array<{
+    file: LeanWorkspaceFile;
+    prevDoc: Text;
+    changes: ChangeSet;
+  }> = [];
+  private readonly pendingLoads = new Map<string, Promise<LeanWorkspaceFile | null>>();
 
   constructor(
     client: LSPClient,
@@ -110,6 +117,20 @@ export class LeanWorkspace extends Workspace {
     if (existing) {
       return existing;
     }
+    const pending = this.pendingLoads.get(uri);
+    if (pending) {
+      return pending;
+    }
+    const load = this.loadFile(uri);
+    this.pendingLoads.set(uri, load);
+    try {
+      return await load;
+    } finally {
+      this.pendingLoads.delete(uri);
+    }
+  }
+
+  private async loadFile(uri: string): Promise<LeanWorkspaceFile | null> {
     const loaded = await this.options.loadDocument?.(uri);
     if (!loaded) {
       return null;
@@ -127,18 +148,14 @@ export class LeanWorkspace extends Workspace {
 
   override connected(): void {
     for (const file of this.files) {
-      if (file.hasOpenView()) {
+      if (file.serverOpen || file.hasOpenView()) {
         this.client.didOpen(file);
       }
     }
   }
 
   override syncFiles() {
-    const updates: Array<{
-      file: LeanWorkspaceFile;
-      prevDoc: Text;
-      changes: ChangeSet;
-    }> = [];
+    const updates = this.pendingUpdates.splice(0, this.pendingUpdates.length);
 
     for (const file of this.files) {
       const view = file.getView();
@@ -166,6 +183,16 @@ export class LeanWorkspace extends Workspace {
     return this.ensureLoadedFile(uri);
   }
 
+  async openServerDocument(uri: string): Promise<LeanWorkspaceFile | null> {
+    const file = await this.ensureLoadedFile(uri);
+    if (!file || file.serverOpen) {
+      return file;
+    }
+    file.serverOpen = true;
+    this.client.didOpen(file);
+    return file;
+  }
+
   override openFile(uri: string, languageId: string, view: EditorView): void {
     let file = this.getFile(uri);
     const wasOpen = file?.hasOpenView() ?? false;
@@ -180,7 +207,7 @@ export class LeanWorkspace extends Workspace {
     }
 
     file.views.add(view);
-    if (!wasOpen) {
+    if (!wasOpen && !file.serverOpen) {
       this.client.didOpen(file);
     }
   }
@@ -191,7 +218,7 @@ export class LeanWorkspace extends Workspace {
       return;
     }
     file.views.delete(view);
-    if (!file.hasOpenView()) {
+    if (!file.hasOpenView() && !file.serverOpen) {
       this.client.didClose(uri);
     }
   }
@@ -207,8 +234,17 @@ export class LeanWorkspace extends Workspace {
       return;
     }
     const state = EditorState.create({ doc: file.doc });
-    file.doc = state.update(update).state.doc;
+    const transaction = state.update(update);
+    const prevDoc = file.doc;
+    file.doc = transaction.state.doc;
     file.version = this.nextFileVersion(uri);
+    if (!transaction.changes.empty) {
+      this.pendingUpdates.push({
+        changes: transaction.changes,
+        file,
+        prevDoc,
+      });
+    }
     void Promise.resolve(this.options.onDocumentChange?.(uri, file, update)).catch((error) => {
       console.error(`[lean-workspace] Failed to apply document change for ${uri}`, error);
     });

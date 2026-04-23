@@ -32,6 +32,7 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   defaultTitle(block) {
     return block.label ?? `Rust Block ${block.ordinal}`;
   },
+  displayName: "Rust",
   editorExtensions(): Extension[] {
     return [
       rust(),
@@ -51,7 +52,14 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
       }),
     ];
   },
+  hostLanguageIds: ["lean4"],
   kind: "rust",
+  scaffold: {
+    baseLabel: "demo-widget",
+    code() {
+      return ['fn demo() {', '    println!("hello from Rust");', '}'].join("\n");
+    },
+  },
 });
 
 function stripRustHoverPrefix(text: string): string {
@@ -318,17 +326,21 @@ function createRustInlineHandle(
     if (!client || destroyed) {
       return;
     }
+    const code = latestCode;
+    if (expectedVersion !== currentDocVersion) {
+      return;
+    }
     client.sync();
     if (destroyed) {
       return;
     }
-    await sessionApi.updateRustDocument(options.block.key, latestCode);
-    if (destroyed) {
+    await sessionApi.updateRustDocument(options.block.key, code, expectedVersion);
+    if (destroyed || expectedVersion !== currentDocVersion) {
       return;
     }
     options.log(`Saved ${options.block.title}`);
     client.notification("textDocument/didSave", {
-      text: latestCode,
+      text: code,
       textDocument: { uri: session.documentUri },
     });
     pendingDiagnosticsVersion = expectedVersion;
@@ -402,9 +414,16 @@ function createRustInlineHandle(
         rootUri: session.rootUri,
       });
       socket = await sessionApi.connectWebSocket(session.websocketUrl);
+      if (destroyed) {
+        socket.close();
+        client.disconnect();
+        return;
+      }
       client.connect(createWebSocketTransport(socket));
       await client.initializing;
       if (destroyed) {
+        client.disconnect();
+        socket.close();
         return;
       }
       status.textContent = "rust-analyzer connected";
@@ -432,6 +451,9 @@ function createRustInlineHandle(
       status.remove();
       options.outerView.requestMeasure();
     } catch (error) {
+      if (destroyed) {
+        return;
+      }
       status.textContent =
         error instanceof Error ? `rust-analyzer failed: ${error.message}` : "rust-analyzer failed";
     }

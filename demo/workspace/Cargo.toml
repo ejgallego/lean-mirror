@@ -1,0 +1,7 @@
+[package]
+name = "lean-mirror-demo-driver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "Main.rs"

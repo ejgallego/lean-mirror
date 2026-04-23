@@ -4,6 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lean 4 CodeMirror Demo</title>
+    <script>
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason;
+        const message =
+          typeof reason === "string"
+            ? reason
+            : reason && typeof reason === "object" && typeof reason.message === "string"
+              ? reason.message
+              : "";
+        if (
+          message.includes("content modified") ||
+          message.includes("file worker") ||
+          message.includes("WebSocket connection failed")
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, { capture: true });
+    </script>
     <script type="module" src="./src/main.ts"></script>
   </head>
   <body>
@@ -15,7 +34,7 @@
           <p class="lede">
             This demo uses the package in this repo with CodeMirror's official
             <code>@codemirror/lsp-client</code> and a tiny WebSocket bridge to
-            <code>lean --server</code>.
+            <code>lean --server</code>, with both Lean-hosted Rust blocks and Rust-hosted Lean snippets.
           </p>
         </div>
         <div class="status-card">
@@ -38,7 +57,7 @@
         <section class="panel panel-editor">
           <div class="panel-head">
             <h2>Editor</h2>
-            <p>Try hover, completion, go-to-definition, rename, formatting, diagnostics, and the embedded Rust renderer.</p>
+            <p>Try hover, completion, go-to-definition, rename, formatting, diagnostics, embedded Rust blocks, and embedded Lean snippets in the Rust driver.</p>
           </div>
           <div id="editor" class="editor-host"></div>
         </section>
@@ -53,6 +72,7 @@
             <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
             <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
             <li>Each embedded Rust block has its own small inline enable/disable button.</li>
+            <li>Open <code>Main.rs</code> to edit Rust comments that contain Lean snippets.</li>
             <li>Edit the file to force diagnostics or signature help.</li>
           </ul>
           <div id="events" class="events"></div>

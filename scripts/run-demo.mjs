@@ -33,6 +33,10 @@ function shouldRestartBridges(path) {
     file.startsWith("demo/rust-blocks/") ||
     file.startsWith("demo/dist/") ||
     file.startsWith("demo/workspace/.lake/") ||
+    file.startsWith("demo/workspace/target/") ||
+    file === "demo/workspace/Cargo.lock" ||
+    file === "demo/workspace/Main.rs" ||
+    file === "demo/workspace/RustSnippets.lean" ||
     file === "demo/workspace/lake-manifest.json" ||
     file.endsWith(".olean")
   ) {

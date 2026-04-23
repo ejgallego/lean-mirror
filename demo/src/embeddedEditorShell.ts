@@ -1,5 +1,6 @@
 import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { EditorView, GutterMarker, WidgetType, gutter, type BlockInfo, type ViewUpdate } from "@codemirror/view";
+import { setDiagnostics } from "@codemirror/lint";
 
 import {
   EmbeddedBlockWidget,
@@ -8,15 +9,18 @@ import {
   findEmbeddedBlockByKey,
   type AnyEmbeddedBlockEditorAdapter,
   type EmbeddedBlock,
+  type EmbeddedBlockDiagnostic,
   type EmbeddedBlockInlineHandle,
 } from "./embeddedBlocks.js";
 
 export interface EmbeddedEditorShell {
   close(): void;
   extensionsFor(adapters: readonly AnyEmbeddedBlockEditorAdapter[]): Extension[];
+  setDiagnostics(kind: string, diagnostics: ReadonlyMap<string, readonly EmbeddedBlockDiagnostic[]>): void;
 }
 
 export interface EmbeddedEditorShellOptions {
+  currentLanguageId?(): string | null;
   currentUri(): string | null;
   currentView(): EditorView | null;
   log(message: string): void;
@@ -50,6 +54,16 @@ export function createEmbeddedEditorShell(
       return next;
     },
   });
+  const blocksState = StateField.define<EmbeddedBlock[]>({
+    create(state) {
+      return collectEmbeddedBlocks(state.doc.toString(), adaptersRef);
+    },
+    update(value, transaction) {
+      return transaction.docChanged
+        ? collectEmbeddedBlocks(transaction.state.doc.toString(), adaptersRef)
+        : value;
+    },
+  });
 
   function isolatePointerEvents(dom: HTMLElement): void {
     for (const eventName of [
@@ -70,7 +84,7 @@ export function createEmbeddedEditorShell(
     }
   }
 
-  function createRustLogoIcon(): SVGSVGElement {
+  function createLanguageIcon(adapter: AnyEmbeddedBlockEditorAdapter): SVGSVGElement {
     const ns = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(ns, "svg");
     svg.setAttribute("class", "cm-embedded-gutter-logo");
@@ -106,13 +120,14 @@ export function createEmbeddedEditorShell(
     text.setAttribute("font-size", "24");
     text.setAttribute("font-weight", "700");
     text.setAttribute("text-anchor", "middle");
-    text.textContent = "R";
+    text.textContent = (adapter.displayName ?? adapter.kind).trim().charAt(0).toUpperCase();
     svg.append(text);
 
     return svg;
   }
 
   function createGutterButton(
+    adapter: AnyEmbeddedBlockEditorAdapter,
     label: string,
     className: string,
     title: string,
@@ -125,18 +140,34 @@ export function createEmbeddedEditorShell(
 
     const icon = document.createElement("span");
     icon.className = "cm-embedded-gutter-icon";
-    icon.append(createRustLogoIcon());
+    icon.append(createLanguageIcon(adapter));
 
     button.append(icon);
     return button;
   }
 
-  function nextRustLabel(source: string): string {
+  function adapterAvailableInCurrentDocument(adapter: AnyEmbeddedBlockEditorAdapter): boolean {
+    const languageId = options.currentLanguageId?.() ?? null;
+    if (!adapter.hostLanguageIds || !languageId) {
+      return true;
+    }
+    return adapter.hostLanguageIds.includes(languageId);
+  }
+
+  function scaffoldAdapter(): AnyEmbeddedBlockEditorAdapter | null {
+    return adaptersRef.find((adapter) => adapter.scaffold && adapterAvailableInCurrentDocument(adapter)) ?? null;
+  }
+
+  function nextScaffoldLabel(source: string, adapter: AnyEmbeddedBlockEditorAdapter): string {
+    const scaffold = adapter.scaffold;
+    if (!scaffold) {
+      return adapter.kind;
+    }
     const blocks = collectEmbeddedBlocks(source, adaptersRef).filter((block) =>
-      block.key.startsWith("rust:"),
+      block.key.startsWith(`${adapter.kind}:`),
     );
     const labels = new Set(blocks.map((block) => block.label).filter((label): label is string => !!label));
-    const base = "demo-widget";
+    const base = scaffold.baseLabel;
     if (!labels.has(base)) {
       return base;
     }
@@ -160,25 +191,25 @@ export function createEmbeddedEditorShell(
       .join("\n");
   }
 
-  function insertRustScaffold(view: EditorView, lineFrom: number): void {
-    const adapter = adaptersRef.find((candidate) => candidate.kind === "rust");
-    if (!adapter) {
+  function insertScaffold(view: EditorView, lineFrom: number, adapter: AnyEmbeddedBlockEditorAdapter): void {
+    const scaffoldSpec = adapter.scaffold;
+    if (!scaffoldSpec) {
       return;
     }
     const source = view.state.doc.toString();
-    const label = nextRustLabel(source);
+    const label = nextScaffoldLabel(source, adapter);
     const line = view.state.doc.lineAt(lineFrom);
     const indent = (/^\s*/.exec(line.text)?.[0]) ?? "";
-    const scaffoldBlock: EmbeddedBlock = {
+    const scaffoldBlock: EmbeddedBlock = scaffoldSpec.createBlock?.(label) ?? {
       code: "",
       from: line.from,
-      key: `rust:${label}`,
+      key: `${adapter.kind}:${label}`,
       label,
       ordinal: 0,
       title: label,
       to: line.from,
     };
-    const scaffoldCode = ['fn demo() {', '    println!("hello from Rust");', '}'].join("\n");
+    const scaffoldCode = scaffoldSpec.code(label);
     const scaffold = indentLines(adapter.serialize(scaffoldBlock, scaffoldCode), indent);
     view.dispatch({
       changes: {
@@ -188,14 +219,14 @@ export function createEmbeddedEditorShell(
       },
     });
     view.requestMeasure();
-    options.log(`Inserted Rust scaffold ${label}`);
+    options.log(`Inserted ${adapter.displayName ?? adapter.kind} scaffold ${label}`);
   }
 
   function lineBlockInfo(
     state: EditorState,
     line: BlockInfo,
   ): { block: EmbeddedBlock | null; kind: "block-start" | "block-body" | "outside" } {
-    const blocks = collectEmbeddedBlocks(state.doc.toString(), adaptersRef);
+    const blocks = state.field(blocksState);
     for (const block of blocks) {
       const startLine = state.doc.lineAt(block.from);
       const endLine = state.doc.lineAt(Math.max(block.from, block.to - 1));
@@ -223,10 +254,15 @@ export function createEmbeddedEditorShell(
     }
 
     override toDOM(view: EditorView): HTMLElement {
+      const adapter = adaptersRef.find((candidate) => this.blockKey.startsWith(`${candidate.kind}:`)) ?? adaptersRef[0];
+      if (!adapter) {
+        return document.createElement("span");
+      }
       const button = createGutterButton(
+        adapter,
         this.disabled ? "Enable widget" : "Disable widget",
         "cm-embedded-gutter-toggle",
-        this.disabled ? "Enable Rust widget" : "Disable Rust widget",
+        this.disabled ? "Enable embedded widget" : "Disable embedded widget",
       );
       button.dataset.state = this.disabled ? "disabled" : "enabled";
       button.addEventListener("click", (event) => {
@@ -239,25 +275,30 @@ export function createEmbeddedEditorShell(
     }
   }
 
-  class AddRustMarker extends GutterMarker {
-    constructor(private readonly lineFrom: number) {
+  class AddBlockMarker extends GutterMarker {
+    constructor(
+      private readonly adapter: AnyEmbeddedBlockEditorAdapter,
+      private readonly lineFrom: number,
+    ) {
       super();
     }
 
-    override eq(other: AddRustMarker): boolean {
-      return this.lineFrom === other.lineFrom;
+    override eq(other: AddBlockMarker): boolean {
+      return this.adapter.kind === other.adapter.kind && this.lineFrom === other.lineFrom;
     }
 
     override toDOM(view: EditorView): HTMLElement {
+      const name = this.adapter.displayName ?? this.adapter.kind;
       const button = createGutterButton(
-        "Add Rust",
+        this.adapter,
+        `Add ${name}`,
         "cm-embedded-gutter-add",
-        "Insert Rust code scaffold",
+        `Insert ${name} code scaffold`,
       );
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        insertRustScaffold(view, this.lineFrom);
+        insertScaffold(view, this.lineFrom, this.adapter);
       });
       return button;
     }
@@ -353,6 +394,19 @@ export function createEmbeddedEditorShell(
         nestedView.destroy();
       },
       dom: container,
+      setDiagnostics(diagnostics) {
+        nestedView.dispatch(
+          setDiagnostics(
+            nestedView.state,
+            diagnostics.map((diagnostic) => ({
+              from: Math.max(0, Math.min(nestedView.state.doc.length, diagnostic.from)),
+              message: diagnostic.message,
+              severity: diagnostic.severity ?? "error",
+              to: Math.max(0, Math.min(nestedView.state.doc.length, diagnostic.to)),
+            })),
+          ),
+        );
+      },
       sync(code: string) {
         if (nestedView.state.doc.toString() === code) {
           return;
@@ -383,6 +437,7 @@ export function createEmbeddedEditorShell(
     extensionsFor(adapters) {
       adaptersRef.splice(0, adaptersRef.length, ...adapters);
       return [
+        blocksState,
         disabledState,
         gutter({
           class: "cm-embedded-block-gutter",
@@ -398,7 +453,8 @@ export function createEmbeddedEditorShell(
               return null;
             }
             if (info.kind === "outside") {
-              return new AddRustMarker(line.from);
+              const adapter = scaffoldAdapter();
+              return adapter ? new AddBlockMarker(adapter, line.from) : null;
             }
             return null;
           },
@@ -430,9 +486,9 @@ export function createEmbeddedEditorShell(
           if (!update.docChanged) {
             return;
           }
-          const source = update.state.doc.toString();
+          const blocks = update.state.field(blocksState);
           for (const [key, entry] of activeHandles) {
-            const block = findEmbeddedBlockByKey(source, key, entry.adapter.parse);
+            const block = blocks.find((candidate) => candidate.key === key);
             if (!block) {
               continue;
             }
@@ -467,6 +523,12 @@ export function createEmbeddedEditorShell(
                     handle.destroy();
                   },
                   dom: handle.dom,
+                  setDiagnostics(diagnostics) {
+                    if (destroyed) {
+                      return;
+                    }
+                    handle.setDiagnostics?.(diagnostics);
+                  },
                   sync(code, title) {
                     if (destroyed) {
                       return;
@@ -480,6 +542,9 @@ export function createEmbeddedEditorShell(
                     trackedHandle.destroy();
                   },
                   dom: handle.dom,
+                  setDiagnostics(diagnostics) {
+                    trackedHandle.setDiagnostics?.(diagnostics);
+                  },
                   sync(code, title) {
                     trackedHandle.sync(code, title);
                   },
@@ -494,6 +559,14 @@ export function createEmbeddedEditorShell(
           return extension;
         }),
       ];
+    },
+    setDiagnostics(kind, diagnostics) {
+      for (const [key, entry] of activeHandles) {
+        if (entry.adapter.kind !== kind) {
+          continue;
+        }
+        entry.handle.setDiagnostics?.(diagnostics.get(key) ?? []);
+      }
     },
   };
 }

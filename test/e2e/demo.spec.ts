@@ -45,12 +45,25 @@ async function hasButtonByText(page: Page, text: string) {
   }, text);
 }
 
+async function hasHighlightedToken(page: Page, selector: string, text: string) {
+  return page.evaluate(
+    ({ selector: tokenSelector, text: tokenText }) =>
+      Array.from(document.querySelectorAll<HTMLElement>(tokenSelector)).some(
+        (token) => token.textContent === tokenText && token.className.trim().length > 0,
+      ),
+    { selector, text },
+  );
+}
+
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
 
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+
+  await page.getByRole("button", { name: "Main.lean" }).click();
   await expect(page.locator("#document-uri")).toContainText("Main.lean");
 
   const editor = page.locator("#editor > .cm-editor > .cm-scroller > .cm-content");
@@ -78,6 +91,7 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
+  await page.getByRole("button", { name: "Main.lean" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   const expandedBlock = page.locator(".cm-embedded-block-widget").first();
@@ -105,6 +119,7 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
+  await page.getByRole("button", { name: "Main.lean" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
@@ -127,6 +142,7 @@ test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
+  await page.getByRole("button", { name: "Main.lean" }).click();
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   await clickButtonByText(page, "Add Rust");
@@ -136,4 +152,69 @@ test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
     .toContain("```rust demo-widget-2");
 
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
+});
+
+test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+  await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
+  await expect
+    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
+    .toContain("```lean demo-check");
+
+  await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
+});
+
+test("demo highlights Rust and embedded Lean code", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+  await expect.poll(() => hasHighlightedToken(page, "#editor > .cm-editor .cm-line span", "pub")).toBe(true);
+  await expect
+    .poll(() => hasHighlightedToken(page, ".cm-embedded-block-widget .cm-line span", "#check"))
+    .toBe(true);
+});
+
+test("demo updates Rust and embedded Lean diagnostics after edits", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "\"bad\""))).toBe(true);
+  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).not.toHaveCount(0);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("\"bad\"", "a + b"))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a + b");
+  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).toHaveCount(0);
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("Nat.succ", "MissingLeanName"))).toBe(true);
+  await expect(page.locator(".cm-embedded-block-widget .cm-lintRange-error")).not.toHaveCount(0);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("MissingLeanName", "Nat.succ"))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("Nat.succ");
+  await expect(page.locator(".cm-embedded-block-widget .cm-lintRange-error")).toHaveCount(0);
+  await page.waitForTimeout(900);
+});
+
+test("demo updates Rust diagnostics after keyboard edits", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
+
+  await page
+    .locator("#editor > .cm-editor .cm-line")
+    .filter({ hasText: "a + b" })
+    .first()
+    .click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" +");
+  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).not.toHaveCount(0);
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b +", "a + b"))).toBe(true);
+  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).toHaveCount(0);
+  await page.waitForTimeout(900);
 });

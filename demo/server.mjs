@@ -11,18 +11,32 @@ const port = Number(process.env.LEAN_DEMO_PORT ?? "7357");
 const workspaceDir = join(__dirname, "workspace");
 const rustBlocksDir = join(__dirname, "rust-blocks");
 const documentPath = join(workspaceDir, "Main.lean");
+const rustMainPath = join(workspaceDir, "Main.rs");
 const helperPath = join(workspaceDir, "Helper.lean");
+const embeddedLeanPath = join(workspaceDir, "RustSnippets.lean");
 const rootUri = pathToFileURL(workspaceDir).toString();
 const documentUri = pathToFileURL(documentPath).toString();
+const rustMainUri = pathToFileURL(rustMainPath).toString();
 const helperUri = pathToFileURL(helperPath).toString();
+const embeddedLeanUri = pathToFileURL(embeddedLeanPath).toString();
+const documentLanguageIds = {
+  [documentUri]: "lean4",
+  [embeddedLeanUri]: "lean4",
+  [helperUri]: "lean4",
+  [rustMainUri]: "rust",
+};
+let rustMainUpdateQueue = Promise.resolve();
+const rustBlockUpdateStates = new Map();
 
 const ignorableClosePatterns = [
   /Watchdog error: Cannot read LSP (?:message|notification): Stream was closed/,
   /client exited without proper shutdown sequence/,
+  /called `Result::unwrap\(\)` on an `Err` value: "SendError\(\.\.\)"/,
+  /thread 'Worker\d+' panicked at .*rust-analyzer.*reload\.rs/,
 ];
 
 function ensureDemoArtifacts() {
-  const result = spawnSync("lake", ["build"], {
+  const result = spawnSync("lake", ["build", "Helper"], {
     cwd: workspaceDir,
     encoding: "utf8",
   });
@@ -33,10 +47,39 @@ function ensureDemoArtifacts() {
   }
 }
 
+function defaultEmbeddedLeanDocument() {
+  return [
+    "/- prelude from Main.rs -/",
+    "import Helper",
+    "",
+    "/- demo-check from Main.rs -/",
+    "#check helperValue",
+    "#check Nat.succ",
+    "",
+  ].join("\n");
+}
+
+async function readFileOrNull(path) {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function ensureEmbeddedLeanArtifacts() {
+  if (!(await readFileOrNull(embeddedLeanPath))) {
+    await writeFile(embeddedLeanPath, defaultEmbeddedLeanDocument(), "utf8");
+  }
+}
+
 function withCorsHeaders(headers = {}) {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     ...headers,
   };
@@ -100,7 +143,44 @@ async function updateRustBlockDocument(key, code) {
   await writeFile(documentPath, code, "utf8");
 }
 
-const httpServer = createServer(async (req, res) => {
+function enqueueRustBlockDocumentUpdate(key, code, version) {
+  let state = rustBlockUpdateStates.get(key);
+  if (!state) {
+    state = { latestVersion: -1, queue: Promise.resolve() };
+    rustBlockUpdateStates.set(key, state);
+  }
+  if (typeof version === "number") {
+    state.latestVersion = Math.max(state.latestVersion, version);
+  }
+  const job = state.queue.then(async () => {
+    if (typeof version === "number" && version < state.latestVersion) {
+      return false;
+    }
+    await updateRustBlockDocument(key, code);
+    return true;
+  });
+  state.queue = job.catch(() => {});
+  return job;
+}
+
+async function refreshRustMainArtifacts(payload) {
+  await writeFile(rustMainPath, payload.code, "utf8");
+  await writeFile(embeddedLeanPath, payload.leanDocument, "utf8");
+  return {
+    leanDocumentUri: embeddedLeanUri,
+    revision: payload.revision,
+  };
+}
+
+function enqueueRustMainUpdate(payload) {
+  const job = rustMainUpdateQueue.then(async () => {
+    return refreshRustMainArtifacts(payload);
+  });
+  rustMainUpdateQueue = job.catch(() => {});
+  return job;
+}
+
+async function handleHttpRequest(req, res) {
   if (!req.url) {
     res.writeHead(400, withCorsHeaders());
     res.end("Missing URL");
@@ -112,7 +192,7 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/session") {
-    const initialDoc = await readFile(documentPath, "utf8");
+    const initialDoc = await readFile(rustMainPath, "utf8");
     res.writeHead(
       200,
       withCorsHeaders({
@@ -122,9 +202,13 @@ const httpServer = createServer(async (req, res) => {
     res.end(
       JSON.stringify({
         rootUri,
-        documentUri,
-        documents: [documentUri, helperUri],
+        documentUri: rustMainUri,
+        documentLanguageIds,
+        documents: [rustMainUri, embeddedLeanUri, documentUri, helperUri],
+        embeddedLeanDocumentUri: embeddedLeanUri,
         initialDoc,
+        rustMainDocumentUri: rustMainUri,
+        rustMainWebsocketUrl: `ws://${host}:${port}/rust-main-lsp`,
         websocketUrl: `ws://${host}:${port}/lsp`,
       }),
     );
@@ -160,9 +244,32 @@ const httpServer = createServer(async (req, res) => {
       res.end("Invalid rust-document payload");
       return;
     }
-    await updateRustBlockDocument(payload.key, payload.code);
+    await enqueueRustBlockDocumentUpdate(payload.key, payload.code, payload.version);
     res.writeHead(204, withCorsHeaders());
     res.end();
+    return;
+  }
+  if (req.method === "POST" && req.url === "/rust-main") {
+    const payload = await readJsonBody(req);
+    if (
+      !payload ||
+      payload.uri !== rustMainUri ||
+      typeof payload.code !== "string" ||
+      typeof payload.leanDocument !== "string" ||
+      typeof payload.revision !== "number"
+    ) {
+      res.writeHead(400, withCorsHeaders());
+      res.end("Invalid rust-main payload");
+      return;
+    }
+    const result = await enqueueRustMainUpdate(payload);
+    res.writeHead(
+      200,
+      withCorsHeaders({
+        "Content-Type": "application/json; charset=utf-8",
+      }),
+    );
+    res.end(JSON.stringify(result));
     return;
   }
   if (req.url.startsWith("/document?")) {
@@ -196,6 +303,19 @@ const httpServer = createServer(async (req, res) => {
     }),
   );
   res.end("Not found");
+}
+
+const httpServer = createServer((req, res) => {
+  void handleHttpRequest(req, res).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    res.writeHead(
+      500,
+      withCorsHeaders({
+        "Content-Type": "text/plain; charset=utf-8",
+      }),
+    );
+    res.end(message);
+  });
 });
 
 const wsServer = new WebSocketServer({ noServer: true });
@@ -239,7 +359,11 @@ function pipeServerStderr(stream, state) {
       return;
     }
     if (ignorableClosePatterns.some((pattern) => pattern.test(text))) {
-      if (text.includes("client exited without proper shutdown sequence")) {
+      if (
+        text.includes("client exited without proper shutdown sequence") ||
+        text.includes("SendError") ||
+        text.includes("rust-analyzer")
+      ) {
         skipBlock = true;
       }
       return;
@@ -320,42 +444,7 @@ wsServer.on("connection", (socket) => {
   });
   const state = { expectedClose: false, initialized: false, shutdownSent: false };
   pipeServerStderr(lean.stderr, state);
-
-  forwardLspFrames(lean.stdout, (message) => {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(message);
-    }
-  });
-
-  socket.on("message", (message) => {
-    const payload = Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8");
-    noteClientLspMessage(state, payload);
-    lean.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
-    lean.stdin.write(payload);
-  });
-
-  const shutdown = () => {
-    state.expectedClose = true;
-    requestGracefulShutdown(lean, state);
-    if (!lean.killed) {
-      setTimeout(() => {
-        if (!lean.killed) {
-          lean.kill();
-        }
-      }, 120);
-    }
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-  };
-
-  socket.on("close", shutdown);
-  socket.on("error", shutdown);
-  lean.on("exit", () => {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-  });
+  attachLspProcess(socket, lean, state);
 });
 
 function attachLspProcess(
@@ -363,6 +452,7 @@ function attachLspProcess(
   child,
   state = { expectedClose: false, initialized: false, shutdownSent: false },
 ) {
+  let shuttingDown = false;
   forwardLspFrames(child.stdout, (message) => {
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(message);
@@ -377,6 +467,10 @@ function attachLspProcess(
   });
 
   const shutdown = () => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
     state.expectedClose = true;
     requestGracefulShutdown(child, state);
     if (!child.killed) {
@@ -430,9 +524,22 @@ httpServer.on("upgrade", (req, socket, head) => {
     });
     return;
   }
+  if (url.pathname === "/rust-main-lsp") {
+    wsServer.handleUpgrade(req, socket, head, (connection) => {
+      const rustAnalyzer = spawn("rust-analyzer", [], {
+        cwd: workspaceDir,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const state = { expectedClose: false, initialized: false, shutdownSent: false };
+      pipeServerStderr(rustAnalyzer.stderr, state);
+      attachLspProcess(connection, rustAnalyzer, state);
+    });
+    return;
+  }
   socket.destroy();
 });
 
+await ensureEmbeddedLeanArtifacts();
 ensureDemoArtifacts();
 
 httpServer.listen(port, host, () => {
