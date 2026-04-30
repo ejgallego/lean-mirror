@@ -43,7 +43,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          rustup component add rust-analyzer
+          rustup component add rust-analyzer rust-src
           rust-analyzer --version
 
       - name: Install Playwright browser

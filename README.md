@@ -91,7 +91,7 @@ const client = createLeanLspClient({
 
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. A Lean install
 through elan provides `lean` and `lake`; `rust-analyzer` can be installed with
-`rustup component add rust-analyzer`.
+`rustup component add rust-analyzer rust-src`.
 
 Run `npm run demo` and open `http://127.0.0.1:5173`.
 
