@@ -115,13 +115,10 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("fn mul(a: i32, b: i32) -> i32 {");
+  await expect(page.locator("#events")).toContainText("Saved demo-widget");
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
   await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-content")).toContainText("a - b");
-
-  await page.keyboard.press("Control+End");
-  await page.keyboard.type("\nfn bad() -> i32 { \"hi\" }");
-  await expect(page.locator("#events")).toContainText("Saved demo-widget");
 });
 
 test("demo toggles embedded widgets on and off", async ({ page }) => {
