@@ -1,10 +1,15 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
+      - zerocopy-anneal-demo
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
