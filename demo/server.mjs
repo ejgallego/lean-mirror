@@ -35,6 +35,34 @@ const ignorableClosePatterns = [
   /thread 'Worker\d+' panicked at .*rust-analyzer.*reload\.rs/,
 ];
 
+function ensureCommandAvailable(command, args, installHint) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+  });
+  if (result.status === 0) {
+    return;
+  }
+  const details = result.error?.message ?? result.stderr ?? result.stdout ?? "";
+  throw new Error(
+    [
+      `${command} is required for the demo.`,
+      installHint,
+      details.trim(),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+function ensureDemoPrerequisites() {
+  ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
+  ensureCommandAvailable(
+    "rust-analyzer",
+    ["--version"],
+    "Install it with `rustup component add rust-analyzer` and ensure it is on PATH.",
+  );
+}
+
 function ensureDemoArtifacts() {
   const result = spawnSync("lake", ["build", "Helper"], {
     cwd: workspaceDir,
@@ -540,6 +568,7 @@ httpServer.on("upgrade", (req, socket, head) => {
 });
 
 await ensureEmbeddedLeanArtifacts();
+ensureDemoPrerequisites();
 ensureDemoArtifacts();
 
 httpServer.listen(port, host, () => {

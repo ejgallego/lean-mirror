@@ -1,9 +1,18 @@
 import { spawnSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 
-const leanAvailable = spawnSync("lean", ["--version"], { stdio: "ignore" }).status === 0;
+function commandAvailable(command: string): boolean {
+  return spawnSync(command, ["--version"], { stdio: "ignore" }).status === 0;
+}
 
-test.skip(!leanAvailable, "Lean is required for the browser E2E test.");
+const missingPrerequisites = ["lean", "lake", "rust-analyzer"].filter(
+  (command) => !commandAvailable(command),
+);
+
+test.skip(
+  missingPrerequisites.length > 0,
+  `Lean demo prerequisites are required for the browser E2E test: missing ${missingPrerequisites.join(", ")}.`,
+);
 
 test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
