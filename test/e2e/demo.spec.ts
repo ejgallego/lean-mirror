@@ -64,6 +64,15 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
   );
 }
 
+function waitForRustWidgetSave(page: Page) {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/rust-document") &&
+      response.ok(),
+  );
+}
+
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
 
@@ -110,12 +119,13 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   const nestedEditor = expandedBlock.locator(".cm-embedded-block-inline .cm-content");
   await nestedEditor.click();
   await page.keyboard.press("Control+End");
+  const saved = waitForRustWidgetSave(page);
   await page.keyboard.type("\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}");
 
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("fn mul(a: i32, b: i32) -> i32 {");
-  await expect(page.locator("#events")).toContainText("Saved demo-widget");
+  await saved;
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
   await expect(expandedBlock.locator(".cm-embedded-block-inline .cm-content")).toContainText("a - b");
