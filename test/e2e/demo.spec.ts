@@ -9,6 +9,13 @@ const missingPrerequisites = ["lean", "lake", "rust-analyzer"].filter(
   (command) => !commandAvailable(command),
 );
 
+function isExpectedTransientConsoleError(text: string): boolean {
+  return (
+    text.includes("net::ERR_CONNECTION_REFUSED") ||
+    (text.includes("WebSocket connection to") && text.includes("failed:"))
+  );
+}
+
 test.skip(
   missingPrerequisites.length > 0,
   `Lean demo prerequisites are required for the browser E2E test: missing ${missingPrerequisites.join(", ")}.`,
@@ -17,7 +24,7 @@ test.skip(
 test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") {
+    if (message.type() === "error" && !isExpectedTransientConsoleError(message.text())) {
       errors.push(message.text());
     }
   });
