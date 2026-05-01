@@ -437,6 +437,28 @@ function noteClientLspMessage(state, payload) {
   } catch {}
 }
 
+function normalizeClientLspPayload(payload) {
+  try {
+    const message = JSON.parse(payload.toString("utf8"));
+    if (
+      message &&
+      typeof message === "object" &&
+      message.method === "$/cancelRequest" &&
+      "params" in message &&
+      (message.params === null || typeof message.params !== "object")
+    ) {
+      return Buffer.from(
+        JSON.stringify({
+          ...message,
+          params: { id: message.params },
+        }),
+        "utf8",
+      );
+    }
+  } catch {}
+  return payload;
+}
+
 function requestGracefulShutdown(child, state) {
   if (state.shutdownSent || child.killed || !state.initialized) {
     return;
@@ -488,7 +510,9 @@ function attachLspProcess(
   });
 
   socket.on("message", (message) => {
-    const payload = Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8");
+    const payload = normalizeClientLspPayload(
+      Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8"),
+    );
     noteClientLspMessage(state, payload);
     child.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
     child.stdin.write(payload);
