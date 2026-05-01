@@ -92,6 +92,31 @@ async function openDocument(page: Page, name: string) {
     .toBe(true);
 }
 
+async function openDocumentContaining(page: Page, name: string, text: string) {
+  await expect
+    .poll(
+      async () => {
+        const button = page.getByRole("button", { name }).first();
+        if ((await button.count()) === 0) {
+          return false;
+        }
+        try {
+          await button.click({ timeout: 1_000 });
+        } catch {
+          return false;
+        }
+        const uri = await page.locator("#document-uri").textContent({ timeout: 1_000 }).catch(() => "");
+        if (!uri?.includes(name)) {
+          return false;
+        }
+        const doc = await page.evaluate(() => window.__leanDemo?.currentDoc()).catch(() => null);
+        return doc?.includes(text) ?? false;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+}
+
 function waitForRustWidgetSave(page: Page) {
   return page.waitForResponse(
     (response) =>
@@ -134,10 +159,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
     .poll(async () => (await page.evaluate(() => window.__leanDemo?.currentDoc()))?.includes(insertedSnippet))
     .toBe(false);
 
-  await openDocument(page, "Helper.lean");
-  await expect
-    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
-    .toContain("def helperValue");
+  await openDocumentContaining(page, "Helper.lean", "def helperValue");
 });
 
 test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
