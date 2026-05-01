@@ -80,6 +80,15 @@ function waitForRustWidgetSave(page: Page) {
   );
 }
 
+function waitForRustMainSave(page: Page) {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/rust-main") &&
+      response.ok(),
+  );
+}
+
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
 
@@ -222,11 +231,12 @@ test("demo updates Rust and embedded Lean diagnostics after edits", async ({ pag
   await page.waitForTimeout(900);
 });
 
-test("demo updates Rust diagnostics after keyboard edits", async ({ page }) => {
+test("demo syncs Rust keyboard edits", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
+  await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
 
   await page
     .locator("#editor > .cm-editor .cm-line")
@@ -234,10 +244,17 @@ test("demo updates Rust diagnostics after keyboard edits", async ({ page }) => {
     .first()
     .click();
   await page.keyboard.press("End");
+  const saved = waitForRustMainSave(page);
   await page.keyboard.type(" +");
-  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).not.toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a + b +");
+  await saved;
 
+  const restored = waitForRustMainSave(page);
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b +", "a + b"))).toBe(true);
+  await restored;
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__leanDemo?.currentDoc()))?.includes("a + b +"))
+    .toBe(false);
   await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).toHaveCount(0);
   await page.waitForTimeout(900);
 });
