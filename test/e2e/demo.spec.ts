@@ -71,6 +71,27 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
   );
 }
 
+async function openDocument(page: Page, name: string) {
+  await expect
+    .poll(
+      async () => {
+        const button = page.getByRole("button", { name }).first();
+        if ((await button.count()) === 0) {
+          return false;
+        }
+        try {
+          await button.click({ timeout: 1_000 });
+        } catch {
+          return false;
+        }
+        const uri = await page.locator("#document-uri").textContent({ timeout: 1_000 }).catch(() => "");
+        return uri?.includes(name) ?? false;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+}
+
 function waitForRustWidgetSave(page: Page) {
   return page.waitForResponse(
     (response) =>
@@ -97,8 +118,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
   await expect(page.locator("#status")).toHaveText("Ready");
   await expect(page.locator("#document-uri")).toContainText("Main.rs");
 
-  await page.getByRole("button", { name: "Main.lean" }).click();
-  await expect(page.locator("#document-uri")).toContainText("Main.lean");
+  await openDocument(page, "Main.lean");
 
   const editor = page.locator("#editor > .cm-editor > .cm-scroller > .cm-content");
   await editor.click();
@@ -114,8 +134,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
     .poll(async () => (await page.evaluate(() => window.__leanDemo?.currentDoc()))?.includes(insertedSnippet))
     .toBe(false);
 
-  await page.getByRole("button", { name: "Helper.lean" }).click();
-  await expect(page.locator("#document-uri")).toContainText("Helper.lean");
+  await openDocument(page, "Helper.lean");
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("def helperValue");
@@ -125,7 +144,7 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
-  await page.getByRole("button", { name: "Main.lean" }).click();
+  await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   const expandedBlock = page.locator(".cm-embedded-block-widget").first();
@@ -151,7 +170,7 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
-  await page.getByRole("button", { name: "Main.lean" }).click();
+  await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
@@ -174,7 +193,7 @@ test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.locator("#status")).toHaveText("Ready");
-  await page.getByRole("button", { name: "Main.lean" }).click();
+  await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   await clickButtonByText(page, "Add Rust");
