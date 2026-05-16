@@ -420,9 +420,17 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setCurrentDocument(session.documentUri);
 
   options.ui.setStatus("Connecting to Lean");
-  options.ui.setServiceStatus(leanService, { state: "starting", message: "Connecting" });
+  options.ui.recordServiceEvent(leanService, {
+    type: "starting",
+    serviceId: leanService.id,
+    message: "Connecting",
+  });
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
-  options.ui.setServiceStatus(leanService, { state: "initializing", message: "Initializing" });
+  options.ui.recordServiceEvent(leanService, {
+    type: "starting",
+    serviceId: leanService.id,
+    message: "Initializing",
+  });
   client = createLeanLspClient({
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
@@ -449,16 +457,24 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   });
   client.connect(createWebSocketTransport(socket));
   await client.initializing;
-  options.ui.setServiceStatus(leanService, { state: "ready" });
+  options.ui.recordServiceEvent(leanService, { type: "ready", serviceId: leanService.id });
   workspace = client.workspace as LeanWorkspace;
   if (session.embeddedLeanDocumentUri) {
     await workspace.openServerDocument(session.embeddedLeanDocumentUri);
   }
 
   if (session.rustMainWebsocketUrl) {
-    options.ui.setServiceStatus(rustService, { state: "starting", message: "Connecting" });
+    options.ui.recordServiceEvent(rustService, {
+      type: "starting",
+      serviceId: rustService.id,
+      message: "Connecting",
+    });
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
-    options.ui.setServiceStatus(rustService, { state: "initializing", message: "Initializing" });
+    options.ui.recordServiceEvent(rustService, {
+      type: "starting",
+      serviceId: rustService.id,
+      message: "Initializing",
+    });
     rustClient = new LSPClient({
       extensions: languageServerExtensions(),
       notificationHandlers: {
@@ -469,10 +485,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     });
     rustClient.connect(createWebSocketTransport(rustSocket));
     await rustClient.initializing;
-    options.ui.setServiceStatus(rustService, { state: "ready" });
+    options.ui.recordServiceEvent(rustService, { type: "ready", serviceId: rustService.id });
     options.ui.logEvent("rust-analyzer initialized.");
   } else {
-    options.ui.setServiceStatus(rustService, { state: "stopped" });
+    options.ui.recordServiceEvent(rustService, { type: "stopped", serviceId: rustService.id });
   }
 
   const openDocument = async (uri: string): Promise<void> => {
@@ -491,7 +507,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    options.ui.setServiceStatus(leanService, { state: "stale", message: "Reconnecting" });
+    options.ui.recordServiceEvent(leanService, {
+      type: "stale",
+      serviceId: leanService.id,
+      reason: "Reconnecting",
+    });
     options.ui.logEvent("Lean server connection closed. Waiting for restart.");
     options.requestRestart("Lean server connection closed.");
   };
@@ -500,7 +520,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    options.ui.setServiceStatus(leanService, { state: "stale", message: "Reconnecting" });
+    options.ui.recordServiceEvent(leanService, {
+      type: "stale",
+      serviceId: leanService.id,
+      reason: "Reconnecting",
+    });
     options.ui.logEvent("WebSocket transport interrupted. Retrying.");
     options.requestRestart("WebSocket transport interrupted.");
   };
@@ -545,10 +569,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       currentView = null;
       demoBridge.clear();
       client?.disconnect();
-      options.ui.setServiceStatus(leanService, { state: "stopped" });
+      options.ui.recordServiceEvent(leanService, { type: "stopped", serviceId: leanService.id });
       socket?.close();
       rustClient?.disconnect();
-      options.ui.setServiceStatus(rustService, { state: "stopped" });
+      options.ui.recordServiceEvent(rustService, { type: "stopped", serviceId: rustService.id });
       rustSocket?.close();
       socket = null;
       rustSocket = null;
