@@ -3,4 +3,5 @@ export * from "./core/documents.js";
 export * from "./core/logs.js";
 export * from "./services/status.js";
 export * from "./shell/platformStore.js";
+export * from "./shell/serviceRuntime.js";
 export * from "./shell/store.js";
