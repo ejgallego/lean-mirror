@@ -8,7 +8,7 @@ import {
   type EditorDiagnostic,
   type EditorPlatformSnapshot,
   type EditorServiceDescriptor,
-  type ServiceStatus,
+  type ServiceEvent,
 } from "@leanprover/editor-platform";
 
 const hostService: EditorServiceDescriptor = {
@@ -21,6 +21,7 @@ export interface DemoUi {
   editorHost: HTMLDivElement;
   logEvent(text: string): void;
   platformStore: EditorPlatformStore;
+  recordServiceEvent(service: EditorServiceDescriptor, event: ServiceEvent): void;
   renderDocumentButtons(
     documents: readonly string[],
     openDocument: (uri: string) => Promise<void>,
@@ -30,7 +31,6 @@ export interface DemoUi {
   setDocumentDiagnostics(uri: string, diagnostics: readonly EditorDiagnostic[]): void;
   setDocumentSyncState(uri: string, syncState: DocumentSyncState, lastError?: string): void;
   setRootUri(uri: string): void;
-  setServiceStatus(service: EditorServiceDescriptor, status: ServiceStatus): void;
   setStatus(text: string): void;
 }
 
@@ -76,14 +76,14 @@ function documentTitle(uri: string): string {
   return uri.split("/").at(-1) ?? uri;
 }
 
-function statusFromText(text: string): ServiceStatus {
+function hostEventFromText(text: string): ServiceEvent {
   if (text === "Ready") {
-    return { state: "ready", message: text };
+    return { type: "ready", serviceId: hostService.id, message: text };
   }
   if (text === "Reconnecting") {
-    return { state: "stale", message: text };
+    return { type: "stale", serviceId: hostService.id, reason: text };
   }
-  return { state: "starting", message: text };
+  return { type: "starting", serviceId: hostService.id, message: text };
 }
 
 function overallStatus(snapshot: EditorPlatformSnapshot): string {
@@ -203,6 +203,9 @@ export function queryDemoUi(
         timestamp: Date.now(),
       });
     },
+    recordServiceEvent(service: EditorServiceDescriptor, event: ServiceEvent) {
+      platformStore.recordServiceEvent(service, event);
+    },
     renderDocumentButtons(documents, openDocument) {
       documentsEl.replaceChildren();
       for (const uri of documents) {
@@ -253,11 +256,8 @@ export function queryDemoUi(
     setRootUri(uri: string) {
       rootUriEl.textContent = uri;
     },
-    setServiceStatus(service: EditorServiceDescriptor, status: ServiceStatus) {
-      platformStore.setServiceStatus(service, status);
-    },
     setStatus(text: string) {
-      platformStore.setServiceStatus(hostService, statusFromText(text));
+      platformStore.recordServiceEvent(hostService, hostEventFromText(text));
     },
   };
 }

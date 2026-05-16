@@ -4,8 +4,10 @@ import type { LogEvent } from "../core/logs.js";
 import type {
   EditorServiceDescriptor,
   EditorServiceSnapshot,
+  ServiceEvent,
   ServiceStatus
 } from "../services/status.js";
+import { serviceStatusFromEvent } from "../services/status.js";
 import { ObservableStore } from "./store.js";
 
 export interface EditorPlatformSnapshot {
@@ -55,6 +57,30 @@ export class EditorPlatformStore extends ObservableStore<EditorPlatformSnapshot>
       documents: options.documents ?? existing?.documents ?? [],
       updatedAt: options.updatedAt ?? Date.now()
     });
+  }
+
+  recordServiceEvent(
+    descriptor: EditorServiceDescriptor,
+    event: ServiceEvent,
+    options: {
+      documents?: readonly DocumentIdentity[];
+    } = {}
+  ): void {
+    if (event.serviceId !== descriptor.id) {
+      throw new Error(`Service event for ${event.serviceId} cannot update ${descriptor.id}.`);
+    }
+
+    const statusOptions: {
+      documents?: readonly DocumentIdentity[];
+      updatedAt?: number;
+    } = {
+      updatedAt: event.timestamp ?? Date.now()
+    };
+    if (options.documents !== undefined) {
+      statusOptions.documents = options.documents;
+    }
+
+    this.setServiceStatus(descriptor, serviceStatusFromEvent(event), statusOptions);
   }
 
   setDocument(document: DocumentSnapshot): void {
