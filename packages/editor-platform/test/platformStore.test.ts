@@ -15,25 +15,14 @@ describe("EditorPlatformStore", () => {
       snapshots.push(snapshot.services.lean?.status.state ?? "missing");
     });
 
-    store.setServiceStatus(
-      {
-        id: "lean",
-        kind: "lean-lsp",
-        label: "Lean"
-      },
-      { state: "starting" },
-      { updatedAt: 10 }
-    );
+    const lean = {
+      id: "lean",
+      kind: "lean-lsp",
+      label: "Lean"
+    } as const;
 
-    store.setServiceStatus(
-      {
-        id: "lean",
-        kind: "lean-lsp",
-        label: "Lean"
-      },
-      { state: "ready" },
-      { updatedAt: 20 }
-    );
+    store.recordServiceEvent(lean, { type: "starting", serviceId: "lean", timestamp: 10 });
+    store.recordServiceEvent(lean, { type: "ready", serviceId: "lean", timestamp: 20 });
 
     expect(snapshots).toEqual(["starting", "ready"]);
     expect(store.snapshot.services.lean?.updatedAt).toBe(20);
