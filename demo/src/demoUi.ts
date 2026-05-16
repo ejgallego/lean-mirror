@@ -2,6 +2,7 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   EditorPlatformStore,
+  EditorServiceRuntime,
   serviceStatusLabel,
   summarizeDiagnostics,
   type DocumentSyncState,
@@ -21,7 +22,6 @@ export interface DemoUi {
   editorHost: HTMLDivElement;
   logEvent(text: string): void;
   platformStore: EditorPlatformStore;
-  recordServiceEvent(service: EditorServiceDescriptor, event: ServiceEvent): void;
   renderDocumentButtons(
     documents: readonly string[],
     openDocument: (uri: string) => Promise<void>,
@@ -188,6 +188,7 @@ export function queryDemoUi(
       documentUriEl.textContent = snapshot.activeDocumentUri;
     }
   }, { emitCurrent: true });
+  const hostRuntime = new EditorServiceRuntime(platformStore, hostService);
 
   return {
     editorHost,
@@ -202,9 +203,6 @@ export function queryDemoUi(
         message: text,
         timestamp: Date.now(),
       });
-    },
-    recordServiceEvent(service: EditorServiceDescriptor, event: ServiceEvent) {
-      platformStore.recordServiceEvent(service, event);
     },
     renderDocumentButtons(documents, openDocument) {
       documentsEl.replaceChildren();
@@ -257,7 +255,7 @@ export function queryDemoUi(
       rootUriEl.textContent = uri;
     },
     setStatus(text: string) {
-      platformStore.recordServiceEvent(hostService, hostEventFromText(text));
+      hostRuntime.record(hostEventFromText(text));
     },
   };
 }

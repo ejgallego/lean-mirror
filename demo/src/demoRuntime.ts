@@ -6,7 +6,7 @@ import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language"
 import { setDiagnostics } from "@codemirror/lint";
 import { LSPClient, LSPPlugin, languageServerExtensions } from "@codemirror/lsp-client";
 import type * as lsp from "vscode-languageserver-protocol";
-import type { EditorDiagnostic, EditorServiceDescriptor } from "@leanprover/editor-platform";
+import { EditorServiceRuntime, type EditorDiagnostic, type EditorServiceDescriptor } from "@leanprover/editor-platform";
 
 import {
   createLeanLspClient,
@@ -65,6 +65,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustMainQueue = Promise.resolve();
   let lastEmbeddedLeanDocument: EmbeddedLeanDocument | null = null;
   let lastRustMainSourceSent: string | null = null;
+  const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
+  const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
 
   function setCurrentUri(uri: string, languageId: string): void {
     currentUri = uri;
@@ -226,6 +228,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
     embeddedLeanDiagnosticTimer = setTimeout(() => {
       embeddedLeanDiagnosticTimer = null;
+      const request = leanRuntime.beginRequest("textDocument/diagnostic");
       void client
         ?.request<
           { textDocument: { uri: string } },
@@ -234,6 +237,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           textDocument: { uri },
         })
         .then((report) => {
+          request.succeeded();
           if (disposed || report.kind !== "full") {
             return;
           }
@@ -245,7 +249,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             scheduleEmbeddedLeanDiagnosticPull(uri, attempt + 1);
           }
         })
-        .catch(() => {});
+        .catch((error) => {
+          request.failed(error);
+        });
     }, attempt === 0 ? 350 : 500);
   }
 
@@ -258,6 +264,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
     rustMainDiagnosticTimer = setTimeout(() => {
       rustMainDiagnosticTimer = null;
+      const request = rustRuntime.beginRequest("textDocument/diagnostic");
       void rustClient
         ?.request<
           { textDocument: { uri: string } },
@@ -266,6 +273,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           textDocument: { uri },
         })
         .then((report) => {
+          request.succeeded();
           if (disposed || report.kind !== "full") {
             return;
           }
@@ -277,7 +285,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             scheduleRustMainDiagnosticPull(uri, attempt + 1);
           }
         })
-        .catch(() => {});
+        .catch((error) => {
+          request.failed(error);
+        });
     }, attempt === 0 ? 650 : 700);
   }
 
@@ -326,12 +336,22 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           if (disposed || revision !== rustMainRevision) {
             return;
           }
+          const request = rustRuntime.beginRequest("rust-main/update");
           const result = await options.sessionApi.updateRustMainDocument({
             code: source,
             leanDocument,
             revision,
             uri,
-          });
+          }).then(
+            (value) => {
+              request.succeeded();
+              return value;
+            },
+            (error) => {
+              request.failed(error);
+              throw error;
+            },
+          );
           if (disposed || result.stale || revision !== rustMainRevision) {
             return;
           }
@@ -420,17 +440,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setCurrentDocument(session.documentUri);
 
   options.ui.setStatus("Connecting to Lean");
-  options.ui.recordServiceEvent(leanService, {
-    type: "starting",
-    serviceId: leanService.id,
-    message: "Connecting",
-  });
+  leanRuntime.starting("Connecting");
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
-  options.ui.recordServiceEvent(leanService, {
-    type: "starting",
-    serviceId: leanService.id,
-    message: "Initializing",
-  });
+  leanRuntime.starting("Initializing");
   client = createLeanLspClient({
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
@@ -457,24 +469,16 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   });
   client.connect(createWebSocketTransport(socket));
   await client.initializing;
-  options.ui.recordServiceEvent(leanService, { type: "ready", serviceId: leanService.id });
+  leanRuntime.ready();
   workspace = client.workspace as LeanWorkspace;
   if (session.embeddedLeanDocumentUri) {
     await workspace.openServerDocument(session.embeddedLeanDocumentUri);
   }
 
   if (session.rustMainWebsocketUrl) {
-    options.ui.recordServiceEvent(rustService, {
-      type: "starting",
-      serviceId: rustService.id,
-      message: "Connecting",
-    });
+    rustRuntime.starting("Connecting");
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
-    options.ui.recordServiceEvent(rustService, {
-      type: "starting",
-      serviceId: rustService.id,
-      message: "Initializing",
-    });
+    rustRuntime.starting("Initializing");
     rustClient = new LSPClient({
       extensions: languageServerExtensions(),
       notificationHandlers: {
@@ -485,10 +489,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     });
     rustClient.connect(createWebSocketTransport(rustSocket));
     await rustClient.initializing;
-    options.ui.recordServiceEvent(rustService, { type: "ready", serviceId: rustService.id });
+    rustRuntime.ready();
     options.ui.logEvent("rust-analyzer initialized.");
   } else {
-    options.ui.recordServiceEvent(rustService, { type: "stopped", serviceId: rustService.id });
+    rustRuntime.stopped();
   }
 
   const openDocument = async (uri: string): Promise<void> => {
@@ -507,11 +511,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    options.ui.recordServiceEvent(leanService, {
-      type: "stale",
-      serviceId: leanService.id,
-      reason: "Reconnecting",
-    });
+    leanRuntime.stale("Reconnecting");
     options.ui.logEvent("Lean server connection closed. Waiting for restart.");
     options.requestRestart("Lean server connection closed.");
   };
@@ -520,11 +520,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    options.ui.recordServiceEvent(leanService, {
-      type: "stale",
-      serviceId: leanService.id,
-      reason: "Reconnecting",
-    });
+    leanRuntime.stale("Reconnecting");
     options.ui.logEvent("WebSocket transport interrupted. Retrying.");
     options.requestRestart("WebSocket transport interrupted.");
   };
@@ -569,10 +565,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       currentView = null;
       demoBridge.clear();
       client?.disconnect();
-      options.ui.recordServiceEvent(leanService, { type: "stopped", serviceId: leanService.id });
+      leanRuntime.stopped();
       socket?.close();
       rustClient?.disconnect();
-      options.ui.recordServiceEvent(rustService, { type: "stopped", serviceId: rustService.id });
+      rustRuntime.stopped();
       rustSocket?.close();
       socket = null;
       rustSocket = null;
