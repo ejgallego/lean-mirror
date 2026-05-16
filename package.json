@@ -5,6 +5,9 @@
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
+  "workspaces": [
+    "packages/*"
+  ],
   "keywords": [
     "codemirror",
     "codemirror6",
@@ -47,8 +50,10 @@
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "build:platform": "npm run build -w @leanprover/editor-platform",
     "check": "tsc -p tsconfig.json --noEmit",
-    "ci": "npm run check && npm test && npm run test:e2e && npm run build && npm run pack:check",
+    "check:platform": "npm run check -w @leanprover/editor-platform",
+    "ci": "npm run check && npm run check:platform && npm test && npm run test:platform && npm run test:e2e && npm run build && npm run build:platform && npm run pack:check",
     "demo": "node ./scripts/run-demo.mjs",
     "demo:backend": "node ./demo/server.mjs",
     "demo:frontend": "vite --config ./demo/vite.config.ts",
@@ -56,6 +61,7 @@
     "playwright:install": "node ./scripts/install-playwright.mjs",
     "prepublishOnly": "npm run check && npm test && npm run build && npm run pack:check",
     "test": "vitest run",
+    "test:platform": "npm run test -w @leanprover/editor-platform",
     "test:e2e": "node ./scripts/test-e2e.mjs"
   },
   "dependencies": {
@@ -74,6 +80,7 @@
   "devDependencies": {
     "@codemirror/lang-rust": "^6.0.2",
     "@playwright/test": "^1.59.1",
+    "@leanprover/editor-platform": "file:packages/editor-platform",
     "@types/node": "^25.6.0",
     "jsdom": "^29.0.2",
     "typescript": "^6.0.2",
