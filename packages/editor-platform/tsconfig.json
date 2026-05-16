@@ -3,29 +3,22 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022"],
     "strict": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "esModuleInterop": true,
-    "ignoreDeprecations": "6.0",
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
-    "paths": {
-      "@leanprover/editor-platform": ["packages/editor-platform/src/index.ts"]
-    },
-    "types": ["node", "vitest/globals"]
+    "types": ["vitest/globals"]
   },
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "demo/**/*.ts",
-    "playwright.config.ts",
     "vitest.config.ts"
   ]
 }
