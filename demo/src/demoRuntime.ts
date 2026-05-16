@@ -6,6 +6,7 @@ import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language"
 import { setDiagnostics } from "@codemirror/lint";
 import { LSPClient, LSPPlugin, languageServerExtensions } from "@codemirror/lsp-client";
 import type * as lsp from "vscode-languageserver-protocol";
+import type { EditorDiagnostic, EditorServiceDescriptor } from "@leanprover/editor-platform";
 
 import {
   createLeanLspClient,
@@ -21,6 +22,18 @@ import type { DemoUi } from "./demoUi.js";
 import { buildEmbeddedLeanDocument, type EmbeddedLeanDocument } from "./embeddedLean.js";
 import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
+
+const leanService: EditorServiceDescriptor = {
+  id: "lean-lsp",
+  kind: "lean-lsp",
+  label: "Lean",
+};
+
+const rustService: EditorServiceDescriptor = {
+  id: "rust-lsp",
+  kind: "rust-lsp",
+  label: "Rust",
+};
 
 export interface DemoRuntimeOptions {
   editorTheme: Extension;
@@ -56,7 +69,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   function setCurrentUri(uri: string, languageId: string): void {
     currentUri = uri;
     currentLanguageId = languageId;
-    options.ui.setCurrentDocument(uri);
+    options.ui.setCurrentDocument(uri, languageId);
     options.ui.setActiveDocument(uri);
   }
 
@@ -121,7 +134,27 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     return value === 1 ? "error" : value === 2 ? "warning" : value === 3 ? "info" : "hint";
   }
 
+  function editorDiagnosticsFromLsp(
+    uri: string,
+    source: string,
+    diagnostics: readonly lsp.Diagnostic[],
+  ): EditorDiagnostic[] {
+    return diagnostics.map((diagnostic) => ({
+      uri,
+      source,
+      message: diagnostic.message,
+      severity: diagnosticSeverity(diagnostic.severity),
+      ...(diagnostic.code === undefined ? {} : { code: String(diagnostic.code) }),
+    }));
+  }
+
   function applyRustMainDiagnostics(params: lsp.PublishDiagnosticsParams): boolean {
+    if (params.uri === session.rustMainDocumentUri) {
+      options.ui.setDocumentDiagnostics(
+        params.uri,
+        editorDiagnosticsFromLsp(params.uri, "rust-analyzer", params.diagnostics),
+      );
+    }
     if (params.uri !== session.rustMainDocumentUri || currentUri !== params.uri || !currentView) {
       return false;
     }
@@ -153,6 +186,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     if (params.uri !== session.embeddedLeanDocumentUri || !lastEmbeddedLeanDocument) {
       return;
     }
+    options.ui.setDocumentDiagnostics(
+      params.uri,
+      editorDiagnosticsFromLsp(params.uri, "lean", params.diagnostics),
+    );
     const byBlock = new Map<string, EmbeddedBlockDiagnostic[]>();
     for (const diagnostic of params.diagnostics) {
       const start = lastEmbeddedLeanDocument.mappings.find(
@@ -301,6 +338,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           lastRustMainSourceSent = source;
           lastEmbeddedLeanDocument = embeddedLeanDocument;
           refreshLeanWorkspaceArtifacts(result, leanDocument);
+          options.ui.setDocumentSyncState(uri, "clean");
           options.ui.logEvent("Rust driver saved; Lean snippets refreshed.");
         })
         .catch((error) => {
@@ -309,6 +347,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           }
           options.ui.logEvent(
             error instanceof Error ? `Rust driver update failed: ${error.message}` : "Rust driver update failed.",
+          );
+          options.ui.setDocumentSyncState(
+            uri,
+            "failed",
+            error instanceof Error ? error.message : "Rust driver update failed.",
           );
         });
     }, 450);
@@ -337,6 +380,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
               : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
+                options.ui.setDocumentSyncState(uri, "dirty");
                 clearRustMainDiagnostics();
                 scheduleRustMainSync();
                 scheduleRustMainPersist(session, uri, update.state.doc.toString());
@@ -376,7 +420,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setCurrentDocument(session.documentUri);
 
   options.ui.setStatus("Connecting to Lean");
+  options.ui.setServiceStatus(leanService, { state: "starting", message: "Connecting" });
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
+  options.ui.setServiceStatus(leanService, { state: "initializing", message: "Initializing" });
   client = createLeanLspClient({
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
@@ -403,13 +449,16 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   });
   client.connect(createWebSocketTransport(socket));
   await client.initializing;
+  options.ui.setServiceStatus(leanService, { state: "ready" });
   workspace = client.workspace as LeanWorkspace;
   if (session.embeddedLeanDocumentUri) {
     await workspace.openServerDocument(session.embeddedLeanDocumentUri);
   }
 
   if (session.rustMainWebsocketUrl) {
+    options.ui.setServiceStatus(rustService, { state: "starting", message: "Connecting" });
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
+    options.ui.setServiceStatus(rustService, { state: "initializing", message: "Initializing" });
     rustClient = new LSPClient({
       extensions: languageServerExtensions(),
       notificationHandlers: {
@@ -420,7 +469,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     });
     rustClient.connect(createWebSocketTransport(rustSocket));
     await rustClient.initializing;
+    options.ui.setServiceStatus(rustService, { state: "ready" });
     options.ui.logEvent("rust-analyzer initialized.");
+  } else {
+    options.ui.setServiceStatus(rustService, { state: "stopped" });
   }
 
   const openDocument = async (uri: string): Promise<void> => {
@@ -439,6 +491,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
+    options.ui.setServiceStatus(leanService, { state: "stale", message: "Reconnecting" });
     options.ui.logEvent("Lean server connection closed. Waiting for restart.");
     options.requestRestart("Lean server connection closed.");
   };
@@ -447,6 +500,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
+    options.ui.setServiceStatus(leanService, { state: "stale", message: "Reconnecting" });
     options.ui.logEvent("WebSocket transport interrupted. Retrying.");
     options.requestRestart("WebSocket transport interrupted.");
   };
@@ -491,8 +545,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       currentView = null;
       demoBridge.clear();
       client?.disconnect();
+      options.ui.setServiceStatus(leanService, { state: "stopped" });
       socket?.close();
       rustClient?.disconnect();
+      options.ui.setServiceStatus(rustService, { state: "stopped" });
       rustSocket?.close();
       socket = null;
       rustSocket = null;

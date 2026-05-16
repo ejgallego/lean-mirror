@@ -155,6 +155,28 @@ code {
   overflow-wrap: anywhere;
 }
 
+.service-statuses {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.service-status {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, max-content) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.service-status strong {
+  font-size: 0.92rem;
+}
+
+.service-status code {
+  font-size: 0.82rem;
+}
+
 .panel-notes {
   padding-bottom: 16px;
 }
