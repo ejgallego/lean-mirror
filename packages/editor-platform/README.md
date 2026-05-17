@@ -30,6 +30,8 @@ This package must not own:
 - `DocumentSnapshot`: URI, language, version, open state, and sync state for files or virtual documents
 - `EditorDiagnostic`: common diagnostic shape with UTF-16 ranges
 - `HostToEditorMessage` / `EditorToHostMessage`: typed host/webview protocol messages with no VS Code dependency
+- `createHostEndpoint` / `createEditorEndpoint`: small typed adapters around `postMessage`-style transports
+- `publishPlatformSnapshots`: publishes store snapshots over the host-to-editor protocol
 
 Example:
 
@@ -61,4 +63,4 @@ That is intentional while the shared boundary is still being validated. If the A
 
 ## Next Boundary
 
-The next extraction target is host/editor messaging for VS Code custom editors and browser demos. The protocol types live here, but concrete VS Code extension registration, webview HTML, and process spawning should remain outside this package until the host boundary is clearer.
+Host/editor messaging for VS Code custom editors and browser demos now has a shared typed envelope and transport adapter. Concrete VS Code extension registration, webview HTML, and process spawning should remain outside this package until the host boundary is clearer.
