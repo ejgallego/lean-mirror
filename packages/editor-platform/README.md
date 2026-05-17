@@ -22,14 +22,43 @@ This package must not own:
 - browser or VS Code UI components
 - concrete process spawning policy until the host/service boundary is clearer
 
-## First Milestone
+## Current API
 
-The first useful milestone is shared status rendering:
+- `EditorPlatformStore`: observable shell snapshot state for services, documents, diagnostics, and logs
+- `EditorServiceRuntime`: small service lifecycle/request/log adapter around an `EditorPlatformStore`
+- `ServiceEvent`: editor-agnostic lifecycle events for starting, ready, stale, failed, and stopped services
+- `DocumentSnapshot`: URI, language, version, open state, and sync state for files or virtual documents
+- `EditorDiagnostic`: common diagnostic shape with UTF-16 ranges
+- `HostToEditorMessage` / `EditorToHostMessage`: typed host/webview protocol messages with no VS Code dependency
 
-- Lean server status
-- Rust server status
-- active document URI/language/version
-- diagnostics summary
-- bridge logs
+Example:
 
-Once both editor shells consume this model, bridge lifecycle code can move here behind the same service abstractions.
+```ts
+import { EditorPlatformStore, EditorServiceRuntime } from "@leanprover/editor-platform";
+
+const store = new EditorPlatformStore();
+const lean = new EditorServiceRuntime(store, {
+  id: "lean",
+  kind: "lean-lsp",
+  label: "Lean"
+});
+
+lean.starting("Connecting");
+const request = lean.beginRequest("textDocument/diagnostic");
+request.succeeded();
+lean.ready();
+```
+
+## Development Topology
+
+For now this package lives inside `lean-mirror` and `verso-mirror` consumes it through a local file dependency:
+
+```json
+"@leanprover/editor-platform": "file:../lean-mirror/packages/editor-platform"
+```
+
+That is intentional while the shared boundary is still being validated. If the API continues to be shared cleanly, this package can later move into a parent monorepo or a dedicated package repository.
+
+## Next Boundary
+
+The next extraction target is host/editor messaging for VS Code custom editors and browser demos. The protocol types live here, but concrete VS Code extension registration, webview HTML, and process spawning should remain outside this package until the host boundary is clearer.
