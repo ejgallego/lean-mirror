@@ -1,6 +1,7 @@
 export * from "./core/diagnostics.js";
 export * from "./core/documents.js";
 export * from "./core/logs.js";
+export * from "./protocol/adapters.js";
 export * from "./protocol/endpoint.js";
 export * from "./protocol/messages.js";
 export * from "./services/status.js";
