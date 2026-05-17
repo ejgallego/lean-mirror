@@ -31,6 +31,7 @@ This package must not own:
 - `EditorDiagnostic`: common diagnostic shape with UTF-16 ranges
 - `HostToEditorMessage` / `EditorToHostMessage`: typed host/webview protocol messages with no VS Code dependency
 - `createHostEndpoint` / `createEditorEndpoint`: small typed adapters around `postMessage`-style transports
+- `createPostMessageTarget`, `createMessageEventSource`, `createOnDidReceiveMessageSource`: structural adapters for browser and VS Code-style message APIs
 - `publishPlatformSnapshots`: publishes store snapshots over the host-to-editor protocol
 
 Example:
