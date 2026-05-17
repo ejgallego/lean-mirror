@@ -1,0 +1,26 @@
+{
+  "name": "@leanprover/editor-platform-vscode",
+  "version": "0.0.0",
+  "description": "VS Code-facing host helpers for editor-platform custom editors.",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@leanprover/editor-platform": "file:../editor-platform"
+  }
+}
