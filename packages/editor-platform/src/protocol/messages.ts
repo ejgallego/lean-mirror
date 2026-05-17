@@ -45,10 +45,9 @@ const editorToHostMessageTypes = [
   "set-active-document"
 ] as const;
 
-const editorPlatformMessageTypes = new Set<string>([
-  ...hostToEditorMessageTypes,
-  ...editorToHostMessageTypes
-]);
+const hostToEditorMessageTypeSet = new Set<string>(hostToEditorMessageTypes);
+const editorToHostMessageTypeSet = new Set<string>(editorToHostMessageTypes);
+const editorPlatformMessageTypes = new Set<string>([...hostToEditorMessageTypes, ...editorToHostMessageTypes]);
 
 export function platformMessage<TType extends string, TPayload extends object = object>(
   type: TType,
@@ -75,4 +74,12 @@ export function isEditorPlatformMessage(value: unknown): value is EditorPlatform
     !!message.payload &&
     typeof message.payload === "object"
   );
+}
+
+export function isHostToEditorMessage(value: unknown): value is HostToEditorMessage {
+  return isEditorPlatformMessage(value) && hostToEditorMessageTypeSet.has(value.type);
+}
+
+export function isEditorToHostMessage(value: unknown): value is EditorToHostMessage {
+  return isEditorPlatformMessage(value) && editorToHostMessageTypeSet.has(value.type);
 }
