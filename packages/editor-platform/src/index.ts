@@ -7,5 +7,5 @@ export * from "./protocol/messages.js";
 export * from "./services/status.js";
 export * from "./shell/platformStore.js";
 export * from "./shell/serviceRuntime.js";
-export * from "./shell/store.js";
+export * from "./shell/shellView.js";
 export * from "./shell/store.js";

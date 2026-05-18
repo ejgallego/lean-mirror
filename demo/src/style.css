@@ -179,9 +179,7 @@ code {
   box-shadow: 0 0 0 3px rgba(102, 212, 127, 0.16), 0 0 12px rgba(102, 212, 127, 0.55);
 }
 
-.service-status[data-state="starting"] .service-light,
-.service-status[data-state="initializing"] .service-light,
-.service-status[data-state="stopping"] .service-light {
+.service-status[data-state="pending"] .service-light {
   background: #f0c65c;
   box-shadow: 0 0 0 3px rgba(240, 198, 92, 0.16);
 }
