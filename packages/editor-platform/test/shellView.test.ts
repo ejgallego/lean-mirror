@@ -59,8 +59,8 @@ describe("editor platform shell view", () => {
         }),
         activeDocumentUri: "file:///Main.lean",
         diagnostics: [
-          { severity: "error", message: "unknown" },
-          { severity: "hint", message: "try this" }
+          { uri: "file:///Main.lean", severity: "error", message: "unknown" },
+          { uri: "file:///Main.lean", severity: "hint", message: "try this" }
         ]
       },
       { hostServiceId: "host" }
@@ -69,6 +69,7 @@ describe("editor platform shell view", () => {
     expect(view.statusText).toBe("Ready");
     expect(view.activeDocumentUri).toBe("file:///Main.lean");
     expect(view.diagnosticsText).toBe("1 error, 0 warnings, 1 hint");
+    expect(view.activeDocumentDiagnosticsText).toBe("1 error, 0 warnings, 1 hint");
     expect(view.services).toEqual([
       {
         id: "lean",
@@ -79,6 +80,24 @@ describe("editor platform shell view", () => {
         statusLabel: "Ready"
       }
     ]);
+  });
+
+  test("summarizes active document diagnostics separately from global diagnostics", () => {
+    const view = createEditorPlatformShellView({
+      ...snapshot({}),
+      activeDocumentUri: "file:///Main.lean",
+      diagnostics: [
+        { uri: "file:///Main.lean", severity: "error", message: "unknown" },
+        { uri: "file:///Helper.lean", severity: "warning", message: "unused" },
+        { severity: "info", message: "service note" }
+      ]
+    });
+
+    expect(view.diagnosticsText).toBe("1 error, 1 warning, 1 info");
+    expect(view.activeDocumentDiagnostics).toEqual([
+      { uri: "file:///Main.lean", severity: "error", message: "unknown" }
+    ]);
+    expect(view.activeDocumentDiagnosticsText).toBe("1 error, 0 warnings");
   });
 
   test("prioritizes failed, pending, and stale service status over ready host status", () => {
