@@ -59,6 +59,7 @@
     "demo": "node ./scripts/run-demo.mjs",
     "demo:backend": "node ./demo/server.mjs",
     "demo:frontend": "vite --config ./demo/vite.config.ts",
+    "demo:reset": "node ./scripts/reset-demo-workspace.mjs",
     "pack:check": "node ./scripts/verify-pack.mjs",
     "playwright:install": "node ./scripts/install-playwright.mjs",
     "prepublishOnly": "npm run check && npm test && npm run build && npm run pack:check",
