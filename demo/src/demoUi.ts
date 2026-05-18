@@ -143,13 +143,17 @@ function renderServiceStatuses(
     row.className = "service-status";
     row.dataset.state = service.status.state;
 
+    const light = document.createElement("span");
+    light.className = "service-light";
+    light.setAttribute("aria-hidden", "true");
+
     const label = document.createElement("strong");
     label.textContent = service.label;
 
     const status = document.createElement("code");
     status.textContent = serviceStatusLabel(service.status);
 
-    row.append(label, status);
+    row.append(light, label, status);
     servicesEl.append(row);
   }
 }

@@ -28,16 +28,8 @@
   <body>
     <div class="shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">Lean 4 + CodeMirror 6</p>
-          <h1>Browser demo for the local LSP wrapper</h1>
-          <p class="lede">
-            This demo uses the package in this repo with CodeMirror's official
-            <code>@codemirror/lsp-client</code> and a tiny WebSocket bridge to
-            <code>lean --server</code>, with both Lean-hosted Rust blocks and Rust-hosted Lean snippets.
-          </p>
-        </div>
-        <div class="status-card">
+        <p class="eyebrow">Lean 4 + CodeMirror 6</p>
+        <div class="status-card" aria-label="Runtime status">
           <div class="status-row">
             <span>Status</span>
             <strong id="status">Booting</strong>
@@ -70,12 +62,12 @@
           <div id="editor" class="editor-host"></div>
         </section>
 
-        <aside class="panel panel-notes">
+        <aside class="panel panel-help">
           <div class="panel-head">
-            <h2>Notes</h2>
+            <h2>Help</h2>
           </div>
           <div id="documents" class="documents"></div>
-          <ul class="notes">
+          <ul class="help-list">
             <li>Hover over <code>Nat.succ</code> or trigger completion with <code>Ctrl-Space</code>.</li>
             <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
             <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
