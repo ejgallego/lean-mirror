@@ -1,13 +1,16 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
+  createDocumentSnapshot,
   EditorPlatformStore,
   EditorServiceRuntime,
   createEditorPlatformShellView,
+  documentTitleFromUri,
   type DocumentSyncState,
   type EditorDiagnostic,
   type EditorServiceDescriptor,
   type EditorServiceStatusView,
+  inferLanguageIdFromUri,
   type ServiceEvent,
 } from "@leanprover/editor-platform";
 
@@ -62,17 +65,6 @@ export function demoTheme(): Extension {
       backgroundColor: "#d7e8ff",
     },
   });
-}
-
-function inferLanguageId(uri: string): string {
-  if (uri.endsWith(".rs")) {
-    return "rust";
-  }
-  return "lean4";
-}
-
-function documentTitle(uri: string): string {
-  return uri.split("/").at(-1) ?? uri;
 }
 
 function hostEventFromText(text: string): ServiceEvent {
@@ -172,7 +164,7 @@ export function queryDemoUi(
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.uri = uri;
-        button.textContent = uri.split("/").at(-1) ?? uri;
+        button.textContent = documentTitleFromUri(uri);
         button.addEventListener("click", () => {
           void openDocument(uri);
         });
@@ -185,17 +177,16 @@ export function queryDemoUi(
       }
       platformStore.setActiveDocument(uri);
     },
-    setCurrentDocument(uri: string, languageId = inferLanguageId(uri)) {
+    setCurrentDocument(uri: string, languageId = inferLanguageIdFromUri(uri, { fallback: "lean4" })) {
       const existing = platformStore.snapshot.documents[uri];
-      platformStore.setDocument({
+      platformStore.setDocument(createDocumentSnapshot({
         uri,
         languageId,
-        version: existing?.version ?? 0,
+        previous: existing,
         openState: "open",
         syncState: existing?.syncState ?? "clean",
-        title: existing?.title ?? documentTitle(uri),
-        ...(existing?.lastError ? { lastError: existing.lastError } : {}),
-      });
+        ...(existing?.lastError ? { lastError: existing.lastError } : {})
+      }));
       platformStore.setActiveDocument(uri);
     },
     setDocumentDiagnostics(uri: string, diagnostics: readonly EditorDiagnostic[]) {
@@ -203,15 +194,13 @@ export function queryDemoUi(
     },
     setDocumentSyncState(uri: string, syncState: DocumentSyncState, lastError?: string) {
       const existing = platformStore.snapshot.documents[uri];
-      platformStore.setDocument({
+      platformStore.setDocument(createDocumentSnapshot({
         uri,
-        languageId: existing?.languageId ?? inferLanguageId(uri),
-        version: existing?.version ?? 0,
-        openState: existing?.openState ?? "open",
+        languageId: existing?.languageId ?? inferLanguageIdFromUri(uri, { fallback: "lean4" }),
+        previous: existing,
         syncState,
-        title: existing?.title ?? documentTitle(uri),
-        ...(lastError ? { lastError } : {}),
-      });
+        ...(lastError ? { lastError } : {})
+      }));
     },
     setRootUri(uri: string) {
       rootUriEl.textContent = uri;
