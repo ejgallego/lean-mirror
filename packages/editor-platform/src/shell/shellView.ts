@@ -1,4 +1,9 @@
-import { summarizeDiagnostics, type DiagnosticSummary } from "../core/diagnostics.js";
+import {
+  diagnosticsForDocument,
+  summarizeDiagnostics,
+  type DiagnosticSummary,
+  type EditorDiagnostic
+} from "../core/diagnostics.js";
 import type { EditorServiceSnapshot, ServiceStatus } from "../services/status.js";
 import { serviceStatusLabel } from "../services/status.js";
 import type { EditorPlatformSnapshot } from "./platformStore.js";
@@ -16,6 +21,9 @@ export interface EditorServiceStatusView {
 
 export interface EditorPlatformShellView {
   activeDocumentUri?: string;
+  activeDocumentDiagnostics: readonly EditorDiagnostic[];
+  activeDocumentDiagnosticsSummary: DiagnosticSummary;
+  activeDocumentDiagnosticsText: string;
   diagnosticsSummary: DiagnosticSummary;
   diagnosticsText: string;
   services: readonly EditorServiceStatusView[];
@@ -81,9 +89,16 @@ export function createEditorPlatformShellView(
     (service) => options.includeHostService || service.id !== hostServiceId
   );
   const diagnosticsSummary = summarizeDiagnostics(snapshot.diagnostics);
+  const activeDocumentDiagnostics = snapshot.activeDocumentUri
+    ? diagnosticsForDocument(snapshot.diagnostics, snapshot.activeDocumentUri)
+    : [];
+  const activeDocumentDiagnosticsSummary = summarizeDiagnostics(activeDocumentDiagnostics);
 
   return {
     ...(snapshot.activeDocumentUri ? { activeDocumentUri: snapshot.activeDocumentUri } : {}),
+    activeDocumentDiagnostics,
+    activeDocumentDiagnosticsSummary,
+    activeDocumentDiagnosticsText: diagnosticsSummaryText(activeDocumentDiagnosticsSummary),
     diagnosticsSummary,
     diagnosticsText: diagnosticsSummaryText(diagnosticsSummary),
     services: services.map(serviceStatusView),

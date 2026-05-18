@@ -31,6 +31,7 @@ This package must not own:
 - `DocumentSnapshot`: URI, language, version, open state, and sync state for files or virtual documents
 - `createDocumentSnapshot`, `documentTitleFromUri`, `inferLanguageIdFromUri`: shared document identity helpers for browser demos and editor shells
 - `EditorDiagnostic`: common diagnostic shape with UTF-16 ranges
+- `diagnosticsForDocument`, `groupDiagnosticsByDocument`, `summarizeDiagnosticsForDocument`: document-scoped diagnostic helpers
 - `HostToEditorMessage` / `EditorToHostMessage`: typed host/webview protocol messages with no VS Code dependency
 - `createHostEndpoint` / `createEditorEndpoint`: small typed adapters around `postMessage`-style transports
 - `createPostMessageTarget`, `createMessageEventSource`, `createOnDidReceiveMessageSource`: structural adapters for browser and VS Code-style message APIs

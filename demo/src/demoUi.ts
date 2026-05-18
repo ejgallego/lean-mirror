@@ -136,7 +136,9 @@ export function queryDemoUi(
   platformStore.subscribe((snapshot) => {
     const shellView = createEditorPlatformShellView(snapshot, { hostServiceId: hostService.id });
     statusEl.textContent = shellView.statusText;
-    diagnosticsEl.textContent = shellView.diagnosticsText;
+    diagnosticsEl.textContent = shellView.activeDocumentUri
+      ? shellView.activeDocumentDiagnosticsText
+      : shellView.diagnosticsText;
     renderServiceStatuses(servicesEl, shellView.services);
     if (shellView.activeDocumentUri) {
       documentUriEl.textContent = shellView.activeDocumentUri;

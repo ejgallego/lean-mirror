@@ -72,49 +72,19 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
 }
 
 async function openDocument(page: Page, name: string) {
-  await expect
-    .poll(
-      async () => {
-        const button = page.getByRole("button", { name }).first();
-        if ((await button.count()) === 0) {
-          return false;
-        }
-        try {
-          await button.click({ timeout: 1_000 });
-        } catch {
-          return false;
-        }
-        const uri = await page.locator("#document-uri").textContent({ timeout: 1_000 }).catch(() => "");
-        return uri?.includes(name) ?? false;
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(true);
+  const button = page.getByRole("button", { name }).first();
+  await expect(button).toBeVisible({ timeout: 30_000 });
+  await button.click();
+  await expect(page.locator("#document-uri")).toContainText(name, { timeout: 30_000 });
 }
 
 async function openDocumentContaining(page: Page, name: string, text: string) {
+  await openDocument(page, name);
   await expect
-    .poll(
-      async () => {
-        const button = page.getByRole("button", { name }).first();
-        if ((await button.count()) === 0) {
-          return false;
-        }
-        try {
-          await button.click({ timeout: 1_000 });
-        } catch {
-          return false;
-        }
-        const uri = await page.locator("#document-uri").textContent({ timeout: 1_000 }).catch(() => "");
-        if (!uri?.includes(name)) {
-          return false;
-        }
-        const doc = await page.evaluate(() => window.__leanDemo?.currentDoc()).catch(() => null);
-        return doc?.includes(text) ?? false;
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(true);
+    .poll(async () => (await page.evaluate(() => window.__leanDemo?.currentDoc()).catch(() => "")) ?? "", {
+      timeout: 30_000,
+    })
+    .toContain(text);
 }
 
 function waitForRustWidgetSave(page: Page) {
