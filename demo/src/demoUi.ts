@@ -3,12 +3,11 @@ import { EditorView } from "@codemirror/view";
 import {
   EditorPlatformStore,
   EditorServiceRuntime,
-  serviceStatusLabel,
-  summarizeDiagnostics,
+  createEditorPlatformShellView,
   type DocumentSyncState,
   type EditorDiagnostic,
-  type EditorPlatformSnapshot,
   type EditorServiceDescriptor,
+  type EditorServiceStatusView,
   type ServiceEvent,
 } from "@leanprover/editor-platform";
 
@@ -86,52 +85,10 @@ function hostEventFromText(text: string): ServiceEvent {
   return { type: "starting", serviceId: hostService.id, message: text };
 }
 
-function overallStatus(snapshot: EditorPlatformSnapshot): string {
-  const host = snapshot.services[hostService.id];
-  if (host && host.status.state !== "ready") {
-    return serviceStatusLabel(host.status);
-  }
-
-  const services = Object.values(snapshot.services).filter((service) => service.id !== hostService.id);
-  const failed = services.find((service) => service.status.state === "failed");
-  if (failed) {
-    return `${failed.label}: ${serviceStatusLabel(failed.status)}`;
-  }
-  const pending = services.find((service) =>
-    service.status.state === "starting" ||
-    service.status.state === "initializing" ||
-    service.status.state === "stopping"
-  );
-  if (pending) {
-    return `${pending.label}: ${serviceStatusLabel(pending.status)}`;
-  }
-  const stale = services.find((service) => service.status.state === "stale");
-  if (stale) {
-    return `${stale.label}: ${serviceStatusLabel(stale.status)}`;
-  }
-  return host ? serviceStatusLabel(host.status) : "Booting";
-}
-
-function diagnosticsText(diagnostics: readonly EditorDiagnostic[]): string {
-  const summary = summarizeDiagnostics(diagnostics);
-  const parts = [
-    `${summary.errors} error${summary.errors === 1 ? "" : "s"}`,
-    `${summary.warnings} warning${summary.warnings === 1 ? "" : "s"}`,
-  ];
-  if (summary.infos > 0) {
-    parts.push(`${summary.infos} info`);
-  }
-  if (summary.hints > 0) {
-    parts.push(`${summary.hints} hint${summary.hints === 1 ? "" : "s"}`);
-  }
-  return parts.join(", ");
-}
-
 function renderServiceStatuses(
   servicesEl: HTMLDivElement,
-  snapshot: EditorPlatformSnapshot,
+  services: readonly EditorServiceStatusView[],
 ): void {
-  const services = Object.values(snapshot.services).filter((service) => service.id !== hostService.id);
   servicesEl.replaceChildren();
   if (services.length === 0) {
     servicesEl.textContent = "Starting";
@@ -141,7 +98,7 @@ function renderServiceStatuses(
   for (const service of services) {
     const row = document.createElement("div");
     row.className = "service-status";
-    row.dataset.state = service.status.state;
+    row.dataset.state = service.lightState;
 
     const light = document.createElement("span");
     light.className = "service-light";
@@ -151,7 +108,7 @@ function renderServiceStatuses(
     label.textContent = service.label;
 
     const status = document.createElement("code");
-    status.textContent = serviceStatusLabel(service.status);
+    status.textContent = service.statusLabel;
 
     row.append(light, label, status);
     servicesEl.append(row);
@@ -185,11 +142,12 @@ export function queryDemoUi(
   }
 
   platformStore.subscribe((snapshot) => {
-    statusEl.textContent = overallStatus(snapshot);
-    diagnosticsEl.textContent = diagnosticsText(snapshot.diagnostics);
-    renderServiceStatuses(servicesEl, snapshot);
-    if (snapshot.activeDocumentUri) {
-      documentUriEl.textContent = snapshot.activeDocumentUri;
+    const shellView = createEditorPlatformShellView(snapshot, { hostServiceId: hostService.id });
+    statusEl.textContent = shellView.statusText;
+    diagnosticsEl.textContent = shellView.diagnosticsText;
+    renderServiceStatuses(servicesEl, shellView.services);
+    if (shellView.activeDocumentUri) {
+      documentUriEl.textContent = shellView.activeDocumentUri;
     }
   }, { emitCurrent: true });
   const hostRuntime = new EditorServiceRuntime(platformStore, hostService);
