@@ -91,6 +91,32 @@ export function createEmbeddedEditorShell(
     svg.setAttribute("viewBox", "0 0 64 64");
     svg.setAttribute("aria-hidden", "true");
 
+    if (adapter.kind === "lean") {
+      const frame = document.createElementNS(ns, "rect");
+      frame.setAttribute("x", "12");
+      frame.setAttribute("y", "10");
+      frame.setAttribute("width", "40");
+      frame.setAttribute("height", "44");
+      frame.setAttribute("rx", "8");
+      frame.setAttribute("fill", "none");
+      frame.setAttribute("stroke", "currentColor");
+      frame.setAttribute("stroke-width", "4");
+      svg.append(frame);
+
+      const lambda = document.createElementNS(ns, "text");
+      lambda.setAttribute("x", "32");
+      lambda.setAttribute("y", "43");
+      lambda.setAttribute("fill", "currentColor");
+      lambda.setAttribute("font-family", "Iosevka Term, IBM Plex Mono, monospace");
+      lambda.setAttribute("font-size", "34");
+      lambda.setAttribute("font-weight", "700");
+      lambda.setAttribute("text-anchor", "middle");
+      lambda.textContent = "λ";
+      svg.append(lambda);
+
+      return svg;
+    }
+
     const ring = document.createElementNS(ns, "circle");
     ring.setAttribute("cx", "32");
     ring.setAttribute("cy", "32");
