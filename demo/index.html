@@ -29,28 +29,6 @@
     <div class="shell">
       <header class="hero">
         <p class="eyebrow">Lean 4 + CodeMirror 6</p>
-        <div class="status-card" aria-label="Runtime status">
-          <div class="status-row">
-            <span>Status</span>
-            <strong id="status">Booting</strong>
-          </div>
-          <div class="status-row">
-            <span>Services</span>
-            <div id="service-statuses" class="service-statuses">Starting</div>
-          </div>
-          <div class="status-row">
-            <span>Diagnostics</span>
-            <strong id="diagnostics-summary">0 errors</strong>
-          </div>
-          <div class="status-row">
-            <span>Document</span>
-            <code id="document-uri">Loading</code>
-          </div>
-          <div class="status-row">
-            <span>Workspace</span>
-            <code id="root-uri">Loading</code>
-          </div>
-        </div>
       </header>
 
       <main class="layout">
@@ -62,20 +40,45 @@
           <div id="editor" class="editor-host"></div>
         </section>
 
-        <aside class="panel panel-help">
-          <div class="panel-head">
-            <h2>Help</h2>
+        <aside class="side-rail">
+          <div class="status-card" aria-label="Runtime status">
+            <div class="status-row">
+              <span>Status</span>
+              <strong id="status">Booting</strong>
+            </div>
+            <div class="status-row">
+              <span>Services</span>
+              <div id="service-statuses" class="service-statuses">Starting</div>
+            </div>
+            <div class="status-row">
+              <span>Diagnostics</span>
+              <strong id="diagnostics-summary">0 errors</strong>
+            </div>
+            <div class="status-row">
+              <span>Document</span>
+              <code id="document-uri">Loading</code>
+            </div>
+            <div class="status-row">
+              <span>Workspace</span>
+              <code id="root-uri">Loading</code>
+            </div>
           </div>
-          <div id="documents" class="documents"></div>
-          <ul class="help-list">
-            <li>Hover over <code>Nat.succ</code> or trigger completion with <code>Ctrl-Space</code>.</li>
-            <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
-            <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
-            <li>Each embedded Rust block has its own small inline enable/disable button.</li>
-            <li>Open <code>Main.rs</code> to edit Rust comments that contain Lean snippets.</li>
-            <li>Edit the file to force diagnostics or signature help.</li>
-          </ul>
-          <div id="events" class="events"></div>
+
+          <section class="panel panel-help">
+            <div class="panel-head">
+              <h2>Help</h2>
+            </div>
+            <div id="documents" class="documents"></div>
+            <ul class="help-list">
+              <li>Hover over <code>Nat.succ</code> or trigger completion with <code>Ctrl-Space</code>.</li>
+              <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
+              <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
+              <li>Each embedded Rust block has its own small inline enable/disable button.</li>
+              <li>Open <code>Main.rs</code> to edit Rust comments that contain Lean snippets.</li>
+              <li>Edit the file to force diagnostics or signature help.</li>
+            </ul>
+            <div id="events" class="events"></div>
+          </section>
         </aside>
       </main>
     </div>

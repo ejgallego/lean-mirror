@@ -22,7 +22,6 @@ code {
 }
 
 .shell {
-  position: relative;
   max-width: 1320px;
   margin: 0 auto;
   padding: 22px 24px 40px;
@@ -44,6 +43,14 @@ code {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
   gap: 20px;
+  align-items: start;
+}
+
+.side-rail {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
 }
 
 .panel {
@@ -109,11 +116,6 @@ code {
 }
 
 .status-card {
-  position: absolute;
-  top: 22px;
-  right: 24px;
-  z-index: 30;
-  width: min(360px, calc(100% - 48px));
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(49, 83, 68, 0.92);
@@ -203,7 +205,6 @@ code {
 }
 
 .panel-help {
-  margin-top: 132px;
   padding-bottom: 16px;
 }
 
@@ -263,20 +264,6 @@ code {
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;
-  }
-
-  .hero {
-    margin-bottom: 14px;
-  }
-
-  .status-card {
-    position: static;
-    width: 100%;
-    margin-top: 12px;
-  }
-
-  .panel-help {
-    margin-top: 0;
   }
 
   .panel-editor {
