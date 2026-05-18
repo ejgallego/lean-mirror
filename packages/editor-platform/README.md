@@ -29,6 +29,7 @@ This package must not own:
 - `createEditorPlatformShellView`: pure view model for shell status, diagnostics text, and service-light state
 - `ServiceEvent`: editor-agnostic lifecycle events for starting, ready, stale, failed, and stopped services
 - `DocumentSnapshot`: URI, language, version, open state, and sync state for files or virtual documents
+- `createDocumentSnapshot`, `documentTitleFromUri`, `inferLanguageIdFromUri`: shared document identity helpers for browser demos and editor shells
 - `EditorDiagnostic`: common diagnostic shape with UTF-16 ranges
 - `HostToEditorMessage` / `EditorToHostMessage`: typed host/webview protocol messages with no VS Code dependency
 - `createHostEndpoint` / `createEditorEndpoint`: small typed adapters around `postMessage`-style transports
