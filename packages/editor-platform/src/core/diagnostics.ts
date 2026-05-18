@@ -28,6 +28,15 @@ export interface DiagnosticSummary {
   hints: number;
 }
 
+export interface DiagnosticsForDocumentOptions {
+  includeUnscoped?: boolean | undefined;
+}
+
+export interface DiagnosticsByDocument {
+  documents: ReadonlyMap<DocumentUri, readonly EditorDiagnostic[]>;
+  unscoped: readonly EditorDiagnostic[];
+}
+
 export function summarizeDiagnostics(diagnostics: readonly EditorDiagnostic[]): DiagnosticSummary {
   const summary: DiagnosticSummary = {
     errors: 0,
@@ -54,4 +63,43 @@ export function summarizeDiagnostics(diagnostics: readonly EditorDiagnostic[]): 
   }
 
   return summary;
+}
+
+export function diagnosticsForDocument(
+  diagnostics: readonly EditorDiagnostic[],
+  uri: DocumentUri,
+  options: DiagnosticsForDocumentOptions = {}
+): readonly EditorDiagnostic[] {
+  return diagnostics.filter(
+    (diagnostic) => diagnostic.uri === uri || (options.includeUnscoped && diagnostic.uri === undefined)
+  );
+}
+
+export function summarizeDiagnosticsForDocument(
+  diagnostics: readonly EditorDiagnostic[],
+  uri: DocumentUri,
+  options: DiagnosticsForDocumentOptions = {}
+): DiagnosticSummary {
+  return summarizeDiagnostics(diagnosticsForDocument(diagnostics, uri, options));
+}
+
+export function groupDiagnosticsByDocument(diagnostics: readonly EditorDiagnostic[]): DiagnosticsByDocument {
+  const documents = new Map<DocumentUri, EditorDiagnostic[]>();
+  const unscoped: EditorDiagnostic[] = [];
+
+  for (const diagnostic of diagnostics) {
+    if (!diagnostic.uri) {
+      unscoped.push(diagnostic);
+      continue;
+    }
+
+    const documentDiagnostics = documents.get(diagnostic.uri);
+    if (documentDiagnostics) {
+      documentDiagnostics.push(diagnostic);
+    } else {
+      documents.set(diagnostic.uri, [diagnostic]);
+    }
+  }
+
+  return { documents, unscoped };
 }

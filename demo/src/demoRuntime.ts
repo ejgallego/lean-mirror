@@ -68,13 +68,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
   const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
 
-  function setCurrentUri(uri: string, languageId: string): void {
-    currentUri = uri;
-    currentLanguageId = languageId;
-    options.ui.setCurrentDocument(uri, languageId);
-    options.ui.setActiveDocument(uri);
-  }
-
   const embeddedEditors = createEmbeddedEditorShell({
     currentLanguageId() {
       return currentLanguageId;
@@ -386,6 +379,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     currentView?.destroy();
     embeddedEditors.close();
     options.ui.editorHost.replaceChildren();
+    currentUri = uri;
+    currentLanguageId = languageId;
 
     const languageExtensions: Extension[] =
       languageId === "rust"
@@ -427,7 +422,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       }),
     });
     currentView = view;
-    setCurrentUri(uri, languageId);
+    options.ui.setCurrentDocument(uri, languageId);
+    options.ui.setActiveDocument(uri);
     if (languageId === "rust") {
       scheduleRustMainPersist(session, uri, doc);
     }
