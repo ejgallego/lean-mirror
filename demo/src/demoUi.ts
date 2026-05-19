@@ -6,6 +6,7 @@ import {
   EditorServiceRuntime,
   createEditorPlatformShellView,
   documentTitleFromUri,
+  serviceEventFromConnectionStatus,
   type DocumentSyncState,
   type EditorDiagnostic,
   type EditorServiceDescriptor,
@@ -69,12 +70,12 @@ export function demoTheme(): Extension {
 
 function hostEventFromText(text: string): ServiceEvent {
   if (text === "Ready") {
-    return { type: "ready", serviceId: hostService.id, message: text };
+    return serviceEventFromConnectionStatus(hostService.id, { phase: "ready", message: text });
   }
   if (text === "Reconnecting") {
-    return { type: "stale", serviceId: hostService.id, reason: text };
+    return serviceEventFromConnectionStatus(hostService.id, { phase: "stale", message: text });
   }
-  return { type: "starting", serviceId: hostService.id, message: text };
+  return serviceEventFromConnectionStatus(hostService.id, { phase: "connecting", message: text });
 }
 
 function renderServiceStatuses(

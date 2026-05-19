@@ -1,5 +1,10 @@
 import type { LogLevel } from "../core/logs.js";
-import type { EditorServiceDescriptor, ServiceEvent } from "../services/status.js";
+import {
+  serviceEventFromConnectionStatus,
+  type EditorServiceDescriptor,
+  type ServiceConnectionStatus,
+  type ServiceEvent
+} from "../services/status.js";
 import type { EditorPlatformStore } from "./platformStore.js";
 
 export type ServiceRequestId = string | number;
@@ -65,6 +70,20 @@ export class EditorServiceRuntime {
     });
   }
 
+  connecting(message?: string): void {
+    this.recordConnectionStatus({
+      phase: "connecting",
+      ...(message ? { message } : {})
+    });
+  }
+
+  initializing(message?: string): void {
+    this.recordConnectionStatus({
+      phase: "initializing",
+      ...(message ? { message } : {})
+    });
+  }
+
   ready(message?: string): void {
     this.record({
       type: "ready",
@@ -96,6 +115,10 @@ export class EditorServiceRuntime {
       serviceId: this.descriptor.id,
       ...(message ? { message } : {})
     });
+  }
+
+  recordConnectionStatus(status: ServiceConnectionStatus): void {
+    this.record(serviceEventFromConnectionStatus(this.descriptor.id, status));
   }
 
   record(event: ServiceEvent): void {
@@ -193,6 +216,10 @@ export class EditorServiceRuntime {
     switch (event.type) {
       case "starting":
         return event.message ? `${this.descriptor.label} starting: ${event.message}` : `${this.descriptor.label} starting`;
+      case "initializing":
+        return event.message
+          ? `${this.descriptor.label} initializing: ${event.message}`
+          : `${this.descriptor.label} initializing`;
       case "ready":
         return event.message ? `${this.descriptor.label} ready: ${event.message}` : `${this.descriptor.label} ready`;
       case "stale":

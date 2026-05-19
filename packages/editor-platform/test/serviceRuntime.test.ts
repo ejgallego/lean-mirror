@@ -20,13 +20,38 @@ describe("EditorServiceRuntime", () => {
 
     runtime.starting("Connecting");
     now = 125;
+    runtime.initializing();
+    now = 150;
     runtime.ready();
 
     expect(store.snapshot.services.lean?.status).toEqual({ state: "ready" });
-    expect(store.snapshot.services.lean?.updatedAt).toBe(125);
+    expect(store.snapshot.services.lean?.updatedAt).toBe(150);
     expect(store.snapshot.logs.map((event) => event.message)).toEqual([
       "Lean starting: Connecting",
+      "Lean initializing",
       "Lean ready"
+    ]);
+  });
+
+  test("records generic connection statuses", () => {
+    const store = new EditorPlatformStore();
+    const runtime = new EditorServiceRuntime(store, {
+      id: "lean",
+      kind: "lean-lsp",
+      label: "Lean"
+    });
+
+    runtime.connecting();
+    runtime.recordConnectionStatus({ phase: "failed", message: "Lean exited", recoverable: true });
+
+    expect(store.snapshot.services.lean?.status).toEqual({
+      state: "failed",
+      message: "Lean exited",
+      recoverable: true
+    });
+    expect(store.snapshot.logs.map((event) => event.message)).toEqual([
+      "Lean starting: Connecting",
+      "Lean failed: Lean exited"
     ]);
   });
 

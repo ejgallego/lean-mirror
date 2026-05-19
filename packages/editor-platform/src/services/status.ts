@@ -10,6 +10,12 @@ export type ServiceEvent =
       timestamp?: number;
     }
   | {
+      type: "initializing";
+      serviceId: string;
+      message?: string;
+      timestamp?: number;
+    }
+  | {
       type: "ready";
       serviceId: string;
       message?: string;
@@ -66,6 +72,37 @@ export type ServiceStatus =
       recoverable?: boolean;
     };
 
+export type ServiceConnectionStatus =
+  | {
+      phase: "stopped";
+      message?: string;
+    }
+  | {
+      phase: "connecting";
+      message?: string;
+    }
+  | {
+      phase: "initializing";
+      message?: string;
+    }
+  | {
+      phase: "ready";
+      message?: string;
+    }
+  | {
+      phase: "stale";
+      message?: string;
+    }
+  | {
+      phase: "failed";
+      message: string;
+      recoverable?: boolean;
+    };
+
+export interface ServiceEventFromConnectionStatusOptions {
+  timestamp?: number | undefined;
+}
+
 export interface EditorServiceDescriptor {
   id: string;
   kind: ServiceKind;
@@ -89,6 +126,11 @@ export function serviceStatusFromEvent(event: ServiceEvent): ServiceStatus {
         state: "starting",
         ...(event.message ? { message: event.message } : {})
       };
+    case "initializing":
+      return {
+        state: "initializing",
+        ...(event.message ? { message: event.message } : {})
+      };
     case "ready":
       return {
         state: "ready",
@@ -110,6 +152,55 @@ export function serviceStatusFromEvent(event: ServiceEvent): ServiceStatus {
         state: "stopped",
         ...(event.message ? { message: event.message } : {})
       };
+  }
+}
+
+export function serviceEventFromConnectionStatus(
+  serviceId: string,
+  status: ServiceConnectionStatus,
+  options: ServiceEventFromConnectionStatusOptions = {}
+): ServiceEvent {
+  const withTimestamp = (event: ServiceEvent): ServiceEvent =>
+    options.timestamp === undefined ? event : { ...event, timestamp: options.timestamp };
+
+  switch (status.phase) {
+    case "connecting":
+      return withTimestamp({
+        type: "starting",
+        serviceId,
+        message: status.message ?? "Connecting"
+      });
+    case "initializing":
+      return withTimestamp({
+        type: "initializing",
+        serviceId,
+        ...(status.message ? { message: status.message } : {})
+      });
+    case "ready":
+      return withTimestamp({
+        type: "ready",
+        serviceId,
+        ...(status.message ? { message: status.message } : {})
+      });
+    case "stale":
+      return withTimestamp({
+        type: "stale",
+        serviceId,
+        ...(status.message ? { reason: status.message } : {})
+      });
+    case "failed":
+      return withTimestamp({
+        type: "failed",
+        serviceId,
+        message: status.message,
+        ...(status.recoverable === undefined ? {} : { recoverable: status.recoverable })
+      });
+    case "stopped":
+      return withTimestamp({
+        type: "stopped",
+        serviceId,
+        ...(status.message ? { message: status.message } : {})
+      });
   }
 }
 
