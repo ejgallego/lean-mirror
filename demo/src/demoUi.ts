@@ -2,15 +2,16 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   createDocumentSnapshot,
+  createEditorPlatformShellView,
   EditorPlatformStore,
   EditorServiceRuntime,
-  createEditorPlatformShellView,
   documentTitleFromUri,
+  renderEditorPlatformStatusPanel,
   serviceEventFromConnectionStatus,
   type DocumentSyncState,
   type EditorDiagnostic,
   type EditorServiceDescriptor,
-  type EditorServiceStatusView,
+  type EditorPlatformShellView,
   inferLanguageIdFromUri,
   type ServiceEvent,
 } from "@leanprover/editor-platform";
@@ -78,55 +79,17 @@ function hostEventFromText(text: string): ServiceEvent {
   return serviceEventFromConnectionStatus(hostService.id, { phase: "connecting", message: text });
 }
 
-function renderServiceStatuses(
-  servicesEl: HTMLDivElement,
-  services: readonly EditorServiceStatusView[],
-): void {
-  servicesEl.replaceChildren();
-  if (services.length === 0) {
-    servicesEl.textContent = "Starting";
-    return;
-  }
-
-  for (const service of services) {
-    const row = document.createElement("div");
-    row.className = "service-status";
-    row.dataset.state = service.lightState;
-
-    const light = document.createElement("span");
-    light.className = "service-light";
-    light.setAttribute("aria-hidden", "true");
-
-    const label = document.createElement("strong");
-    label.textContent = service.label;
-
-    const status = document.createElement("code");
-    status.textContent = service.statusLabel;
-
-    row.append(light, label, status);
-    servicesEl.append(row);
-  }
-}
-
 export function queryDemoUi(
   root: ParentNode = document,
   platformStore = new EditorPlatformStore(),
 ): DemoUi | null {
-  const statusEl = root.querySelector<HTMLSpanElement>("#status");
-  const servicesEl = root.querySelector<HTMLDivElement>("#service-statuses");
-  const diagnosticsEl = root.querySelector<HTMLElement>("#diagnostics-summary");
-  const rootUriEl = root.querySelector<HTMLElement>("#root-uri");
-  const documentUriEl = root.querySelector<HTMLElement>("#document-uri");
+  const statusPanelEl = root.querySelector<HTMLDivElement>("#status-panel");
   const eventsEl = root.querySelector<HTMLDivElement>("#events");
   const editorHost = root.querySelector<HTMLDivElement>("#editor");
   const documentsEl = root.querySelector<HTMLDivElement>("#documents");
 
   if (
-    !statusEl ||
-    !servicesEl ||
-    !diagnosticsEl ||
-    !rootUriEl ||
-    !documentUriEl ||
+    !statusPanelEl ||
     !eventsEl ||
     !editorHost ||
     !documentsEl
@@ -134,16 +97,18 @@ export function queryDemoUi(
     return null;
   }
 
-  platformStore.subscribe((snapshot) => {
-    const shellView = createEditorPlatformShellView(snapshot, { hostServiceId: hostService.id });
-    statusEl.textContent = shellView.statusText;
-    diagnosticsEl.textContent = shellView.activeDocumentUri
-      ? shellView.activeDocumentDiagnosticsText
-      : shellView.diagnosticsText;
-    renderServiceStatuses(servicesEl, shellView.services);
-    if (shellView.activeDocumentUri) {
-      documentUriEl.textContent = shellView.activeDocumentUri;
+  let rootUri = "Loading";
+  let currentShellView: EditorPlatformShellView | null = null;
+  const renderStatusPanel = () => {
+    if (!currentShellView) {
+      return;
     }
+    renderEditorPlatformStatusPanel(statusPanelEl, currentShellView, { workspaceUri: rootUri });
+  };
+
+  platformStore.subscribe((snapshot) => {
+    currentShellView = createEditorPlatformShellView(snapshot, { hostServiceId: hostService.id });
+    renderStatusPanel();
   }, { emitCurrent: true });
   const hostRuntime = new EditorServiceRuntime(platformStore, hostService);
 
@@ -206,7 +171,8 @@ export function queryDemoUi(
       }));
     },
     setRootUri(uri: string) {
-      rootUriEl.textContent = uri;
+      rootUri = uri;
+      renderStatusPanel();
     },
     setStatus(text: string) {
       hostRuntime.record(hostEventFromText(text));

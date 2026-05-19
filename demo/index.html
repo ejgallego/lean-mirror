@@ -41,28 +41,7 @@
         </section>
 
         <aside class="side-rail">
-          <div class="status-card" aria-label="Runtime status">
-            <div class="status-row">
-              <span>Status</span>
-              <strong id="status">Booting</strong>
-            </div>
-            <div class="status-row">
-              <span>Services</span>
-              <div id="service-statuses" class="service-statuses">Starting</div>
-            </div>
-            <div class="status-row">
-              <span>Diagnostics</span>
-              <strong id="diagnostics-summary">0 errors</strong>
-            </div>
-            <div class="status-row">
-              <span>Document</span>
-              <code id="document-uri">Loading</code>
-            </div>
-            <div class="status-row">
-              <span>Workspace</span>
-              <code id="root-uri">Loading</code>
-            </div>
-          </div>
+          <div id="status-panel" class="status-card" aria-label="Runtime status"></div>
 
           <section class="panel panel-help">
             <div class="panel-head">
