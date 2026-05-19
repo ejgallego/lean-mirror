@@ -8,4 +8,5 @@ export * from "./services/status.js";
 export * from "./shell/platformStore.js";
 export * from "./shell/serviceRuntime.js";
 export * from "./shell/shellView.js";
+export * from "./shell/statusPanel.js";
 export * from "./shell/store.js";

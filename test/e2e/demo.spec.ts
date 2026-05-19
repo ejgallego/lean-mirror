@@ -71,11 +71,15 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
   );
 }
 
+function statusValue(page: Page, kind: string) {
+  return page.locator(`[data-platform-status-part="value"][data-platform-status-kind="${kind}"]`);
+}
+
 async function openDocument(page: Page, name: string) {
   const button = page.getByRole("button", { name }).first();
   await expect(button).toBeVisible({ timeout: 30_000 });
   await button.click();
-  await expect(page.locator("#document-uri")).toContainText(name, { timeout: 30_000 });
+  await expect(statusValue(page, "document")).toContainText(name, { timeout: 30_000 });
 }
 
 async function openDocumentContaining(page: Page, name: string, text: string) {
@@ -110,8 +114,8 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
-  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.rs");
 
   await openDocument(page, "Main.lean");
 
@@ -135,7 +139,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
 test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
@@ -161,7 +165,7 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
 test("demo toggles embedded widgets on and off", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
@@ -184,7 +188,7 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
 test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
@@ -200,8 +204,8 @@ test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
 test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
-  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.rs");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
   await expect
@@ -214,8 +218,8 @@ test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({
 test("demo highlights Rust and embedded Lean code", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
-  await expect(page.locator("#document-uri")).toContainText("Main.rs");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.rs");
   await expect.poll(() => hasHighlightedToken(page, "#editor > .cm-editor .cm-line span", "pub")).toBe(true);
   await expect
     .poll(() => hasHighlightedToken(page, ".cm-embedded-block-widget .cm-line span", "#check"))
@@ -225,7 +229,7 @@ test("demo highlights Rust and embedded Lean code", async ({ page }) => {
 test("demo updates Rust and embedded Lean diagnostics after edits", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "\"bad\""))).toBe(true);
@@ -245,7 +249,7 @@ test("demo updates Rust and embedded Lean diagnostics after edits", async ({ pag
 test("demo syncs Rust keyboard edits", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.locator("#status")).toHaveText("Ready");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
   await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
 

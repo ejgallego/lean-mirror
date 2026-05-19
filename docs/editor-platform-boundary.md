@@ -11,15 +11,15 @@ These APIs are already inside the package and are good examples of the intended 
 - document-scoped diagnostics, diagnostic summaries, and logs
 - observable platform snapshots
 - pure shell view models derived from snapshots
+- a compact status-panel DOM renderer over the shell view model
 - typed host/editor protocol envelopes and structural message adapters
 
-These APIs should remain pure TypeScript and avoid direct dependencies on CodeMirror, ProseMirror, VS Code, browser DOM nodes, Lean process management, or Verso CST internals.
+These APIs should remain pure TypeScript and avoid direct dependencies on CodeMirror, ProseMirror, VS Code, Lean process management, or Verso CST internals. The status-panel renderer is the only current DOM-facing exception; it must stay limited to a structural element interface, with layout and CSS owned by host apps.
 
 ## Maybe Share Later
 
 These are plausible extraction candidates, but should require two real consumers and a clear customization story first:
 
-- a compact status-panel DOM renderer that accepts a shell view model and host styling hooks
 - request telemetry helpers for LSP and custom bridge calls
 - VS Code webview host helpers for message wiring, state publication, and test harnesses
 - common document/session test utilities for editor shell demos
@@ -53,14 +53,11 @@ Before adding a new shared API:
 
 ## Near-Term Backlog
 
-1. Status panel renderer:
-   Extract only if it can render from `EditorPlatformShellView` with small customization hooks. It must not import CodeMirror, ProseMirror, or VS Code APIs.
-
-2. Request telemetry:
+1. Request telemetry:
    Consolidate request timing and failure summaries if both LSP clients and custom bridge calls need the same reporting.
 
-3. VS Code webview wiring:
+2. VS Code webview wiring:
    Share typed message/state publication helpers before sharing any VS Code extension classes.
 
-4. Test harness utilities:
+3. Test harness utilities:
    Share document/session fixture helpers once both demos exercise the same host protocol shape.

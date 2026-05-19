@@ -19,7 +19,7 @@ This package must not own:
 - CodeMirror extensions, workspaces, commands, or keymaps
 - ProseMirror schemas, plugins, node views, or reconciliation
 - Verso CST projection logic
-- browser or VS Code UI components
+- browser or VS Code UI components beyond small renderers over shared view models
 - concrete process spawning policy until the host/service boundary is clearer
 
 ## Current API
@@ -27,6 +27,7 @@ This package must not own:
 - `EditorPlatformStore`: observable shell snapshot state for services, documents, diagnostics, and logs
 - `EditorServiceRuntime`: small service lifecycle/request/log adapter around an `EditorPlatformStore`
 - `createEditorPlatformShellView`: pure view model for shell status, diagnostics text, and service-light state
+- `renderEditorPlatformStatusPanel`: small DOM renderer for compact shell status panels
 - `ServiceEvent`: editor-agnostic lifecycle events for starting, ready, stale, failed, and stopped services
 - `ServiceConnectionStatus`, `serviceEventFromConnectionStatus`: shared mapping from host connection phases to lifecycle events
 - `DocumentSnapshot`: URI, language, version, open state, and sync state for files or virtual documents
