@@ -69,3 +69,5 @@ That is intentional while the shared boundary is still being validated. If the A
 ## Next Boundary
 
 Host/editor messaging for VS Code custom editors and browser demos now has a shared typed envelope and transport adapter. Concrete VS Code extension registration, webview HTML, and process spawning should remain outside this package until the host boundary is clearer.
+
+The current boundary and extraction backlog are tracked in [docs/editor-platform-boundary.md](../../docs/editor-platform-boundary.md).

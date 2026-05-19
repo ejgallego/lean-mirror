@@ -46,3 +46,5 @@ Run `npm run test:lsp` in `verso-mirror` when shared changes touch service statu
 ## Why Not Split Yet?
 
 A dedicated `editor-platform` repository or a parent monorepo may make sense once the package boundary settles. Keeping the package here for now gives us clean TypeScript package boundaries without adding release choreography before we know which abstractions are stable.
+
+See [editor-platform-boundary.md](./editor-platform-boundary.md) for the current API boundary and extraction backlog.
