@@ -3,7 +3,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
+import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const host = process.env.LEAN_DEMO_HOST ?? "127.0.0.1";
@@ -27,13 +28,6 @@ const documentLanguageIds = {
 };
 let rustMainUpdateQueue = Promise.resolve();
 const rustBlockUpdateStates = new Map();
-
-const ignorableClosePatterns = [
-  /Watchdog error: Cannot read LSP (?:message|notification): Stream was closed/,
-  /client exited without proper shutdown sequence/,
-  /called `Result::unwrap\(\)` on an `Err` value: "SendError\(\.\.\)"/,
-  /thread 'Worker\d+' panicked at .*rust-analyzer.*reload\.rs/,
-];
 
 function ensureCommandAvailable(command, args, installHint) {
   const result = spawnSync(command, args, {
@@ -348,203 +342,14 @@ const httpServer = createServer((req, res) => {
 
 const wsServer = new WebSocketServer({ noServer: true });
 
-function forwardLspFrames(stream, onMessage) {
-  let buffer = Buffer.alloc(0);
-  stream.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, chunk]);
-    for (;;) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd < 0) {
-        return;
-      }
-      const header = buffer.subarray(0, headerEnd).toString("utf8");
-      const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) {
-        throw new Error(`Malformed LSP header: ${header}`);
-      }
-      const length = Number(match[1]);
-      const bodyStart = headerEnd + 4;
-      if (buffer.length < bodyStart + length) {
-        return;
-      }
-      const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
-      buffer = buffer.subarray(bodyStart + length);
-      onMessage(body);
-    }
-  });
-}
-
-function pipeServerStderr(stream, state) {
-  let buffer = "";
-  let skipBlock = false;
-
-  function emit(line) {
-    const text = line.replace(/\r$/, "");
-    if (skipBlock) {
-      if (text.trim().length === 0) {
-        skipBlock = false;
-      }
-      return;
-    }
-    if (ignorableClosePatterns.some((pattern) => pattern.test(text))) {
-      if (
-        text.includes("client exited without proper shutdown sequence") ||
-        text.includes("SendError") ||
-        text.includes("rust-analyzer")
-      ) {
-        skipBlock = true;
-      }
-      return;
-    }
-    if (text.trim().length === 0) {
-      return;
-    }
-    console.error(text);
-  }
-
-  stream.on("data", (chunk) => {
-    buffer += chunk.toString("utf8");
-    for (;;) {
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) {
-        break;
-      }
-      emit(buffer.slice(0, newline));
-      buffer = buffer.slice(newline + 1);
-    }
-  });
-
-  stream.on("end", () => {
-    if (buffer.length > 0) {
-      emit(buffer);
-      buffer = "";
-    }
-  });
-}
-
-function sendLspFrame(stream, payload) {
-  const body = Buffer.from(JSON.stringify(payload), "utf8");
-  stream.write(`Content-Length: ${body.length}\r\n\r\n`);
-  stream.write(body);
-}
-
-function noteClientLspMessage(state, payload) {
-  try {
-    const message = JSON.parse(payload.toString("utf8"));
-    if (message && typeof message === "object" && message.method === "initialized") {
-      state.initialized = true;
-    }
-  } catch {}
-}
-
-function normalizeClientLspPayload(payload) {
-  try {
-    const message = JSON.parse(payload.toString("utf8"));
-    if (
-      message &&
-      typeof message === "object" &&
-      message.method === "$/cancelRequest" &&
-      "params" in message &&
-      (message.params === null || typeof message.params !== "object")
-    ) {
-      return Buffer.from(
-        JSON.stringify({
-          ...message,
-          params: { id: message.params },
-        }),
-        "utf8",
-      );
-    }
-  } catch {}
-  return payload;
-}
-
-function requestGracefulShutdown(child, state) {
-  if (state.shutdownSent || child.killed || !state.initialized) {
-    return;
-  }
-  state.shutdownSent = true;
-  try {
-    sendLspFrame(child.stdin, {
-      jsonrpc: "2.0",
-      id: 1_000_000,
-      method: "shutdown",
-      params: null,
-    });
-    setTimeout(() => {
-      if (child.killed) {
-        return;
-      }
-      try {
-        sendLspFrame(child.stdin, {
-          jsonrpc: "2.0",
-          method: "exit",
-          params: null,
-        });
-        child.stdin.end();
-      } catch {}
-    }, 25);
-  } catch {}
-}
-
 wsServer.on("connection", (socket) => {
   const lean = spawn("lake", ["env", "lean", "--server"], {
     cwd: workspaceDir,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  const state = { expectedClose: false, initialized: false, shutdownSent: false };
-  pipeServerStderr(lean.stderr, state);
-  attachLspProcess(socket, lean, state);
+  pipeServerStderr(lean.stderr);
+  attachLspProcess(socket, lean);
 });
-
-function attachLspProcess(
-  socket,
-  child,
-  state = { expectedClose: false, initialized: false, shutdownSent: false },
-) {
-  let shuttingDown = false;
-  forwardLspFrames(child.stdout, (message) => {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(message);
-    }
-  });
-
-  socket.on("message", (message) => {
-    const payload = normalizeClientLspPayload(
-      Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8"),
-    );
-    noteClientLspMessage(state, payload);
-    child.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
-    child.stdin.write(payload);
-  });
-
-  const shutdown = () => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-    state.expectedClose = true;
-    requestGracefulShutdown(child, state);
-    if (!child.killed) {
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill();
-        }
-      }, 120);
-    }
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-  };
-
-  socket.on("close", shutdown);
-  socket.on("error", shutdown);
-  child.on("exit", () => {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-  });
-}
 
 httpServer.on("upgrade", (req, socket, head) => {
   if (!req.url) {
@@ -570,9 +375,8 @@ httpServer.on("upgrade", (req, socket, head) => {
         cwd: rootPath,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      const state = { expectedClose: false, initialized: false, shutdownSent: false };
-      pipeServerStderr(rustAnalyzer.stderr, state);
-      attachLspProcess(connection, rustAnalyzer, state);
+      pipeServerStderr(rustAnalyzer.stderr);
+      attachLspProcess(connection, rustAnalyzer);
     });
     return;
   }
@@ -582,9 +386,8 @@ httpServer.on("upgrade", (req, socket, head) => {
         cwd: workspaceDir,
         stdio: ["pipe", "pipe", "pipe"],
       });
-      const state = { expectedClose: false, initialized: false, shutdownSent: false };
-      pipeServerStderr(rustAnalyzer.stderr, state);
-      attachLspProcess(connection, rustAnalyzer, state);
+      pipeServerStderr(rustAnalyzer.stderr);
+      attachLspProcess(connection, rustAnalyzer);
     });
     return;
   }

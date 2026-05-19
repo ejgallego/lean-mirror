@@ -45,6 +45,7 @@ function shouldRestartBridges(path) {
   return (
     file === "demo/index.html" ||
     file === "demo/server.mjs" ||
+    file.startsWith("demo/server/") ||
     file.startsWith("demo/src/") ||
     file.startsWith("demo/workspace/") ||
     file.startsWith("src/")
@@ -199,6 +200,7 @@ viteServer = await createServer({
 
 viteServer.watcher.add([
   resolve(rootDir, "demo/server.mjs"),
+  resolve(rootDir, "demo/server"),
   resolve(rootDir, "demo/index.html"),
   resolve(rootDir, "demo/src"),
   resolve(rootDir, "demo/workspace"),
