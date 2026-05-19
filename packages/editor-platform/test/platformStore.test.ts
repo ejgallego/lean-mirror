@@ -1,6 +1,8 @@
 import {
   EditorPlatformStore,
+  serviceEventFromConnectionStatus,
   serviceIsUsable,
+  serviceStatusFromEvent,
   serviceStatusLabel,
   summarizeDiagnostics
 } from "../src/index.js";
@@ -72,6 +74,30 @@ describe("service helpers", () => {
     expect(serviceIsUsable({ state: "ready" })).toBe(true);
     expect(serviceIsUsable({ state: "failed", message: "crashed" })).toBe(false);
     expect(serviceStatusLabel({ state: "starting" })).toBe("Starting");
+    expect(serviceStatusLabel({ state: "initializing" })).toBe("Initializing");
     expect(serviceStatusLabel({ state: "failed", message: "Lean exited" })).toBe("Lean exited");
+  });
+
+  test("maps connection status snapshots to lifecycle events", () => {
+    expect(serviceEventFromConnectionStatus("lean", { phase: "connecting" })).toEqual({
+      type: "starting",
+      serviceId: "lean",
+      message: "Connecting"
+    });
+    expect(serviceStatusFromEvent({ type: "initializing", serviceId: "lean" })).toEqual({
+      state: "initializing"
+    });
+    expect(
+      serviceEventFromConnectionStatus("lean", {
+        phase: "failed",
+        message: "Lean exited",
+        recoverable: true
+      })
+    ).toEqual({
+      type: "failed",
+      serviceId: "lean",
+      message: "Lean exited",
+      recoverable: true
+    });
   });
 });
