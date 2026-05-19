@@ -436,9 +436,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setCurrentDocument(session.documentUri);
 
   options.ui.setStatus("Connecting to Lean");
-  leanRuntime.starting("Connecting");
+  leanRuntime.connecting();
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
-  leanRuntime.starting("Initializing");
+  leanRuntime.initializing();
   client = createLeanLspClient({
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
@@ -472,9 +472,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   }
 
   if (session.rustMainWebsocketUrl) {
-    rustRuntime.starting("Connecting");
+    rustRuntime.connecting();
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
-    rustRuntime.starting("Initializing");
+    rustRuntime.initializing();
     rustClient = new LSPClient({
       extensions: languageServerExtensions(),
       notificationHandlers: {
@@ -507,7 +507,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    leanRuntime.stale("Reconnecting");
+    leanRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
     options.ui.logEvent("Lean server connection closed. Waiting for restart.");
     options.requestRestart("Lean server connection closed.");
   };
@@ -516,7 +516,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return;
     }
     options.ui.setStatus("Reconnecting");
-    leanRuntime.stale("Reconnecting");
+    leanRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
     options.ui.logEvent("WebSocket transport interrupted. Retrying.");
     options.requestRestart("WebSocket transport interrupted.");
   };
