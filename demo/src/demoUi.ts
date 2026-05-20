@@ -6,6 +6,7 @@ import {
   EditorPlatformStore,
   EditorServiceRuntime,
   documentTitleFromUri,
+  renderEditorPlatformLogPanel,
   renderEditorPlatformStatusPanel,
   renderEditorPlatformWorkspaceShell,
   serviceEventFromConnectionStatus,
@@ -162,6 +163,7 @@ export function queryDemoUi(
   platformStore.subscribe((snapshot) => {
     currentShellView = createEditorPlatformShellView(snapshot, { hostServiceId: hostService.id });
     renderStatusPanel();
+    renderEditorPlatformLogPanel(eventsEl, snapshot.logs, { levels: ["info", "warn", "error"] });
   }, { emitCurrent: true });
   const hostRuntime = new EditorServiceRuntime(platformStore, hostService);
 
@@ -170,10 +172,6 @@ export function queryDemoUi(
     infoviewHost,
     platformStore,
     logEvent(text: string) {
-      const item = document.createElement("div");
-      item.className = "event";
-      item.textContent = text;
-      eventsEl.prepend(item);
       platformStore.appendLog({
         level: "info",
         message: text,
