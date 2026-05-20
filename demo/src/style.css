@@ -3,11 +3,8 @@
 :root {
   color-scheme: light;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(246, 214, 119, 0.35), transparent 28%),
-    radial-gradient(circle at top right, rgba(53, 126, 102, 0.16), transparent 24%),
-    linear-gradient(180deg, #f6f1e2 0%, #efe5cf 100%);
-  color: #2b2418;
+  background: linear-gradient(180deg, #f4f6f1 0%, #e7ece4 100%);
+  color: #263128;
 }
 
 * {
@@ -24,66 +21,70 @@ code {
 }
 
 .shell {
-  max-width: 1320px;
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 22px 24px 40px;
+  padding: 18px 20px 28px;
 }
 
 .hero {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .eyebrow {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   font-size: 11px;
-  color: #8a6c2f;
+  color: #657346;
 }
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.44fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 31vw, 500px);
+  gap: 16px;
   align-items: start;
 }
 
 .side-rail {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   align-content: start;
-  grid-template-rows: auto minmax(340px, 1fr) auto;
+  grid-template-rows: auto auto auto;
   min-width: 0;
+  position: sticky;
+  top: 18px;
 }
 
 .panel {
-  border: 1px solid rgba(120, 93, 39, 0.2);
-  border-radius: 20px;
-  background: rgba(255, 251, 243, 0.88);
-  box-shadow: 0 16px 48px rgba(81, 64, 25, 0.08);
+  min-width: 0;
+  border: 1px solid rgba(92, 111, 91, 0.22);
+  border-radius: 8px;
+  background: rgba(252, 253, 249, 0.96);
+  box-shadow: 0 10px 28px rgba(38, 49, 40, 0.08);
   backdrop-filter: blur(10px);
 }
 
 .panel-head {
-  padding: 18px 20px 0;
+  padding: 12px 14px 0;
 }
 
 .panel-head h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #6f5a2c;
+  letter-spacing: 0;
+  color: #506147;
 }
 
 .panel-head p {
-  margin: 8px 0 0;
-  color: #5a4d38;
-  line-height: 1.5;
+  margin: 6px 0 0;
+  color: #566253;
+  font-size: 0.9rem;
+  line-height: 1.42;
 }
 
 .panel-editor {
-  min-height: 68vh;
+  min-height: calc(100vh - 86px);
   display: flex;
   flex-direction: column;
 }
@@ -91,13 +92,13 @@ code {
 .editor-host {
   min-height: 0;
   flex: 1;
-  padding: 16px 20px 20px;
+  padding: 10px 12px 12px;
 }
 
 .editor-host > .cm-editor {
   height: 100%;
-  border: 1px solid #dfd3b9;
-  border-radius: 16px;
+  border: 1px solid #cbd6c9;
+  border-radius: 8px;
   overflow: visible;
 }
 
@@ -119,16 +120,16 @@ code {
 }
 
 .status-card {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(49, 83, 68, 0.92);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(38, 59, 51, 0.94);
   color: #f4f8f5;
-  box-shadow: 0 12px 32px rgba(35, 55, 43, 0.14);
+  box-shadow: 0 8px 20px rgba(35, 55, 43, 0.14);
 }
 
 .status-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -140,15 +141,15 @@ code {
 
 .status-row span {
   opacity: 0.72;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
 }
 
 .status-row code,
 .status-row strong {
   min-width: 0;
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
@@ -163,15 +164,15 @@ code {
 
 .service-status {
   display: grid;
-  grid-template-columns: 10px minmax(4.5rem, max-content) minmax(0, 1fr);
-  gap: 7px;
+  grid-template-columns: 9px minmax(4.2rem, max-content) minmax(0, 1fr);
+  gap: 6px;
   align-items: center;
   min-width: 0;
 }
 
 .service-light {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #aeb9b2;
   box-shadow: 0 0 0 3px rgba(244, 248, 245, 0.08);
@@ -198,44 +199,53 @@ code {
 }
 
 .service-status strong {
-  font-size: 0.84rem;
-}
-
-.service-status code {
   font-size: 0.78rem;
 }
 
+.service-status code {
+  font-size: 0.74rem;
+}
+
 .panel-help {
-  padding-bottom: 16px;
+  max-height: min(26vh, 260px);
+  overflow: auto;
+  padding-bottom: 12px;
 }
 
 .panel-infoview {
-  min-height: 44vh;
+  min-height: 360px;
+  height: clamp(380px, 56vh, 620px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  resize: vertical;
+}
+
+.panel-infoview .panel-head {
+  border-bottom: 1px solid rgba(92, 111, 91, 0.14);
+  padding-bottom: 8px;
 }
 
 .infoview-host {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px 14px 14px;
+  padding: 8px 12px 12px;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   font-size: 13px;
   line-height: 1.45;
   color: #253228;
-  background: #fffdf7;
+  background: #fbfcf7;
   --vscode-font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   --vscode-font-size: 13px;
   --vscode-editor-font-family: "Iosevka Term", "IBM Plex Mono", monospace;
   --vscode-editor-font-size: 13px;
-  --vscode-editor-background: #fffdf7;
+  --vscode-editor-background: #fbfcf7;
   --vscode-editor-foreground: #253228;
-  --vscode-editorWidget-background: #fffaf0;
-  --vscode-editorWidget-border: #dfd3b9;
-  --vscode-editorHoverWidget-background: #fffaf0;
-  --vscode-editorHoverWidget-border: #dfd3b9;
+  --vscode-editorWidget-background: #f8faf2;
+  --vscode-editorWidget-border: #cbd6c9;
+  --vscode-editorHoverWidget-background: #f8faf2;
+  --vscode-editorHoverWidget-border: #cbd6c9;
   --vscode-editor-selectionBackground: #d7e8ff;
   --vscode-editor-inactiveSelectionBackground: #edf3f7;
   --vscode-editor-lineHighlightBackground: #fff5d9;
@@ -244,9 +254,9 @@ code {
   --vscode-button-background: #274d40;
   --vscode-button-foreground: #f8fbf9;
   --vscode-button-hoverBackground: #315f50;
-  --vscode-input-background: #fffaf0;
+  --vscode-input-background: #f8faf2;
   --vscode-input-foreground: #253228;
-  --vscode-input-border: #dfd3b9;
+  --vscode-input-border: #cbd6c9;
   --vscode-focusBorder: #357e66;
   --vscode-errorForeground: #a33b34;
   --vscode-warningForeground: #8a681b;
@@ -266,26 +276,28 @@ code {
 }
 
 .help-list {
-  margin: 14px 0 0;
-  padding: 0 20px 0 38px;
-  color: #524734;
-  line-height: 1.55;
+  margin: 10px 0 0;
+  padding: 0 14px 0 30px;
+  color: #505a4d;
+  font-size: 0.83rem;
+  line-height: 1.42;
 }
 
 .documents {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 14px 20px 0;
+  padding: 10px 14px 0;
 }
 
 .documents button {
-  border: 1px solid #d8c7a1;
-  border-radius: 999px;
-  background: #fbf5e4;
-  color: #4d412f;
+  border: 1px solid #cbd6c9;
+  border-radius: 6px;
+  background: #f8faf2;
+  color: #384536;
   font: inherit;
-  padding: 8px 14px;
+  font-size: 0.82rem;
+  padding: 5px 8px;
   cursor: pointer;
   transition: transform 120ms ease, background-color 120ms ease;
 }
@@ -301,21 +313,21 @@ code {
 }
 
 .events {
-  margin: 18px 20px 0;
-  border-top: 1px solid #e4dbc6;
-  padding-top: 14px;
+  margin: 10px 14px 0;
+  border-top: 1px solid #dbe3d8;
+  padding-top: 10px;
 }
 
 .event {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f5eedc;
-  color: #54472f;
-  font-size: 0.95rem;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: #eef3ea;
+  color: #485544;
+  font-size: 0.78rem;
 }
 
 .event + .event {
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 @media (max-width: 980px) {
@@ -323,7 +335,22 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .side-rail {
+    height: auto;
+    position: static;
+  }
+
   .panel-editor {
     min-height: 58vh;
+  }
+
+  .panel-infoview {
+    height: 46vh;
+    max-height: none;
+    resize: none;
+  }
+
+  .panel-help {
+    max-height: none;
   }
 }
