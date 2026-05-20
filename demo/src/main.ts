@@ -3,17 +3,15 @@ import {
 } from "./embeddedAdapters.js";
 import { bootDemoRuntime, type DemoRuntime } from "./demoRuntime.js";
 import { createDemoSessionApi } from "./demoSession.js";
-import { demoTheme, queryDemoUi } from "./demoUi.js";
+import { createDemoUi, demoTheme } from "./demoUi.js";
 
 import "./style.css";
 
-const ui = queryDemoUi(document);
-
-if (!ui) {
-  throw new Error("Demo DOM is incomplete.");
+const demoShell = document.querySelector<HTMLElement>("#demo-shell");
+if (!demoShell) {
+  throw new Error("Demo shell mount is missing.");
 }
-
-const demoUi = ui;
+const demoUi = createDemoUi(demoShell);
 
 let apiBase = import.meta.env.VITE_LEAN_DEMO_API ?? "http://127.0.0.1:7357";
 const sessionApi = createDemoSessionApi(apiBase);

@@ -26,47 +26,6 @@
     <script type="module" src="./src/main.ts"></script>
   </head>
   <body>
-    <div class="shell">
-      <header class="hero">
-        <p class="eyebrow">Lean 4 + CodeMirror 6</p>
-      </header>
-
-      <main class="layout">
-        <section class="panel panel-editor">
-          <div class="panel-head">
-            <h2>Editor</h2>
-            <p>Try hover, completion, go-to-definition, rename, formatting, diagnostics, embedded Rust blocks, and embedded Lean snippets in the Rust driver.</p>
-          </div>
-          <div id="editor" class="editor-host"></div>
-        </section>
-
-        <aside class="side-rail">
-          <div id="status-panel" class="status-card" aria-label="Runtime status"></div>
-
-          <section class="panel panel-infoview" aria-label="Lean InfoView">
-            <div class="panel-head">
-              <h2>InfoView</h2>
-            </div>
-            <div id="lean-infoview" class="infoview-host"></div>
-          </section>
-
-          <section class="panel panel-help">
-            <div class="panel-head">
-              <h2>Help</h2>
-            </div>
-            <div id="documents" class="documents"></div>
-            <ul class="help-list">
-              <li>Hover over <code>Nat.succ</code> or trigger completion with <code>Ctrl-Space</code>.</li>
-              <li>Use <code>F12</code> for definition and <code>Shift-F12</code> for references.</li>
-              <li>Rename is on <code>F2</code>. Formatting is on <code>Shift-Alt-F</code>. Undo is on <code>Ctrl-Z</code>.</li>
-              <li>Each embedded Rust block has its own small inline enable/disable button.</li>
-              <li>Open <code>Main.rs</code> to edit Rust comments that contain Lean snippets.</li>
-              <li>Edit the file to force diagnostics or signature help.</li>
-            </ul>
-            <div id="events" class="events"></div>
-          </section>
-        </aside>
-      </main>
-    </div>
+    <div id="demo-shell"></div>
   </body>
 </html>

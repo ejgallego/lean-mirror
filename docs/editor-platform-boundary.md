@@ -12,9 +12,10 @@ These APIs are already inside the package and are good examples of the intended 
 - observable platform snapshots
 - pure shell view models derived from snapshots
 - a compact status-panel DOM renderer over the shell view model
+- a structural workspace-shell DOM renderer with editor, status, info, and secondary slots
 - typed host/editor protocol envelopes and structural message adapters
 
-These APIs should remain pure TypeScript and avoid direct dependencies on CodeMirror, ProseMirror, VS Code, Lean process management, or Verso CST internals. The status-panel renderer is the only current DOM-facing exception; it must stay limited to a structural element interface, with layout and CSS owned by host apps.
+These APIs should remain pure TypeScript and avoid direct dependencies on CodeMirror, ProseMirror, VS Code, Lean process management, or Verso CST internals. The DOM-facing renderers must stay limited to structural element interfaces, with concrete styling and editor-specific content owned by host apps.
 
 ## Maybe Share Later
 

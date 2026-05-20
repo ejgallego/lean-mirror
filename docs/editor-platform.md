@@ -15,7 +15,7 @@ This keeps iteration cheap while the boundary is still moving. It does not requi
 
 When changing `editor-platform` for `lean-mirror`:
 
-1. Keep the API editor-agnostic: service status, document identity, diagnostics, logs, host messages, and pure view models belong here.
+1. Keep the API editor-agnostic: service status, document identity, diagnostics, logs, host messages, pure view models, and structural shell slots belong here.
 2. Keep editor implementation details outside the package: CodeMirror extensions, ProseMirror schema/plugins, concrete VS Code registration, process spawning policy, and Verso CST projection stay in their host repos.
 3. Run the platform checks in this repo:
 
