@@ -14,14 +14,20 @@ import {
   createWebSocketTransport,
   lean4,
   leanUtilities,
+  type Transport,
   type LeanWorkspace,
 } from "../../src/index.js";
 import { createDemoBridge } from "./demoBridge.js";
 import type { DemoSession, DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
 import { buildEmbeddedLeanDocument, type EmbeddedLeanDocument } from "./embeddedLean.js";
-import { createEmbeddedEditorShell } from "./embeddedEditorShell.js";
+import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
+import {
+  createLeanInfoviewHost,
+  forwardLeanClientNotifications,
+  type LeanInfoviewHost,
+} from "./leanInfoview.js";
 
 const leanService: EditorServiceDescriptor = {
   id: "lean-lsp",
@@ -47,15 +53,58 @@ export interface DemoRuntime {
   dispose(): void;
 }
 
+function observeInitializeResult(
+  transport: Transport,
+  onInitializeResult: (result: lsp.InitializeResult) => void,
+): Transport {
+  const handlers = new Map<(message: string) => void, (message: string) => void>();
+  return {
+    send(message) {
+      transport.send(message);
+    },
+    subscribe(handler) {
+      const wrapped = (message: string) => {
+        try {
+          const payload = JSON.parse(message) as Partial<lsp.ResponseMessage>;
+          if (
+            payload &&
+            "result" in payload &&
+            payload.result &&
+            typeof payload.result === "object" &&
+            "capabilities" in payload.result
+          ) {
+            onInitializeResult(payload.result as lsp.InitializeResult);
+          }
+        } catch {
+          // The underlying LSP client will report malformed messages.
+        }
+        handler(message);
+      };
+      handlers.set(handler, wrapped);
+      transport.subscribe(wrapped);
+    },
+    unsubscribe(handler) {
+      const wrapped = handlers.get(handler);
+      if (!wrapped) {
+        return;
+      }
+      handlers.delete(handler);
+      transport.unsubscribe(wrapped);
+    },
+  };
+}
+
 export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
   let currentView: EditorView | null = null;
   let currentLanguageId: string | null = null;
   let currentUri: string | null = null;
   let workspace: LeanWorkspace | null = null;
   let client: ReturnType<typeof createLeanLspClient> | null = null;
+  let leanInfoview: LeanInfoviewHost | null = null;
   let rustClient: LSPClient | null = null;
   let socket: WebSocket | null = null;
   let rustSocket: WebSocket | null = null;
+  let restoreLeanNotificationForwarding: (() => void) | null = null;
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +114,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustMainQueue = Promise.resolve();
   let lastEmbeddedLeanDocument: EmbeddedLeanDocument | null = null;
   let lastRustMainSourceSent: string | null = null;
+  let leanInitializeResult: lsp.InitializeResult | null = null;
   const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
   const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
 
@@ -77,6 +127,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     },
     currentView() {
       return currentView;
+    },
+    setActiveEmbeddedEditor(editor) {
+      setActiveEmbeddedEditor(editor);
     },
     log(message) {
       options.ui.logEvent(message);
@@ -210,6 +263,51 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       byBlock.set(start.blockKey, mapped);
     }
     embeddedEditors.setDiagnostics("lean", byBlock);
+  }
+
+  function embeddedLeanPosition(blockKey: string, view: EditorView, offset: number): lsp.Position | null {
+    if (!lastEmbeddedLeanDocument) {
+      return null;
+    }
+    const clamped = Math.max(0, Math.min(view.state.doc.length, offset));
+    const line = view.state.doc.lineAt(clamped);
+    const blockMappings = lastEmbeddedLeanDocument.mappings.filter((mapping) => mapping.blockKey === blockKey);
+    const mapping = blockMappings.find((candidate) => candidate.blockLineStart === line.from)
+      ?? blockMappings[line.number - 1];
+    if (!mapping) {
+      return null;
+    }
+    return {
+      character: Math.max(0, clamped - line.from),
+      line: mapping.generatedLine,
+    };
+  }
+
+  function embeddedLeanLocation(editor: ActiveEmbeddedEditor): lsp.Location | undefined {
+    if (editor.adapter.kind !== "lean" || !session.embeddedLeanDocumentUri) {
+      return undefined;
+    }
+    const selection = editor.view.state.selection.main;
+    const start = embeddedLeanPosition(editor.block.key, editor.view, selection.from);
+    const end = embeddedLeanPosition(editor.block.key, editor.view, selection.to);
+    if (!start || !end) {
+      return undefined;
+    }
+    return {
+      range: { end, start },
+      uri: session.embeddedLeanDocumentUri,
+    };
+  }
+
+  function setActiveEmbeddedEditor(editor: ActiveEmbeddedEditor | null): void {
+    if (!leanInfoview) {
+      return;
+    }
+    if (!editor) {
+      leanInfoview.updateCursorLocation();
+      return;
+    }
+    leanInfoview.setCursorLocation(embeddedLeanLocation(editor));
   }
 
   function scheduleEmbeddedLeanDiagnosticPull(uri: string, attempt = 0): void {
@@ -409,6 +507,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
               lineWrapping: true,
             },
           });
+    const infoviewExtensions: Extension[] = [leanInfoview?.editorExtension()].filter(
+      (ext): ext is Extension => !!ext,
+    );
 
     const view = new EditorView({
       parent: options.ui.editorHost,
@@ -416,6 +517,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         doc,
         extensions: [
           ...languageExtensions,
+          ...infoviewExtensions,
           options.editorTheme,
           ...embeddedBlockExtensions,
         ],
@@ -442,9 +544,13 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   client = createLeanLspClient({
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+        leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
         applyEmbeddedLeanDiagnostics(params);
         return false;
       },
+    },
+    unhandledNotification(_client, method, params) {
+      leanInfoview?.forwardServerNotification(method, params);
     },
     rootUri: session.rootUri,
     workspace: createLeanWorkspace({
@@ -463,10 +569,36 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       },
     }),
   });
-  client.connect(createWebSocketTransport(socket));
+  client.connect(observeInitializeResult(createWebSocketTransport(socket), (result) => {
+    leanInitializeResult = result;
+  }));
   await client.initializing;
   leanRuntime.ready();
   workspace = client.workspace as LeanWorkspace;
+  leanInfoview = createLeanInfoviewHost({
+    client,
+    container: options.ui.infoviewHost,
+    currentLanguageId() {
+      return currentLanguageId;
+    },
+    currentUri() {
+      return currentUri;
+    },
+    currentView() {
+      return currentView;
+    },
+    log(message) {
+      options.ui.logEvent(message);
+    },
+    requestRestart(reason) {
+      options.requestRestart(reason);
+    },
+    workspace() {
+      return workspace;
+    },
+  });
+  restoreLeanNotificationForwarding = forwardLeanClientNotifications(client, leanInfoview);
+  leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
   if (session.embeddedLeanDocumentUri) {
     await workspace.openServerDocument(session.embeddedLeanDocumentUri);
   }
@@ -501,6 +633,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);
   await mountDocument(session.documentUri, session.initialDoc);
+  leanInfoview.updateCursorLocation();
 
   const handleSocketClose = () => {
     if (disposed) {
@@ -560,6 +693,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       currentView?.destroy();
       currentView = null;
       demoBridge.clear();
+      restoreLeanNotificationForwarding?.();
+      restoreLeanNotificationForwarding = null;
+      leanInfoview?.serverStopped({ message: "Lean server stopped.", reason: "Demo runtime disposed." });
+      leanInfoview?.dispose();
+      leanInfoview = null;
       client?.disconnect();
       leanRuntime.stopped();
       socket?.close();

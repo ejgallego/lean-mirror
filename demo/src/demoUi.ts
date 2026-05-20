@@ -24,6 +24,7 @@ const hostService: EditorServiceDescriptor = {
 
 export interface DemoUi {
   editorHost: HTMLDivElement;
+  infoviewHost: HTMLDivElement;
   logEvent(text: string): void;
   platformStore: EditorPlatformStore;
   renderDocumentButtons(
@@ -86,12 +87,14 @@ export function queryDemoUi(
   const statusPanelEl = root.querySelector<HTMLDivElement>("#status-panel");
   const eventsEl = root.querySelector<HTMLDivElement>("#events");
   const editorHost = root.querySelector<HTMLDivElement>("#editor");
+  const infoviewHost = root.querySelector<HTMLDivElement>("#lean-infoview");
   const documentsEl = root.querySelector<HTMLDivElement>("#documents");
 
   if (
     !statusPanelEl ||
     !eventsEl ||
     !editorHost ||
+    !infoviewHost ||
     !documentsEl
   ) {
     return null;
@@ -114,6 +117,7 @@ export function queryDemoUi(
 
   return {
     editorHost,
+    infoviewHost,
     platformStore,
     logEvent(text: string) {
       const item = document.createElement("div");
