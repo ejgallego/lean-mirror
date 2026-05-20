@@ -1,3 +1,5 @@
+@import "../../node_modules/@leanprover/infoview/dist/index.css";
+
 :root {
   color-scheme: light;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
@@ -41,7 +43,7 @@ code {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.44fr);
   gap: 20px;
   align-items: start;
 }
@@ -50,6 +52,7 @@ code {
   display: grid;
   gap: 16px;
   align-content: start;
+  grid-template-rows: auto minmax(340px, 1fr) auto;
   min-width: 0;
 }
 
@@ -204,6 +207,62 @@ code {
 
 .panel-help {
   padding-bottom: 16px;
+}
+
+.panel-infoview {
+  min-height: 44vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.infoview-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 14px 14px;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #253228;
+  background: #fffdf7;
+  --vscode-font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --vscode-font-size: 13px;
+  --vscode-editor-font-family: "Iosevka Term", "IBM Plex Mono", monospace;
+  --vscode-editor-font-size: 13px;
+  --vscode-editor-background: #fffdf7;
+  --vscode-editor-foreground: #253228;
+  --vscode-editorWidget-background: #fffaf0;
+  --vscode-editorWidget-border: #dfd3b9;
+  --vscode-editorHoverWidget-background: #fffaf0;
+  --vscode-editorHoverWidget-border: #dfd3b9;
+  --vscode-editor-selectionBackground: #d7e8ff;
+  --vscode-editor-inactiveSelectionBackground: #edf3f7;
+  --vscode-editor-lineHighlightBackground: #fff5d9;
+  --vscode-textLink-foreground: #1d6f59;
+  --vscode-textLink-activeForeground: #15533f;
+  --vscode-button-background: #274d40;
+  --vscode-button-foreground: #f8fbf9;
+  --vscode-button-hoverBackground: #315f50;
+  --vscode-input-background: #fffaf0;
+  --vscode-input-foreground: #253228;
+  --vscode-input-border: #dfd3b9;
+  --vscode-focusBorder: #357e66;
+  --vscode-errorForeground: #a33b34;
+  --vscode-warningForeground: #8a681b;
+  --vscode-descriptionForeground: #6a604c;
+  --vscode-badge-background: #274d40;
+  --vscode-badge-foreground: #f8fbf9;
+}
+
+.infoview-host .font-code,
+.infoview-host code,
+.infoview-host pre {
+  font-family: "Iosevka Term", "IBM Plex Mono", monospace;
+}
+
+.infoview-host pre {
+  white-space: pre-wrap;
 }
 
 .help-list {

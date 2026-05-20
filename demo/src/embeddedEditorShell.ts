@@ -13,6 +13,12 @@ import {
   type EmbeddedBlockInlineHandle,
 } from "./embeddedBlocks.js";
 
+export interface ActiveEmbeddedEditor {
+  adapter: AnyEmbeddedBlockEditorAdapter;
+  block: EmbeddedBlock;
+  view: EditorView;
+}
+
 export interface EmbeddedEditorShell {
   close(): void;
   extensionsFor(adapters: readonly AnyEmbeddedBlockEditorAdapter[]): Extension[];
@@ -23,6 +29,7 @@ export interface EmbeddedEditorShellOptions {
   currentLanguageId?(): string | null;
   currentUri(): string | null;
   currentView(): EditorView | null;
+  setActiveEmbeddedEditor?(editor: ActiveEmbeddedEditor | null): void;
   log(message: string): void;
 }
 
@@ -380,14 +387,6 @@ export function createEmbeddedEditorShell(
     isolatePointerEvents(container);
 
     let syncingFromOuter = false;
-    const nestedView = new EditorView({
-      parent: container,
-      state: EditorState.create({
-        doc: block.code,
-        extensions: adapter.editorExtensions(),
-      }),
-    });
-
     const innerSyncExtension = EditorView.updateListener.of((update: ViewUpdate) => {
       if (!update.docChanged || syncingFromOuter) {
         return;
@@ -409,8 +408,28 @@ export function createEmbeddedEditorShell(
         },
       });
     });
-    nestedView.dispatch({
-      effects: StateEffect.appendConfig.of(innerSyncExtension),
+
+    const activeInlineExtension = EditorView.updateListener.of((update: ViewUpdate) => {
+      if (!update.selectionSet && !update.focusChanged && !update.docChanged) {
+        return;
+      }
+      if (update.view.hasFocus) {
+        options.setActiveEmbeddedEditor?.({ adapter, block, view: update.view });
+      } else if (update.focusChanged) {
+        options.setActiveEmbeddedEditor?.(null);
+      }
+    });
+
+    const nestedView = new EditorView({
+      parent: container,
+      state: EditorState.create({
+        doc: block.code,
+        extensions: [
+          ...adapter.editorExtensions(),
+          innerSyncExtension,
+          activeInlineExtension,
+        ],
+      }),
     });
 
     options.log(`Expanded embedded block ${block.title}`);

@@ -215,6 +215,23 @@ test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({
   await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
 });
 
+test("demo infoview follows embedded Lean editors", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
+
+  const embeddedLean = page
+    .locator(".cm-embedded-block-widget .cm-content")
+    .filter({ hasText: "#check helperValue" })
+    .first();
+  await embeddedLean.click();
+
+  const infoview = page.locator("#lean-infoview");
+  await expect(infoview).toContainText("RustSnippets.lean", { timeout: 30_000 });
+  await expect(infoview).toContainText("helperValue : Nat", { timeout: 30_000 });
+});
+
 test("demo highlights Rust and embedded Lean code", async ({ page }) => {
   await page.goto("/");
 

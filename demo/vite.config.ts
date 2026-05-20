@@ -6,9 +6,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: resolve(__dirname),
+  css: {
+    lightningcss: {
+      errorRecovery: true,
+    },
+  },
   resolve: {
     alias: {
       "@leanprover/editor-platform": resolve(__dirname, "../packages/editor-platform/src/index.ts"),
+      "@leanprover/infoview": resolve(
+        __dirname,
+        "../node_modules/@leanprover/infoview/dist/index.production.min.js",
+      ),
+      "react/jsx-runtime": resolve(
+        __dirname,
+        "../node_modules/@leanprover/infoview/dist/react-jsx-runtime.production.min.js",
+      ),
+      "react-dom": resolve(__dirname, "../node_modules/@leanprover/infoview/dist/react-dom.production.min.js"),
+      react: resolve(__dirname, "../node_modules/@leanprover/infoview/dist/react.production.min.js"),
     },
   },
   server: {
