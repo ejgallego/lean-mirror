@@ -66,6 +66,7 @@ describe("demo workspace backend", () => {
       code: "fn changed() {}\n",
       leanDocument: "#check helperValue\n",
       revision: 12,
+      uri: workspace.uris.rustMainUri,
     });
 
     expect(result).toEqual({
