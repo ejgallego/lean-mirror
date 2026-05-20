@@ -1,3 +1,5 @@
+import type { DemoSession, RustMainUpdateRequest, RustMainUpdateResult } from "../shared/demoProtocol.mjs";
+
 export interface DemoWorkspacePaths {
   workspaceDir: string;
   rustBlocksDir: string;
@@ -31,38 +33,17 @@ export interface RustBlockPaths {
   slug: string;
 }
 
-export interface RustMainUpdatePayload {
-  code: string;
-  leanDocument: string;
-  revision: number;
-}
-
-export interface RustMainUpdateResult {
-  leanDocumentUri: string;
-  revision: number;
-}
-
 export interface DemoWorkspace {
   paths: DemoWorkspacePaths;
   uris: DemoWorkspaceUris;
   documentLanguageIds: Record<string, string>;
   prepare(): Promise<void>;
-  readSession(urls: DemoSessionUrls): Promise<{
-    rootUri: string;
-    documentUri: string;
-    documentLanguageIds: Record<string, string>;
-    documents: string[];
-    embeddedLeanDocumentUri: string;
-    initialDoc: string;
-    rustMainDocumentUri: string;
-    rustMainWebsocketUrl: string;
-    websocketUrl: string;
-  }>;
+  readSession(urls: DemoSessionUrls): Promise<DemoSession>;
   createRustBlockSession(key: string, code: string): Promise<RustBlockSession>;
   readDocument(uri: string): Promise<string>;
   rustBlockPaths(key: string): RustBlockPaths;
   updateRustBlockDocument(key: string, code: string, version?: number): Promise<boolean>;
-  updateRustMainDocument(payload: RustMainUpdatePayload): Promise<RustMainUpdateResult>;
+  updateRustMainDocument(payload: RustMainUpdateRequest): Promise<RustMainUpdateResult>;
 }
 
 export function createDemoWorkspace(demoDir: string): DemoWorkspace;

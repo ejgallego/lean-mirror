@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
+import {
+  DEMO_ENDPOINTS,
+  parseCreateRustSessionRequest,
+  parseRustMainUpdateRequest,
+  parseUpdateRustDocumentRequest,
+} from "./shared/demoProtocol.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const host = process.env.LEAN_DEMO_HOST ?? "127.0.0.1";
@@ -28,6 +34,16 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+async function readValidatedJsonBody(req, res, parser, invalidMessage) {
+  try {
+    return parser(await readJsonBody(req));
+  } catch {
+    res.writeHead(400, withCorsHeaders());
+    res.end(invalidMessage);
+    return null;
+  }
+}
+
 async function handleHttpRequest(req, res) {
   if (!req.url) {
     res.writeHead(400, withCorsHeaders());
@@ -39,7 +55,7 @@ async function handleHttpRequest(req, res) {
     res.end();
     return;
   }
-  if (req.url === "/session") {
+  if (req.url === DEMO_ENDPOINTS.session) {
     res.writeHead(
       200,
       withCorsHeaders({
@@ -56,13 +72,14 @@ async function handleHttpRequest(req, res) {
     );
     return;
   }
-  if (req.method === "POST" && req.url === "/rust-session") {
-    const payload = await readJsonBody(req);
-    if (!payload?.key || typeof payload.key !== "string" || typeof payload.code !== "string") {
-      res.writeHead(400, withCorsHeaders());
-      res.end("Invalid rust-session payload");
-      return;
-    }
+  if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustSession) {
+    const payload = await readValidatedJsonBody(
+      req,
+      res,
+      parseCreateRustSessionRequest,
+      "Invalid rust-session payload",
+    );
+    if (!payload) return;
     const session = await demoWorkspace.createRustBlockSession(payload.key, payload.code);
     res.writeHead(
       200,
@@ -79,27 +96,28 @@ async function handleHttpRequest(req, res) {
     );
     return;
   }
-  if (req.method === "POST" && req.url === "/rust-document") {
-    const payload = await readJsonBody(req);
-    if (!payload?.key || typeof payload.key !== "string" || typeof payload.code !== "string") {
-      res.writeHead(400, withCorsHeaders());
-      res.end("Invalid rust-document payload");
-      return;
-    }
+  if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustDocument) {
+    const payload = await readValidatedJsonBody(
+      req,
+      res,
+      parseUpdateRustDocumentRequest,
+      "Invalid rust-document payload",
+    );
+    if (!payload) return;
     await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
     res.writeHead(204, withCorsHeaders());
     res.end();
     return;
   }
-  if (req.method === "POST" && req.url === "/rust-main") {
-    const payload = await readJsonBody(req);
-    if (
-      !payload ||
-      payload.uri !== demoWorkspace.uris.rustMainUri ||
-      typeof payload.code !== "string" ||
-      typeof payload.leanDocument !== "string" ||
-      typeof payload.revision !== "number"
-    ) {
+  if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustMain) {
+    const payload = await readValidatedJsonBody(
+      req,
+      res,
+      parseRustMainUpdateRequest,
+      "Invalid rust-main payload",
+    );
+    if (!payload) return;
+    if (payload.uri !== demoWorkspace.uris.rustMainUri) {
       res.writeHead(400, withCorsHeaders());
       res.end("Invalid rust-main payload");
       return;
@@ -114,7 +132,7 @@ async function handleHttpRequest(req, res) {
     res.end(JSON.stringify(result));
     return;
   }
-  if (req.url.startsWith("/document?")) {
+  if (req.url.startsWith(`${DEMO_ENDPOINTS.document}?`)) {
     const url = new URL(req.url, `http://${host}:${port}`);
     const uri = url.searchParams.get("uri");
     if (!uri) {
