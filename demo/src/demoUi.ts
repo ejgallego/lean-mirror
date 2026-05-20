@@ -7,6 +7,7 @@ import {
   EditorServiceRuntime,
   documentTitleFromUri,
   renderEditorPlatformStatusPanel,
+  renderEditorPlatformWorkspaceShell,
   serviceEventFromConnectionStatus,
   type DocumentSyncState,
   type EditorDiagnostic,
@@ -20,6 +21,23 @@ const hostService: EditorServiceDescriptor = {
   id: "demo-host",
   kind: "demo-host",
   label: "Demo",
+};
+
+const demoWorkspaceShellClassNames = {
+  shell: "shell",
+  header: "hero",
+  eyebrow: "eyebrow",
+  layout: "layout",
+  sideRail: "side-rail",
+  panel: "panel",
+  panelHead: "panel-head",
+  editorPanel: "panel-editor",
+  editorHost: "editor-host",
+  statusPanel: "status-card",
+  infoPanel: "panel-infoview",
+  infoHost: "infoview-host",
+  secondaryPanel: "panel-help",
+  secondaryHost: "help-host",
 };
 
 export interface DemoUi {
@@ -78,6 +96,38 @@ function hostEventFromText(text: string): ServiceEvent {
     return serviceEventFromConnectionStatus(hostService.id, { phase: "stale", message: text });
   }
   return serviceEventFromConnectionStatus(hostService.id, { phase: "connecting", message: text });
+}
+
+export function createDemoUi(
+  container: HTMLElement,
+  platformStore = new EditorPlatformStore(),
+): DemoUi {
+  renderEditorPlatformWorkspaceShell(container, {
+    classNames: demoWorkspaceShellClassNames,
+    eyebrow: "Lean 4 + CodeMirror 6",
+    ids: {
+      info: "lean-infoview",
+    },
+    labels: {
+      editorDescription:
+        "Try hover, completion, go-to-definition, rename, formatting, diagnostics, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
+      infoAriaLabel: "Lean InfoView",
+      infoTitle: "InfoView",
+      secondaryTitle: "Help",
+    },
+  });
+
+  const helpHost = container.querySelector<HTMLElement>("[data-platform-shell-slot='secondary']");
+  if (!helpHost) {
+    throw new Error("Demo shell is missing the secondary host slot.");
+  }
+  renderDemoHelp(helpHost);
+
+  const ui = queryDemoUi(container, platformStore);
+  if (!ui) {
+    throw new Error("Demo shell is incomplete.");
+  }
+  return ui;
 }
 
 export function queryDemoUi(
@@ -182,4 +232,66 @@ export function queryDemoUi(
       hostRuntime.record(hostEventFromText(text));
     },
   };
+}
+
+function renderDemoHelp(host: HTMLElement): void {
+  const ownerDocument = host.ownerDocument;
+  const documentsEl = ownerDocument.createElement("div");
+  documentsEl.id = "documents";
+  documentsEl.className = "documents";
+
+  const helpList = ownerDocument.createElement("ul");
+  helpList.className = "help-list";
+  appendHelpItem(
+    helpList,
+    "Hover over ",
+    helpCode(ownerDocument, "Nat.succ"),
+    " or trigger completion with ",
+    helpCode(ownerDocument, "Ctrl-Space"),
+    ".",
+  );
+  appendHelpItem(
+    helpList,
+    "Use ",
+    helpCode(ownerDocument, "F12"),
+    " for definition and ",
+    helpCode(ownerDocument, "Shift-F12"),
+    " for references.",
+  );
+  appendHelpItem(
+    helpList,
+    "Rename is on ",
+    helpCode(ownerDocument, "F2"),
+    ". Formatting is on ",
+    helpCode(ownerDocument, "Shift-Alt-F"),
+    ". Undo is on ",
+    helpCode(ownerDocument, "Ctrl-Z"),
+    ".",
+  );
+  appendHelpItem(helpList, "Each embedded Rust block has its own small inline enable/disable button.");
+  appendHelpItem(
+    helpList,
+    "Open ",
+    helpCode(ownerDocument, "Main.rs"),
+    " to edit Rust comments that contain Lean snippets.",
+  );
+  appendHelpItem(helpList, "Edit the file to force diagnostics or signature help.");
+
+  const eventsEl = ownerDocument.createElement("div");
+  eventsEl.id = "events";
+  eventsEl.className = "events";
+
+  host.replaceChildren(documentsEl, helpList, eventsEl);
+}
+
+function appendHelpItem(list: HTMLUListElement, ...parts: Array<HTMLElement | string>): void {
+  const item = list.ownerDocument.createElement("li");
+  item.append(...parts);
+  list.append(item);
+}
+
+function helpCode(ownerDocument: Document, text: string): HTMLElement {
+  const element = ownerDocument.createElement("code");
+  element.textContent = text;
+  return element;
 }
