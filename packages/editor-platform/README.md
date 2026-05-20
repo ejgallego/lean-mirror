@@ -27,6 +27,7 @@ This package must not own:
 - `EditorPlatformStore`: observable shell snapshot state for services, documents, diagnostics, and logs
 - `EditorServiceRuntime`: small service lifecycle/request/log adapter around an `EditorPlatformStore`
 - `createEditorPlatformShellView`: pure view model for shell status, diagnostics text, and service-light state
+- `renderEditorPlatformLogPanel`: small DOM renderer for recent platform log events
 - `renderEditorPlatformStatusPanel`: small DOM renderer for compact shell status panels
 - `renderEditorPlatformWorkspaceShell`: structural DOM renderer for editor, status, info, and secondary host slots
 - `ServiceEvent`: editor-agnostic lifecycle events for starting, ready, stale, failed, and stopped services

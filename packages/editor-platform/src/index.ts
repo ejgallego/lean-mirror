@@ -5,6 +5,7 @@ export * from "./protocol/adapters.js";
 export * from "./protocol/endpoint.js";
 export * from "./protocol/messages.js";
 export * from "./services/status.js";
+export * from "./shell/logPanel.js";
 export * from "./shell/platformStore.js";
 export * from "./shell/serviceRuntime.js";
 export * from "./shell/shellView.js";

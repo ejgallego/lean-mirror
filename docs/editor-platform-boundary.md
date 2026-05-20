@@ -11,6 +11,7 @@ These APIs are already inside the package and are good examples of the intended 
 - document-scoped diagnostics, diagnostic summaries, and logs
 - observable platform snapshots
 - pure shell view models derived from snapshots
+- a recent-log DOM renderer over platform log events
 - a compact status-panel DOM renderer over the shell view model
 - a structural workspace-shell DOM renderer with editor, status, info, and secondary slots
 - typed host/editor protocol envelopes and structural message adapters
