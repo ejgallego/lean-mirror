@@ -29,6 +29,10 @@ export interface EmbeddedEditorShellOptions {
   currentLanguageId?(): string | null;
   currentUri(): string | null;
   currentView(): EditorView | null;
+  extraExtensions?(
+    adapter: AnyEmbeddedBlockEditorAdapter,
+    block: EmbeddedBlock,
+  ): readonly Extension[];
   setActiveEmbeddedEditor?(editor: ActiveEmbeddedEditor | null): void;
   log(message: string): void;
 }
@@ -426,6 +430,7 @@ export function createEmbeddedEditorShell(
         doc: block.code,
         extensions: [
           ...adapter.editorExtensions(),
+          ...(options.extraExtensions?.(adapter, block) ?? []),
           innerSyncExtension,
           activeInlineExtension,
         ],
