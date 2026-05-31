@@ -15,7 +15,15 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const host = process.env.LEAN_DEMO_HOST ?? "127.0.0.1";
 const port = Number(process.env.LEAN_DEMO_PORT ?? "7357");
-const demoWorkspace = createDemoWorkspace(__dirname);
+const demoWorkspace = createDemoWorkspace(__dirname, {
+  onStatusChange(status) {
+    console.log(`[demo] ${status.message}`);
+  },
+});
+let prepareError = null;
+const preparePromise = demoWorkspace.prepare().catch((error) => {
+  prepareError = error;
+});
 
 function withCorsHeaders(headers = {}) {
   return {
@@ -44,6 +52,13 @@ async function readValidatedJsonBody(req, res, parser, invalidMessage) {
   }
 }
 
+async function ensureWorkspacePrepared() {
+  await preparePromise;
+  if (prepareError) {
+    throw prepareError;
+  }
+}
+
 async function handleHttpRequest(req, res) {
   if (!req.url) {
     res.writeHead(400, withCorsHeaders());
@@ -55,7 +70,18 @@ async function handleHttpRequest(req, res) {
     res.end();
     return;
   }
+  if (req.url === DEMO_ENDPOINTS.status) {
+    res.writeHead(
+      200,
+      withCorsHeaders({
+        "Content-Type": "application/json; charset=utf-8",
+      }),
+    );
+    res.end(JSON.stringify(demoWorkspace.readPreparationStatus()));
+    return;
+  }
   if (req.url === DEMO_ENDPOINTS.session) {
+    await ensureWorkspacePrepared();
     res.writeHead(
       200,
       withCorsHeaders({
@@ -73,6 +99,7 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustSession) {
+    await ensureWorkspacePrepared();
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -97,6 +124,7 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustDocument) {
+    await ensureWorkspacePrepared();
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -110,6 +138,7 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustMain) {
+    await ensureWorkspacePrepared();
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -133,6 +162,7 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.url.startsWith(`${DEMO_ENDPOINTS.document}?`)) {
+    await ensureWorkspacePrepared();
     const url = new URL(req.url, `http://${host}:${port}`);
     const uri = url.searchParams.get("uri");
     if (!uri) {
@@ -234,8 +264,6 @@ httpServer.on("upgrade", (req, socket, head) => {
   }
   socket.destroy();
 });
-
-await demoWorkspace.prepare();
 
 httpServer.listen(port, host, () => {
   console.log(`Lean demo bridge listening on http://${host}:${port}`);

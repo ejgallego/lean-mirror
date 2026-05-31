@@ -19,7 +19,7 @@ import {
   type LeanWorkspace,
 } from "../../src/index.js";
 import { createDemoBridge } from "./demoBridge.js";
-import type { DemoSession, DemoSessionApi } from "./demoSession.js";
+import type { DemoPreparationStatus, DemoSession, DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
 import { buildEmbeddedLeanDocument, type EmbeddedLeanDocument } from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
@@ -43,6 +43,11 @@ const rustService: EditorServiceDescriptor = {
 };
 
 const leanHoverMarkdown = new Marked();
+const preparationPollDelayMs = 500;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>\n]/gu, (character) => {
@@ -638,8 +643,45 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     return view;
   }
 
+  let lastPreparationMessage = "";
+
+  function preparationStatusMessage(status: DemoPreparationStatus): string {
+    return status.detail ? `${status.message} ${status.detail}` : status.message;
+  }
+
+  function logPreparationStatus(status: DemoPreparationStatus): void {
+    const message = preparationStatusMessage(status);
+    if (message !== lastPreparationMessage) {
+      options.ui.logEvent(message);
+      lastPreparationMessage = message;
+    }
+    if (status.phase === "idle" || status.phase === "preparing") {
+      options.ui.setStatus(status.message);
+    }
+  }
+
+  async function fetchSessionWithPreparationProgress(): Promise<DemoSession> {
+    while (!disposed) {
+      const status = await options.sessionApi.fetchPreparationStatus();
+      logPreparationStatus(status);
+      if (status.phase === "failed") {
+        throw new Error(preparationStatusMessage(status));
+      }
+      if (status.phase === "ready") {
+        break;
+      }
+      await delay(preparationPollDelayMs);
+    }
+    options.ui.setStatus("Loading session");
+    const nextSession = await options.sessionApi.fetchSession();
+    if (nextSession.preparationStatus) {
+      logPreparationStatus(nextSession.preparationStatus);
+    }
+    return nextSession;
+  }
+
   options.ui.setStatus("Loading session");
-  const session = await options.sessionApi.fetchSession();
+  const session = await fetchSessionWithPreparationProgress();
   options.ui.setRootUri(session.rootUri);
   options.ui.setCurrentDocument(session.documentUri);
 

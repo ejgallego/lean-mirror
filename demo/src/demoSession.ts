@@ -1,22 +1,31 @@
 import {
   DEMO_ENDPOINTS,
   documentEndpoint,
+  parseDemoPreparationStatus,
   parseDemoSession,
   parseDocumentResponse,
   parseRustMainUpdateResult,
   parseRustSession,
+  type DemoPreparationStatus,
   type DemoSession,
   type RustMainUpdateRequest,
   type RustMainUpdateResult,
   type RustSession,
 } from "../shared/demoProtocol.mjs";
 
-export type { DemoSession, RustMainUpdateRequest as RustMainUpdatePayload, RustMainUpdateResult, RustSession };
+export type {
+  DemoPreparationStatus,
+  DemoSession,
+  RustMainUpdateRequest as RustMainUpdatePayload,
+  RustMainUpdateResult,
+  RustSession,
+};
 
 export interface DemoSessionApi {
   connectWebSocket(url: string): Promise<WebSocket>;
   createRustSession(key: string, code: string): Promise<RustSession>;
   fetchDocument(uri: string): Promise<string>;
+  fetchPreparationStatus(): Promise<DemoPreparationStatus>;
   fetchSession(): Promise<DemoSession>;
   updateRustDocument(key: string, code: string, version?: number): Promise<void>;
   updateRustMainDocument(payload: RustMainUpdateRequest): Promise<RustMainUpdateResult>;
@@ -38,6 +47,13 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
       }
       const payload = parseDocumentResponse(await response.json());
       return payload.text;
+    },
+    async fetchPreparationStatus(): Promise<DemoPreparationStatus> {
+      const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.status}`);
+      if (!response.ok) {
+        throw new Error(`Status request failed with ${response.status}`);
+      }
+      return parseDemoPreparationStatus(await response.json());
     },
     async createRustSession(key: string, code: string): Promise<RustSession> {
       const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}`, {

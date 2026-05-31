@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export function createDemoWorkspace(demoDir) {
+export function createDemoWorkspace(demoDir, options = {}) {
   const workspaceDir = join(demoDir, "workspace");
   const rustBlocksDir = join(demoDir, "rust-blocks");
   const documentPath = join(workspaceDir, "Main.lean");
@@ -21,8 +21,14 @@ export function createDemoWorkspace(demoDir) {
     [helperUri]: "lean4",
     [rustMainUri]: "rust",
   };
+  let preparationStatus = createPreparationStatus("idle", "Waiting to prepare demo workspace.");
   let rustMainUpdateQueue = Promise.resolve();
   const rustBlockUpdateStates = new Map();
+
+  function setPreparationStatus(phase, message, detail) {
+    preparationStatus = createPreparationStatus(phase, message, detail);
+    options.onStatusChange?.(preparationStatus);
+  }
 
   function rustBlockPaths(key) {
     const slug = slugify(key);
@@ -116,9 +122,24 @@ export function createDemoWorkspace(demoDir) {
     },
     documentLanguageIds,
     async prepare() {
-      await ensureEmbeddedLeanArtifacts(embeddedLeanPath);
-      ensureDemoPrerequisites();
-      ensureDemoArtifacts(workspaceDir);
+      try {
+        setPreparationStatus("preparing", "Checking demo prerequisites.");
+        await ensureDemoPrerequisites();
+        setPreparationStatus("preparing", "Preparing embedded Lean document.");
+        await ensureEmbeddedLeanArtifacts(embeddedLeanPath);
+        setPreparationStatus("preparing", "Checking local demo artifacts.");
+        await ensureDemoArtifacts(workspaceDir);
+        setPreparationStatus("ready", "Demo workspace ready.");
+      } catch (error) {
+        setPreparationStatus(
+          "failed",
+          error instanceof Error ? error.message : "Demo workspace preparation failed.",
+        );
+        throw error;
+      }
+    },
+    readPreparationStatus() {
+      return preparationStatus;
     },
     async readSession({ websocketUrl, rustMainWebsocketUrl }) {
       const initialDoc = await readFile(rustMainPath, "utf8");
@@ -129,6 +150,7 @@ export function createDemoWorkspace(demoDir) {
         documents: [rustMainUri, embeddedLeanUri, documentUri, helperUri],
         embeddedLeanDocumentUri: embeddedLeanUri,
         initialDoc,
+        preparationStatus,
         rustMainDocumentUri: rustMainUri,
         rustMainWebsocketUrl,
         websocketUrl,
@@ -150,10 +172,42 @@ export function createDemoWorkspace(demoDir) {
   };
 }
 
-function ensureCommandAvailable(command, args, installHint) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
+function createPreparationStatus(phase, message, detail) {
+  return {
+    ...(detail ? { detail } : {}),
+    message,
+    phase,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      resolve({ error, status: null, stderr, stdout });
+    });
+    child.on("close", (status) => {
+      resolve({ status, stderr, stdout });
+    });
   });
+}
+
+async function ensureCommandAvailable(command, args, installHint) {
+  const result = await runCommand(command, args);
   if (result.status === 0) {
     return;
   }
@@ -169,19 +223,18 @@ function ensureCommandAvailable(command, args, installHint) {
   );
 }
 
-function ensureDemoPrerequisites() {
-  ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
-  ensureCommandAvailable(
+async function ensureDemoPrerequisites() {
+  await ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
+  await ensureCommandAvailable(
     "rust-analyzer",
     ["--version"],
     "Install it with `rustup component add rust-analyzer` and ensure it is on PATH.",
   );
 }
 
-function ensureDemoArtifacts(workspaceDir) {
-  const result = spawnSync("lake", ["build", "Helper"], {
+async function ensureDemoArtifacts(workspaceDir) {
+  const result = await runCommand("lake", ["build", "Helper"], {
     cwd: workspaceDir,
-    encoding: "utf8",
   });
   if (result.status !== 0) {
     throw new Error(

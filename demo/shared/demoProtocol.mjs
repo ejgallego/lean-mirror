@@ -4,6 +4,7 @@ export const DEMO_ENDPOINTS = Object.freeze({
   rustMain: "/rust-main",
   rustSession: "/rust-session",
   session: "/session",
+  status: "/status",
 });
 
 export function documentEndpoint(apiBase, uri) {
@@ -13,6 +14,7 @@ export function documentEndpoint(apiBase, uri) {
 export function parseDemoSession(value) {
   const record = expectRecord(value, "DemoSession");
   const documentLanguageIds = optionalStringRecord(record.documentLanguageIds, "documentLanguageIds");
+  const preparationStatus = optionalDemoPreparationStatus(record.preparationStatus, "preparationStatus");
   return {
     rootUri: expectString(record.rootUri, "rootUri"),
     documentUri: expectString(record.documentUri, "documentUri"),
@@ -22,6 +24,7 @@ export function parseDemoSession(value) {
       ? {}
       : { embeddedLeanDocumentUri: expectString(record.embeddedLeanDocumentUri, "embeddedLeanDocumentUri") }),
     initialDoc: expectString(record.initialDoc, "initialDoc"),
+    ...(preparationStatus ? { preparationStatus } : {}),
     ...(record.rustMainDocumentUri === undefined
       ? {}
       : { rustMainDocumentUri: expectString(record.rustMainDocumentUri, "rustMainDocumentUri") }),
@@ -30,6 +33,10 @@ export function parseDemoSession(value) {
       : { rustMainWebsocketUrl: expectString(record.rustMainWebsocketUrl, "rustMainWebsocketUrl") }),
     websocketUrl: expectString(record.websocketUrl, "websocketUrl"),
   };
+}
+
+export function parseDemoPreparationStatus(value) {
+  return expectDemoPreparationStatus(value, "DemoPreparationStatus");
 }
 
 export function parseDocumentResponse(value) {
@@ -126,6 +133,27 @@ function optionalNumber(value, name) {
     return undefined;
   }
   return expectNumber(value, name);
+}
+
+function optionalDemoPreparationStatus(value, name) {
+  if (value === undefined) {
+    return undefined;
+  }
+  return expectDemoPreparationStatus(value, name);
+}
+
+function expectDemoPreparationStatus(value, name) {
+  const record = expectRecord(value, name);
+  const phase = expectString(record.phase, `${name}.phase`);
+  if (!["idle", "preparing", "ready", "failed"].includes(phase)) {
+    throw new Error(`${name}.phase is invalid`);
+  }
+  return {
+    ...(record.detail === undefined ? {} : { detail: expectString(record.detail, `${name}.detail`) }),
+    message: expectString(record.message, `${name}.message`),
+    phase,
+    updatedAt: expectString(record.updatedAt, `${name}.updatedAt`),
+  };
 }
 
 function optionalStringRecord(value, name) {

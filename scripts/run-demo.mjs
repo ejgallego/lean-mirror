@@ -57,16 +57,69 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function fetchWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchBackendStatus() {
+  const response = await fetchWithTimeout(`${demo.backendUrl}/status`, 900);
+  if (!response.ok) {
+    return null;
+  }
+  const status = await response.json();
+  if (!status || typeof status !== "object" || typeof status.message !== "string") {
+    return null;
+  }
+  return {
+    detail: typeof status.detail === "string" ? status.detail : "",
+    message: status.message,
+    phase: typeof status.phase === "string" ? status.phase : "preparing",
+  };
+}
+
 async function waitForBackendReady(timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
+  let lastMessage = "";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${demo.backendUrl}/session`);
-      if (response.ok) {
-        return;
+      const status = await fetchBackendStatus();
+      if (status) {
+        const message = status.detail ? `${status.message} ${status.detail}` : status.message;
+        if (message !== lastMessage) {
+          console.log(`[demo] ${message}`);
+          lastMessage = message;
+        }
+        if (status.phase === "ready") {
+          return;
+        }
+        if (status.phase === "failed") {
+          throw new Error(`Demo backend failed: ${status.message}`);
+        }
+      } else {
+        const response = await fetchWithTimeout(`${demo.backendUrl}/session`, 900);
+        if (response.ok) {
+          return;
+        }
       }
-    } catch {}
-    await delay(120);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Demo backend failed:")) {
+        throw error;
+      }
+      const aborted = error instanceof Error && error.name === "AbortError";
+      if (!aborted && error instanceof Error && error.message !== lastMessage) {
+        console.log(`[demo] Waiting for backend: ${error.message}`);
+        lastMessage = error.message;
+      }
+    }
+    await delay(250);
   }
   throw new Error(`Timed out waiting for demo backend at ${demo.backendUrl}`);
 }

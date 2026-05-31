@@ -1,3 +1,10 @@
+export interface DemoPreparationStatus {
+  detail?: string;
+  message: string;
+  phase: "idle" | "preparing" | "ready" | "failed";
+  updatedAt: string;
+}
+
 export interface DemoSession {
   rootUri: string;
   documentUri: string;
@@ -5,6 +12,7 @@ export interface DemoSession {
   documents: string[];
   embeddedLeanDocumentUri?: string;
   initialDoc: string;
+  preparationStatus?: DemoPreparationStatus;
   rustMainDocumentUri?: string;
   rustMainWebsocketUrl?: string;
   websocketUrl: string;
@@ -51,9 +59,11 @@ export const DEMO_ENDPOINTS: Readonly<{
   rustMain: "/rust-main";
   rustSession: "/rust-session";
   session: "/session";
+  status: "/status";
 }>;
 
 export function documentEndpoint(apiBase: string, uri: string): string;
+export function parseDemoPreparationStatus(value: unknown): DemoPreparationStatus;
 export function parseDemoSession(value: unknown): DemoSession;
 export function parseDocumentResponse(value: unknown): DocumentResponse;
 export function parseCreateRustSessionRequest(value: unknown): CreateRustSessionRequest;
