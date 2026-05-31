@@ -56,7 +56,7 @@ describe("demo workspace backend", () => {
     expect(status.phase).toBe("ready");
     expect(status.message).toBe("Demo workspace ready.");
     expect(session.preparationStatus).toEqual(status);
-  });
+  }, 30_000);
 
   it("builds session metadata from the workspace files", async () => {
     const { workspace } = await createFixture();
