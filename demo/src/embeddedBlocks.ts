@@ -96,80 +96,106 @@ function isVersoCommentStart(line: string): boolean {
   return /^\s*(?:\/-!|\/--)\s*$/.test(line);
 }
 
+interface SourceLine {
+  end: number;
+  from: number;
+  text: string;
+}
+
+function splitSourceLines(source: string): SourceLine[] {
+  const lines: SourceLine[] = [];
+  let from = 0;
+  while (from < source.length) {
+    let to = from;
+    while (to < source.length && source[to] !== "\n" && source[to] !== "\r") {
+      to += 1;
+    }
+    let end = to;
+    if (source[end] === "\r" && source[end + 1] === "\n") {
+      end += 2;
+    } else if (source[end] === "\r" || source[end] === "\n") {
+      end += 1;
+    }
+    lines.push({
+      end,
+      from,
+      text: source.slice(from, to),
+    });
+    from = end;
+  }
+  return lines;
+}
+
+function embeddedBlockKey(
+  kind: string,
+  label: string | null,
+  ordinal: number,
+  seenKeys: Map<string, number>,
+): string {
+  const base = label ? `${kind}:${label}` : `${kind}:${ordinal}`;
+  const seen = seenKeys.get(base) ?? 0;
+  seenKeys.set(base, seen + 1);
+  return seen === 0 ? base : `${base}#${seen + 1}`;
+}
+
 // Demo-side heuristic: treat standalone Lean doc comments with a single fenced block as embeddable.
 export function parseVersoCommentBlocks(
   source: string,
   spec: Pick<VersoCommentSpec, "defaultTitle" | "kind">,
 ): EmbeddedBlock[] {
-  const lines = source.split("\n");
+  const lines = splitSourceLines(source);
   const blocks: EmbeddedBlock[] = [];
-  let offset = 0;
   let ordinal = 0;
+  const seenKeys = new Map<string, number>();
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const newlineSize = offset + line.length < source.length ? 1 : 0;
-    const nextOffset = offset + line.length + newlineSize;
-    if (!isVersoCommentStart(line)) {
-      offset = nextOffset;
+    const line = lines[index];
+    if (!line || !isVersoCommentStart(line.text)) {
       continue;
     }
 
-    const headerLine = lines[index + 1] ?? "";
-    const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine);
+    const headerLine = lines[index + 1];
+    const header = headerLine
+      ? new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text)
+      : null;
     if (!header) {
-      offset = nextOffset;
       continue;
     }
 
-    const from = offset;
+    const from = line.from;
     const label = header[1]?.trim() || null;
     const codeLines: string[] = [];
-    const headerNewlineSize = nextOffset + headerLine.length < source.length ? 1 : 0;
-    let endOffset = nextOffset + headerLine.length + headerNewlineSize;
-    let foundEnd = false;
 
     for (let inner = index + 2; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner] ?? "";
-      const innerStart = endOffset;
-      const innerNewlineSize = innerStart + innerLine.length < source.length ? 1 : 0;
-      endOffset = innerStart + innerLine.length + innerNewlineSize;
-      if (/^\s*```\s*$/.test(innerLine)) {
-        const closingLine = lines[inner + 1] ?? "";
-        const closingStart = endOffset;
-        const closingNewlineSize = closingStart + closingLine.length < source.length ? 1 : 0;
-        const closingEnd = closingStart + closingLine.length + closingNewlineSize;
-        if (!/^\s*-\s*\/\s*$/.test(closingLine)) {
+      const innerLine = lines[inner];
+      if (!innerLine) {
+        break;
+      }
+      if (/^\s*```\s*$/.test(innerLine.text)) {
+        const closingLine = lines[inner + 1];
+        if (!closingLine || !/^\s*-\s*\/\s*$/.test(closingLine.text)) {
           break;
         }
         ordinal += 1;
         const block: EmbeddedBlock = {
           code: codeLines.join("\n"),
           from,
-          key: label ? `${spec.kind}:${label}` : `${spec.kind}:${ordinal}`,
+          key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
           ordinal,
           title: "",
-          to: closingEnd,
+          to: closingLine.end,
         };
         block.title = spec.defaultTitle(block);
         blocks.push(block);
         index = inner + 1;
-        foundEnd = true;
-        endOffset = closingEnd;
         break;
       }
-      codeLines.push(innerLine);
+      codeLines.push(innerLine.text);
     }
-
-    offset = foundEnd ? endOffset : nextOffset;
   }
 
   return blocks;
-}
-
-function lineEndOffset(source: string, lineStart: number, line: string): number {
-  return lineStart + line.length + (lineStart + line.length < source.length ? 1 : 0);
 }
 
 function parseLineComment(
@@ -197,38 +223,37 @@ export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedB
   source: string,
   spec: Pick<LineCommentAdapterSpec<TBlock>, "defaultTitle" | "kind" | "linePrefixes">,
 ): TBlock[] {
-  const lines = source.split("\n");
+  const lines = splitSourceLines(source);
   const blocks: TBlock[] = [];
   let ordinal = 0;
-  let offset = 0;
+  const seenKeys = new Map<string, number>();
   const headerPattern = new RegExp(`^\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const nextOffset = lineEndOffset(source, offset, line);
-    const parsed = parseLineComment(line, spec.linePrefixes);
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+    const parsed = parseLineComment(line.text, spec.linePrefixes);
     if (!parsed) {
-      offset = nextOffset;
       continue;
     }
     const header = headerPattern.exec(parsed.content);
     if (!header) {
-      offset = nextOffset;
       continue;
     }
 
-    const from = offset;
+    const from = line.from;
     const label = header[1]?.trim() || null;
     const codeLines: string[] = [];
     const codeLineStarts: number[] = [];
-    let endOffset = nextOffset;
-    let foundEnd = false;
 
     for (let inner = index + 1; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner] ?? "";
-      const innerStart = endOffset;
-      endOffset = lineEndOffset(source, innerStart, innerLine);
-      const innerParsed = parseLineComment(innerLine, spec.linePrefixes);
+      const innerLine = lines[inner];
+      if (!innerLine) {
+        break;
+      }
+      const innerParsed = parseLineComment(innerLine.text, spec.linePrefixes);
       if (!innerParsed) {
         break;
       }
@@ -236,29 +261,23 @@ export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedB
         ordinal += 1;
         const block = {
           code: codeLines.join("\n"),
+          codeLineStarts,
           from,
           indent: parsed.indent,
-          key: label ? `${spec.kind}:${label}` : `${spec.kind}:${ordinal}`,
+          key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
           linePrefix: parsed.prefix,
           ordinal,
           title: "",
-          to: endOffset,
-        } as TBlock;
+          to: innerLine.end,
+        } as unknown as TBlock;
         block.title = spec.defaultTitle(block);
         blocks.push(block);
         index = inner;
-        foundEnd = true;
-        offset = endOffset;
         break;
       }
-      codeLineStarts.push(innerStart + innerParsed.contentOffset);
+      codeLineStarts.push(innerLine.from + innerParsed.contentOffset);
       codeLines.push(innerParsed.content);
-    }
-
-    if (!foundEnd) {
-      offset = nextOffset;
-      continue;
     }
   }
 

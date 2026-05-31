@@ -18,6 +18,10 @@ import { keymap } from "@codemirror/view";
 
 import { leanLanguage } from "./language.js";
 
+interface LeanClientLifecycleExtension extends LSPClientExtension {
+  onClientDisconnect?(client: LSPClient): void;
+}
+
 export interface LeanLspFeatureOptions {
   completion?: boolean | Parameters<typeof serverCompletion>[0];
   diagnostics?: boolean;
@@ -94,12 +98,36 @@ function defaultHighlightLanguage(
   };
 }
 
+function hasClientLifecycle(
+  extension: Extension | LSPClientExtension,
+): extension is LeanClientLifecycleExtension {
+  return (
+    !!extension &&
+    typeof extension === "object" &&
+    !Array.isArray(extension) &&
+    typeof (extension as LeanClientLifecycleExtension).onClientDisconnect === "function"
+  );
+}
+
 export function createLeanLspClient(config: LeanLspClientConfig = {}): LSPClient {
   const { extensions = [], features, highlightLanguage, ...rest } = config;
   const highlight = defaultHighlightLanguage(highlightLanguage);
-  return new LSPClient({
+  const configuredExtensions = [...extensions, ...leanLspExtensions(features)];
+  const client = new LSPClient({
     ...rest,
-    extensions: [...extensions, ...leanLspExtensions(features)],
+    extensions: configuredExtensions,
     highlightLanguage: highlight,
   });
+  const lifecycleExtensions = configuredExtensions.filter(hasClientLifecycle);
+  if (lifecycleExtensions.length === 0) {
+    return client;
+  }
+  const disconnect = client.disconnect.bind(client);
+  client.disconnect = () => {
+    for (const extension of lifecycleExtensions) {
+      extension.onClientDisconnect?.(client);
+    }
+    disconnect();
+  };
+  return client;
 }

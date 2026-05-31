@@ -8,6 +8,7 @@ This package stays intentionally thin:
 
 - Lean syntax/highlighting via `leanLanguageSupport()`
 - Lean-aware `LSPClient` factory via `createLeanLspClient()`
+- Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
 - Standard editor utilities via `leanUtilities()`
 - Browser transport helpers for `WebSocket` and `MessagePort`
@@ -44,6 +45,24 @@ const state = EditorState.create({
 new EditorView({
   state,
   parent: document.querySelector("#editor")!,
+});
+```
+
+To observe Lean's per-file processing ranges, add the Lean progress extension to
+the client. The store is cleared automatically when a client created by
+`createLeanLspClient()` disconnects.
+
+```ts
+import { createLeanLspClient, leanFileProgress } from "codemirror-lean4-lsp";
+
+const progress = leanFileProgress({
+  onUpdate(update) {
+    console.log(update.uri, update.state?.processing.length ?? 0);
+  },
+});
+
+const client = createLeanLspClient({
+  extensions: [progress],
 });
 ```
 

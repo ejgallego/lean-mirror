@@ -4,6 +4,7 @@ import { lean4 } from "../../src/index.js";
 import {
   createLineCommentAdapter,
   type EmbeddedBlock,
+  type EmbeddedBlockDiagnostic,
   type LineCommentEmbeddedBlock,
 } from "./embeddedBlocks.js";
 
@@ -28,13 +29,35 @@ export interface EmbeddedLeanDocumentMapping {
   generatedLine: number;
 }
 
+export interface EmbeddedLeanDiagnosticInput {
+  message: string;
+  range: {
+    end: { character: number; line: number };
+    start: { character: number; line: number };
+  };
+  severity?: EmbeddedBlockDiagnostic["severity"];
+}
+
 function leanRole(block: EmbeddedBlock): EmbeddedLeanBlock["role"] {
   const label = block.label?.trim().toLowerCase();
   return label === "prelude" || label === "imports" ? "prelude" : "snippet";
 }
 
 function lineNumberAt(source: string, offset: number): number {
-  return source.slice(0, Math.max(0, offset)).split("\n").length;
+  const end = Math.max(0, Math.min(source.length, offset));
+  let line = 1;
+  for (let index = 0; index < end; index += 1) {
+    const char = source[index];
+    if (char === "\r") {
+      line += 1;
+      if (source[index + 1] === "\n") {
+        index += 1;
+      }
+    } else if (char === "\n") {
+      line += 1;
+    }
+  }
+  return line;
 }
 
 function withRole(block: LineCommentEmbeddedBlock): EmbeddedLeanBlock {
@@ -85,6 +108,37 @@ export function buildEmbeddedLeanDocument(
     doc: lines.join("\n").trimEnd() + "\n",
     mappings,
   };
+}
+
+export function mapEmbeddedLeanDiagnostics(
+  document: EmbeddedLeanDocument,
+  diagnostics: readonly EmbeddedLeanDiagnosticInput[],
+): Map<string, EmbeddedBlockDiagnostic[]> {
+  const byBlock = new Map<string, EmbeddedBlockDiagnostic[]>();
+  for (const diagnostic of diagnostics) {
+    const start = document.mappings.find(
+      (mapping) => mapping.generatedLine === diagnostic.range.start.line,
+    );
+    if (!start) {
+      continue;
+    }
+    const end =
+      document.mappings.find(
+        (mapping) => mapping.generatedLine === diagnostic.range.end.line && mapping.blockKey === start.blockKey,
+      ) ?? start;
+    const mapped = byBlock.get(start.blockKey) ?? [];
+    mapped.push({
+      from: start.blockLineStart + diagnostic.range.start.character,
+      message: diagnostic.message,
+      ...(diagnostic.severity === undefined ? {} : { severity: diagnostic.severity }),
+      to: Math.max(
+        start.blockLineStart + diagnostic.range.start.character,
+        end.blockLineStart + diagnostic.range.end.character,
+      ),
+    });
+    byBlock.set(start.blockKey, mapped);
+  }
+  return byBlock;
 }
 
 const baseLeanAdapter = createLineCommentAdapter<EmbeddedLeanBlock>({

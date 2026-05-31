@@ -14,14 +14,20 @@ import {
   createLeanWorkspace,
   createWebSocketTransport,
   lean4,
+  leanFileProgress,
   leanUtilities,
   type Transport,
   type LeanWorkspace,
 } from "../../src/index.js";
+import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
 import { createDemoBridge } from "./demoBridge.js";
 import type { DemoPreparationStatus, DemoSession, DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
-import { buildEmbeddedLeanDocument, type EmbeddedLeanDocument } from "./embeddedLean.js";
+import {
+  buildEmbeddedLeanDocument,
+  mapEmbeddedLeanDiagnostics,
+  type EmbeddedLeanDocument,
+} from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
 import {
@@ -117,6 +123,11 @@ function observeInitializeResult(
   };
 }
 
+function workDoneProgressMessage(state: WorkDoneProgressState): string {
+  const percentage = typeof state.percentage === "number" ? ` ${state.percentage}%` : "";
+  return state.message ? `${state.title}${percentage}: ${state.message}` : `${state.title}${percentage}`;
+}
+
 export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
   let currentView: EditorView | null = null;
   let currentLanguageId: string | null = null;
@@ -140,6 +151,40 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let leanInitializeResult: lsp.InitializeResult | null = null;
   const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
   const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
+  const leanProgress = leanFileProgress({
+    onUpdate(update) {
+      if (update.uri !== currentUri) {
+        return;
+      }
+      if (!update.state) {
+        leanRuntime.recordConnectionStatus({ phase: "ready", message: "Ready" });
+        return;
+      }
+      leanRuntime.recordConnectionStatus({
+        phase: "ready",
+        message: update.state.hasFatalError ? "Fatal Lean processing error" : "Processing Lean file",
+      });
+    },
+  });
+  const rustProgress = workDoneProgress({
+    onUpdate(update) {
+      if (update.kind === "end") {
+        const active = rustProgress.store.entries().at(-1);
+        rustRuntime.recordConnectionStatus({
+          phase: "ready",
+          message: active ? workDoneProgressMessage(active) : "Ready",
+        });
+        return;
+      }
+      if (!update.state) {
+        return;
+      }
+      rustRuntime.recordConnectionStatus({
+        phase: "ready",
+        message: workDoneProgressMessage(update.state),
+      });
+    },
+  });
 
   const embeddedEditors = createEmbeddedEditorShell({
     currentLanguageId() {
@@ -264,30 +309,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       params.uri,
       editorDiagnosticsFromLsp(params.uri, "lean", params.diagnostics),
     );
-    const byBlock = new Map<string, EmbeddedBlockDiagnostic[]>();
-    for (const diagnostic of params.diagnostics) {
-      const start = lastEmbeddedLeanDocument.mappings.find(
-        (mapping) => mapping.generatedLine === diagnostic.range.start.line,
-      );
-      if (!start) {
-        continue;
-      }
-      const end =
-        lastEmbeddedLeanDocument.mappings.find(
-          (mapping) => mapping.generatedLine === diagnostic.range.end.line && mapping.blockKey === start.blockKey,
-        ) ?? start;
-      const mapped = byBlock.get(start.blockKey) ?? [];
-      mapped.push({
-        from: start.blockLineStart + diagnostic.range.start.character,
+    const byBlock = mapEmbeddedLeanDiagnostics(
+      lastEmbeddedLeanDocument,
+      params.diagnostics.map((diagnostic) => ({
         message: diagnostic.message,
+        range: diagnostic.range,
         severity: diagnosticSeverity(diagnostic.severity),
-        to: Math.max(
-          start.blockLineStart + diagnostic.range.start.character,
-          end.blockLineStart + diagnostic.range.end.character,
-        ),
-      });
-      byBlock.set(start.blockKey, mapped);
-    }
+      })),
+    );
     embeddedEditors.setDiagnostics("lean", byBlock);
   }
 
@@ -690,6 +719,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
   leanRuntime.initializing();
   client = createLeanLspClient({
+    extensions: [leanProgress],
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
         leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
@@ -756,14 +786,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
     rustRuntime.initializing();
     rustClient = new LSPClient({
-      extensions: languageServerExtensions(),
+      extensions: [rustProgress, ...languageServerExtensions()],
       notificationHandlers: {
         "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) =>
           applyRustMainDiagnostics(params),
       },
       rootUri: session.rootUri,
     });
-    rustClient.connect(createWebSocketTransport(rustSocket));
+    rustClient.connect(rustProgress.wrapTransport(createWebSocketTransport(rustSocket)));
     await rustClient.initializing;
     rustRuntime.ready();
     options.ui.logEvent("rust-analyzer initialized.");
@@ -847,9 +877,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       leanInfoview?.dispose();
       leanInfoview = null;
       client?.disconnect();
+      leanProgress.clear();
       leanRuntime.stopped();
       socket?.close();
       rustClient?.disconnect();
+      rustProgress.clear();
       rustRuntime.stopped();
       rustSocket?.close();
       socket = null;

@@ -11,6 +11,10 @@ Import these from `codemirror-lean4-lsp`:
 - `leanLanguageSupport`
 - `leanHighlightStyle`
 - `leanUtilities`
+- `leanFileProgress`
+- `leanFileProgressMethod`
+- `LeanFileProgressKind`
+- `LeanFileProgressStore`
 - `createLeanWorkspace`
 - `LeanWorkspace`
 - `LeanWorkspaceFile`
@@ -18,6 +22,24 @@ Import these from `codemirror-lean4-lsp`:
 - `createMessagePortTransport`
 
 These exports define the package-specific contract. Changes to them should be treated as SemVer-significant.
+
+### Lean file progress
+
+`leanFileProgress()` creates a small `LSPClientExtension` for Lean's
+`$/lean/fileProgress` notification. It tracks per-document processing ranges in a
+`LeanFileProgressStore` and calls `onUpdate` when Lean reports new progress or an
+empty `processing` array that clears a document's progress.
+
+The exported Lean progress types model Lean's protocol shape:
+
+- `textDocument` is a versioned text document identifier.
+- `processing` contains range-bearing items.
+- `LeanFileProgressKind.Processing` is `1`.
+- `LeanFileProgressKind.FatalError` is `2`.
+
+Stale progress notifications are ignored by default when the workspace already
+has a newer document version. Pass `{ acceptStaleVersions: true }` if a host
+application deliberately wants to observe older server updates.
 
 ## Official CodeMirror passthrough
 

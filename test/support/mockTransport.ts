@@ -53,6 +53,10 @@ export class MockTransport implements Transport {
     this.emit({ jsonrpc: "2.0", method, params });
   }
 
+  emitRequest(method: string, params?: unknown, id: number | string = this.sent.length + 1): void {
+    this.emit({ jsonrpc: "2.0", id, method, params });
+  }
+
   private emit(message: RpcMessage): void {
     const encoded = JSON.stringify(message);
     for (const subscriber of this.subscribers) {
