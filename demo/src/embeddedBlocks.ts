@@ -422,6 +422,9 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     height: "19px",
     display: "block",
   },
+  ".cm-embedded-gutter-logo-lean": {
+    width: "24px",
+  },
   ".cm-embedded-gutter-toggle[data-state=\"enabled\"]": {
     background: "rgba(69, 53, 28, 0.94)",
     borderColor: "rgba(69, 53, 28, 0.98)",

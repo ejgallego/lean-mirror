@@ -103,27 +103,43 @@ export function createEmbeddedEditorShell(
     svg.setAttribute("aria-hidden", "true");
 
     if (adapter.kind === "lean") {
-      const frame = document.createElementNS(ns, "rect");
-      frame.setAttribute("x", "12");
-      frame.setAttribute("y", "10");
-      frame.setAttribute("width", "40");
-      frame.setAttribute("height", "44");
-      frame.setAttribute("rx", "8");
-      frame.setAttribute("fill", "none");
-      frame.setAttribute("stroke", "currentColor");
-      frame.setAttribute("stroke-width", "4");
-      svg.append(frame);
+      svg.setAttribute("class", "cm-embedded-gutter-logo cm-embedded-gutter-logo-lean");
 
-      const lambda = document.createElementNS(ns, "text");
-      lambda.setAttribute("x", "32");
-      lambda.setAttribute("y", "43");
-      lambda.setAttribute("fill", "currentColor");
-      lambda.setAttribute("font-family", "Iosevka Term, IBM Plex Mono, monospace");
-      lambda.setAttribute("font-size", "34");
-      lambda.setAttribute("font-weight", "700");
-      lambda.setAttribute("text-anchor", "middle");
-      lambda.textContent = "λ";
-      svg.append(lambda);
+      const mark = document.createElementNS(ns, "g");
+      mark.setAttribute("transform", "translate(0.02 18.45) scale(0.08)");
+
+      const left = document.createElementNS(ns, "path");
+      left.setAttribute("fill", "currentColor");
+      left.setAttribute(
+        "d",
+        "M323.274 164.462H179.979v-5.377h143.295V49.427H176.822v-5.045h152.78v235.115H24.725V44.384h6.339v230.102h292.21Z",
+      );
+      mark.append(left);
+
+      const apex = document.createElementNS(ns, "path");
+      apex.setAttribute("fill", "none");
+      apex.setAttribute("stroke", "currentColor");
+      apex.setAttribute("stroke-linejoin", "miter");
+      apex.setAttribute("stroke-width", "28");
+      apex.setAttribute("d", "M326.655 45.441 438.666 272.716 551.195 45.531");
+      mark.append(apex);
+
+      const crossbar = document.createElementNS(ns, "path");
+      crossbar.setAttribute("fill", "none");
+      crossbar.setAttribute("stroke", "currentColor");
+      crossbar.setAttribute("stroke-width", "28");
+      crossbar.setAttribute("d", "M383.184 161.622h111.503");
+      mark.append(crossbar);
+
+      const right = document.createElementNS(ns, "path");
+      right.setAttribute("fill", "currentColor");
+      right.setAttribute(
+        "d",
+        "M554.579 279.497V54.817l182.874 224.68h6.328V44.463h-5.938v225.62L553.782 44.463h-5.531v235.034Z",
+      );
+      mark.append(right);
+
+      svg.append(mark);
 
       return svg;
     }
