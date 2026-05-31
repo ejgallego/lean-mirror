@@ -215,6 +215,19 @@ test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({
   await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
 });
 
+test("demo sizes short embedded editors to their content", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
+
+  const height = await page
+    .locator(".cm-embedded-block-widget .cm-embedded-block-inline .cm-editor")
+    .first()
+    .evaluate((element) => element.getBoundingClientRect().height);
+  expect(height).toBeLessThan(120);
+});
+
 test("demo infoview follows embedded Lean editors", async ({ page }) => {
   await page.goto("/");
 

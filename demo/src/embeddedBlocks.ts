@@ -462,13 +462,17 @@ export const embeddedBlockTheme = EditorView.baseTheme({
     boxShadow: "0 6px 16px rgba(78, 59, 20, 0.08)",
   },
   ".cm-embedded-block-inline .cm-editor": {
-    minHeight: "180px",
+    minHeight: "0",
     border: "none",
     borderRadius: "0",
     overflow: "visible",
   },
   ".cm-embedded-block-inline .cm-scroller": {
+    maxHeight: "min(32vh, 320px)",
     overflow: "auto",
+  },
+  ".cm-embedded-block-inline .cm-content": {
+    minHeight: "0",
   },
   ".cm-embedded-block-inline .cm-tooltip": {
     zIndex: "90",
