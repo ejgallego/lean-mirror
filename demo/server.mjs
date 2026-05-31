@@ -17,6 +17,7 @@ import {
   DEMO_ENDPOINTS,
   parseCreateRustSessionRequest,
   parseRustMainUpdateRequest,
+  parseSwitchExampleRequest,
   parseUpdateRustDocumentRequest,
 } from "./shared/demoProtocol.mjs";
 
@@ -47,6 +48,8 @@ const maxLspProcesses = parsePositiveInteger(
   "LEAN_DEMO_MAX_LSP_PROCESSES",
 );
 const demoWorkspace = createDemoWorkspace(__dirname, {
+  cwd: process.cwd(),
+  env: process.env,
   onStatusChange(status) {
     console.log(`[demo] ${status.message}`);
   },
@@ -55,6 +58,13 @@ let prepareError = null;
 const preparePromise = demoWorkspace.prepare().catch((error) => {
   prepareError = error;
 });
+
+function websocketUrls() {
+  return {
+    rustMainWebsocketUrl: `ws://${host}:${port}/rust-main-lsp`,
+    websocketUrl: `ws://${host}:${port}/lsp`,
+  };
+}
 
 function withCorsHeaders(req, headers = {}) {
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
@@ -76,13 +86,6 @@ async function readValidatedJsonBody(req, res, parser, invalidMessage) {
     res.writeHead(tooLarge ? 413 : 400, withCorsHeaders(req));
     res.end(tooLarge ? "Request body too large" : invalidMessage);
     return null;
-  }
-}
-
-async function ensureWorkspacePrepared() {
-  await preparePromise;
-  if (prepareError) {
-    throw prepareError;
   }
 }
 
@@ -114,25 +117,47 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.url === DEMO_ENDPOINTS.session) {
-    await ensureWorkspacePrepared();
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
     res.writeHead(
       200,
       withCorsHeaders(req, {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
-    res.end(
-      JSON.stringify(
-        await demoWorkspace.readSession({
-          rustMainWebsocketUrl: `ws://${host}:${port}/rust-main-lsp`,
-          websocketUrl: `ws://${host}:${port}/lsp`,
-        }),
-      ),
+    res.end(JSON.stringify(await demoWorkspace.readSession(websocketUrls())));
+    return;
+  }
+  if (req.method === "POST" && req.url === DEMO_ENDPOINTS.switchExample) {
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
+    const payload = await readValidatedJsonBody(
+      req,
+      res,
+      parseSwitchExampleRequest,
+      "Invalid switch-example payload",
     );
+    if (!payload) return;
+    try {
+      await demoWorkspace.switchExample(payload.id);
+    } catch (error) {
+      res.writeHead(400, withCorsHeaders());
+      res.end(error instanceof Error ? error.message : "Failed to switch example");
+      return;
+    }
+    res.writeHead(204, withCorsHeaders());
+    res.end();
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustSession) {
-    await ensureWorkspacePrepared();
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -157,7 +182,10 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustDocument) {
-    await ensureWorkspacePrepared();
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -171,7 +199,10 @@ async function handleHttpRequest(req, res) {
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustMain) {
-    await ensureWorkspacePrepared();
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
     const payload = await readValidatedJsonBody(
       req,
       res,
@@ -194,8 +225,43 @@ async function handleHttpRequest(req, res) {
     res.end(JSON.stringify(result));
     return;
   }
+  if (req.method === "POST" && req.url === DEMO_ENDPOINTS.regenerateRustMain) {
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
+    const payload = await readValidatedJsonBody(
+      req,
+      res,
+      parseRustMainUpdateRequest,
+      "Invalid rust-main regeneration payload",
+    );
+    if (!payload) return;
+    try {
+      const result = await demoWorkspace.regenerateRustMainDocument(payload, websocketUrls());
+      res.writeHead(
+        200,
+        withCorsHeaders({
+          "Content-Type": "application/json; charset=utf-8",
+        }),
+      );
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      res.writeHead(
+        500,
+        withCorsHeaders({
+          "Content-Type": "text/plain; charset=utf-8",
+        }),
+      );
+      res.end(error instanceof Error ? error.message : "Failed to regenerate Rust main workspace");
+    }
+    return;
+  }
   if (req.url.startsWith(`${DEMO_ENDPOINTS.document}?`)) {
-    await ensureWorkspacePrepared();
+    await preparePromise;
+    if (prepareError) {
+      throw prepareError;
+    }
     const url = new URL(req.url, `http://${host}:${port}`);
     const uri = url.searchParams.get("uri");
     if (!uri) {
@@ -317,7 +383,7 @@ httpServer.on("upgrade", (req, socket, head) => {
   }
   if (url.pathname === "/rust-main-lsp") {
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      attachSpawnedLsp(connection, "rust-analyzer", [], demoWorkspace.paths.workspaceDir);
+      attachSpawnedLsp(connection, "rust-analyzer", [], demoWorkspace.paths.rustWorkspaceDir);
     });
     return;
   }

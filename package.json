@@ -80,6 +80,7 @@
     "demo:backend": "node ./demo/server.mjs",
     "demo:frontend": "vite --config ./demo/vite.config.ts",
     "demo:reset": "node ./scripts/reset-demo-workspace.mjs",
+    "demo:zerocopy-anneal": "node ./scripts/run-zerocopy-anneal-demo.mjs",
     "pack:check": "node ./scripts/verify-pack.mjs",
     "playwright:install": "node ./scripts/install-playwright.mjs",
     "prepublishOnly": "npm run check && npm test && npm run test:consumer && npm run pack:check && npm run test:packed",

@@ -1,11 +1,12 @@
 import {
   DEMO_ENDPOINTS,
   documentEndpoint,
-  parseDemoPreparationStatus,
   parseDemoSession,
+  parseDemoPreparationStatus,
   parseDocumentResponse,
   parseRustMainUpdateResult,
   parseRustSession,
+  type DemoExample,
   type DemoPreparationStatus,
   type DemoSession,
   type RustMainUpdateRequest,
@@ -14,12 +15,13 @@ import {
 } from "../shared/demoProtocol.mjs";
 
 export type {
-  DemoPreparationStatus,
+  DemoExample,
   DemoSession,
-  RustMainUpdateRequest as RustMainUpdatePayload,
+  DemoPreparationStatus,
   RustMainUpdateResult,
   RustSession,
 };
+export type RustMainUpdatePayload = RustMainUpdateRequest;
 
 export interface DemoSessionApi {
   connectWebSocket(url: string): Promise<WebSocket>;
@@ -27,6 +29,8 @@ export interface DemoSessionApi {
   fetchDocument(uri: string): Promise<string>;
   fetchPreparationStatus(): Promise<DemoPreparationStatus>;
   fetchSession(): Promise<DemoSession>;
+  regenerateRustMainDocument(payload: RustMainUpdatePayload): Promise<DemoSession>;
+  switchExample(id: string): Promise<void>;
   updateRustDocument(key: string, code: string, version?: number): Promise<void>;
   updateRustMainDocument(payload: RustMainUpdateRequest): Promise<RustMainUpdateResult>;
 }
@@ -54,6 +58,19 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         throw new Error(`Status request failed with ${response.status}`);
       }
       return parseDemoPreparationStatus(await response.json());
+    },
+    async switchExample(id: string): Promise<void> {
+      const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.switchExample}`, {
+        body: JSON.stringify({ id }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `Example switch failed with ${response.status}`);
+      }
     },
     async createRustSession(key: string, code: string): Promise<RustSession> {
       const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}`, {
@@ -92,6 +109,20 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         throw new Error(`Rust main update failed with ${response.status}`);
       }
       return parseRustMainUpdateResult(await response.json());
+    },
+    async regenerateRustMainDocument(payload: RustMainUpdatePayload): Promise<DemoSession> {
+      const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.regenerateRustMain}`, {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `Rust main regeneration failed with ${response.status}`);
+      }
+      return parseDemoSession(await response.json());
     },
     async connectWebSocket(url: string): Promise<WebSocket> {
       const socket = new WebSocket(url);

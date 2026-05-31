@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const npmCache =
   process.env.PACK_CHECK_NPM_CACHE ??
-  join(tmpdir(), "codemirror-lean4-lsp-npm-cache");
+  join(root, ".demo-cache", "npm-pack-cache");
 
 function fail(message) {
   console.error(`[pack:check] ${message}`);

@@ -100,12 +100,43 @@ function waitForRustWidgetSave(page: Page) {
   );
 }
 
+function preparedExampleButton(page: Page, label: string) {
+  return page.locator("#examples button").filter({ hasText: label }).first();
+}
+
+async function readyExampleLabels(page: Page): Promise<string[]> {
+  return page.locator('#examples button[data-ready="true"]').evaluateAll((buttons) =>
+    buttons
+      .map((button) => button.textContent?.trim() ?? "")
+      .filter((label) => label.length > 0),
+  );
+}
+
+async function notReadyExampleStates(page: Page): Promise<Array<{ disabled: boolean; label: string }>> {
+  return page.locator('#examples button[data-ready="false"]').evaluateAll((buttons) =>
+    buttons.map((button) => ({
+      disabled: button.hasAttribute("disabled"),
+      label: button.textContent?.trim() ?? "",
+    })),
+  );
+}
+
 function waitForRustMainSave(page: Page) {
   return page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
       response.url().endsWith("/rust-main") &&
       response.ok(),
+  );
+}
+
+function waitForRustMainRegeneration(page: Page) {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/regenerate-rust-main") &&
+      response.ok(),
+    { timeout: 300_000 },
   );
 }
 
@@ -370,4 +401,134 @@ test("demo syncs Rust keyboard edits", async ({ page }) => {
     .toBe(false);
   await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).toHaveCount(0);
   await page.waitForTimeout(900);
+});
+
+test("demo marks extracted Lean state fresh only when host Rust matches startup extraction", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("Nat.succ", "MissingLeanName"))).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a + b +"))).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Stale");
+  await expect(page.locator("#events")).toContainText(
+    "Rust changed outside embedded Lean blocks; generated Lean is stale until regeneration.",
+  );
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b +", "a + b"))).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+  await expect(page.locator("#events")).toContainText("Rust host matches the startup extraction again.");
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("MissingLeanName", "Nat.succ"))).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+});
+
+test("external demo switches prepared examples and preserves embedded Lean diagnostics", async ({ page }) => {
+  const targetExample = "namespaces.rs";
+
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  const targetButton = await preparedExampleButton(page, targetExample);
+  test.skip((await targetButton.count()) === 0, "Prepared example switching requires external demo mode.");
+  test.skip(
+    (await targetButton.getAttribute("data-ready")) !== "true",
+    `${targetExample} must be prebuilt for the external demo check.`,
+  );
+
+  await expect(page.locator("#demo-project")).toContainText("google/zerocopy PR 3321");
+  await expect(page.locator("#demo-title")).toHaveText("Zerocopy Anneal Embedded Lean Demo");
+
+  await targetButton.click();
+
+  await expect(page.locator("#active-example")).toHaveText(targetExample);
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText(targetExample);
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
+
+  const brokenSave = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("scalar_tac", "MissingLeanName"))).toBe(true);
+  await brokenSave;
+  await expect(page.locator(".cm-embedded-block-widget .cm-lintRange-error")).not.toHaveCount(0);
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+
+  const restoredSave = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("MissingLeanName", "scalar_tac"))).toBe(true);
+  await restoredSave;
+  await expect(page.locator(".cm-embedded-block-widget .cm-lintRange-error")).toHaveCount(0);
+});
+
+test("external demo auto-regenerates stale host Rust edits", async ({ page }) => {
+  test.setTimeout(600_000);
+
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  const targetButton = await preparedExampleButton(page, "linked_list.rs");
+  test.skip((await targetButton.count()) === 0, "Prepared example switching requires external demo mode.");
+  test.skip(
+    (await targetButton.getAttribute("data-ready")) !== "true",
+    "linked_list.rs must be prebuilt for the external auto-regeneration check.",
+  );
+
+  await targetButton.click();
+  await expect(page.locator("#active-example")).toHaveText("linked_list.rs");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+
+  const manualMode = page.locator('#regeneration-mode button[data-mode="manual"]');
+  const autoMode = page.locator('#regeneration-mode button[data-mode="auto"]');
+  await expect(autoMode).toBeEnabled();
+  await autoMode.click();
+  await expect(autoMode).toHaveAttribute("data-active", "true");
+
+  const autoRegeneration = waitForRustMainRegeneration(page);
+  expect(
+    await page.evaluate(() =>
+      window.__leanDemo?.replaceCurrentText("fn main() {}", "fn main() { let _ = 0; }")
+    ),
+  ).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Stale");
+  await expect(page.locator("#regenerate-workspace")).toHaveText(/Queued|Regenerating/, { timeout: 5_000 });
+  await autoRegeneration;
+  await expect(statusValue(page, "status")).toHaveText("Ready", { timeout: 300_000 });
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh", { timeout: 300_000 });
+
+  await manualMode.click();
+  await expect(manualMode).toHaveAttribute("data-active", "true");
+  const restoreRegeneration = waitForRustMainRegeneration(page);
+  expect(
+    await page.evaluate(() =>
+      window.__leanDemo?.replaceCurrentText("fn main() { let _ = 0; }", "fn main() {}")
+    ),
+  ).toBe(true);
+  await expect(page.locator("#extraction-state")).toHaveText("Stale");
+  await page.locator("#regenerate-workspace").click();
+  await restoreRegeneration;
+  await expect(statusValue(page, "status")).toHaveText("Ready", { timeout: 300_000 });
+  await expect(page.locator("#extraction-state")).toHaveText("Fresh", { timeout: 300_000 });
+});
+
+test("external demo switches through all ready prepared examples", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  const labels = await readyExampleLabels(page);
+  test.skip(labels.length === 0, "Prepared example switching requires external demo mode.");
+
+  await expect(page.locator("#demo-project")).toContainText("google/zerocopy PR 3321");
+  expect((await notReadyExampleStates(page)).every((example) => example.disabled)).toBe(true);
+
+  for (const label of labels) {
+    await preparedExampleButton(page, label).click();
+    await expect(page.locator("#active-example")).toHaveText(label);
+    await expect(statusValue(page, "status")).toHaveText("Ready");
+    await expect(statusValue(page, "document")).toContainText(label);
+    await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+    await expect(page.locator(".cm-embedded-block-widget")).not.toHaveCount(0);
+  }
 });

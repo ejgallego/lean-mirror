@@ -33,10 +33,11 @@ import {
   DiagnosticGenerationGate,
   type DiagnosticGenerationTicket,
 } from "./diagnosticGeneration.js";
-import type { DemoPreparationStatus, DemoSession, DemoSessionApi } from "./demoSession.js";
-import type { DemoUi } from "./demoUi.js";
+import type { DemoExample, DemoPreparationStatus, DemoSession, DemoSessionApi } from "./demoSession.js";
+import type { DemoUi, RegenerationMode } from "./demoUi.js";
 import {
   buildEmbeddedLeanDocument,
+  embeddedLeanHostFingerprint,
   mapEmbeddedLeanDiagnostics,
   type EmbeddedLeanDocument,
 } from "./embeddedLean.js";
@@ -56,8 +57,26 @@ const rustService: EditorServiceDescriptor = {
   label: "Rust",
 };
 
-const leanHoverMarkdown = new Marked();
+const regenerationModeStorageKey = "lean-demo-regeneration-mode";
+const autoRegenerationDelayMs = 1400;
 const preparationPollDelayMs = 500;
+const leanHoverMarkdown = new Marked();
+
+function loadRegenerationMode(): RegenerationMode {
+  try {
+    return window.localStorage.getItem(regenerationModeStorageKey) === "auto" ? "auto" : "manual";
+  } catch {
+    return "manual";
+  }
+}
+
+function saveRegenerationMode(mode: RegenerationMode): void {
+  try {
+    window.localStorage.setItem(regenerationModeStorageKey, mode);
+  } catch {
+    // Ignore storage failures; mode still applies to the current runtime.
+  }
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -83,6 +102,7 @@ export interface DemoRuntimeOptions {
   embeddedAdapters: readonly AnyEmbeddedBlockEditorAdapter[];
   requestRestart(reason: string): void;
   sessionApi: DemoSessionApi;
+  switchExample(example: DemoExample): Promise<void>;
   ui: DemoUi;
 }
 
@@ -155,11 +175,17 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainPersistTimer: ReturnType<typeof setTimeout> | null = null;
+  let rustMainAutoRegenerateTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainRevision = 0;
   let rustMainQueue = Promise.resolve();
   let lastEmbeddedLeanDocument: EmbeddedLeanDocument | null = null;
   let lastRustMainSourceSent: string | null = null;
   let leanInitializeResult: lsp.InitializeResult | null = null;
+  let rustMainBaselineFingerprint: string | null = null;
+  let rustMainExtractionFresh: boolean | null = null;
+  let rustMainRegenerationInFlight = false;
+  let regenerationMode = loadRegenerationMode();
+  let suppressedAutoRegenerationSource: string | null = null;
   const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
   const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
   const embeddedLeanDiagnosticGate = new DiagnosticGenerationGate();
@@ -257,6 +283,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         },
       });
       client?.sync();
+      client?.notification("textDocument/didSave", {
+        text: leanDocument,
+        textDocument: { uri: result.leanDocumentUri },
+      });
       const ticket = embeddedLeanDiagnosticGate.recordSync(leanFile.version);
       scheduleEmbeddedLeanDiagnosticPull(result.leanDocumentUri, ticket);
     }
@@ -504,20 +534,20 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             diagnostics: Array.isArray(report.items) ? report.items : [],
             uri,
           });
-          if ((!report.items || report.items.length === 0) && attempt < 3) {
+          if ((!report.items || report.items.length === 0) && attempt < 11) {
             scheduleEmbeddedLeanDiagnosticPull(uri, ticket, attempt + 1);
           }
         })
         .catch(() => {
           if (
-            attempt < 3 &&
+            attempt < 11 &&
             !disposed &&
             embeddedLeanDiagnosticGate.isCurrent(ticket)
           ) {
             scheduleEmbeddedLeanDiagnosticPull(uri, ticket, attempt + 1);
           }
         });
-    }, attempt === 0 ? 350 : 500);
+    }, attempt === 0 ? 900 : 700);
   }
 
   function scheduleRustMainDiagnosticPull(
@@ -593,10 +623,134 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     currentView.dispatch(setDiagnostics(currentView.state, []));
   }
 
+  function canRegenerateCurrentRust(): boolean {
+    return Boolean(
+      session.canRegenerate &&
+        session.rustMainDocumentUri &&
+        currentUri === session.rustMainDocumentUri &&
+        rustMainExtractionFresh === false &&
+        !rustMainRegenerationInFlight,
+    );
+  }
+
+  function clearAutoRegenerationTimer(): void {
+    if (!rustMainAutoRegenerateTimer) {
+      return;
+    }
+    clearTimeout(rustMainAutoRegenerateTimer);
+    rustMainAutoRegenerateTimer = null;
+    setRegenerateControlState();
+  }
+
+  function setRegenerateControlState(): void {
+    const canRegenerate = canRegenerateCurrentRust();
+    const autoQueued = Boolean(rustMainAutoRegenerateTimer);
+    const enabled = regenerationMode === "manual" && canRegenerate;
+    const label = rustMainRegenerationInFlight
+      ? "Regenerating"
+      : autoQueued
+        ? "Queued"
+        : "Regenerate";
+    options.ui.setRegenerateState({
+      busy: rustMainRegenerationInFlight,
+      enabled,
+      label,
+      title: session.canRegenerate
+        ? "Regenerate the Anneal workspace from the current Rust source."
+        : "Regeneration is only available for manifest-backed Anneal demos.",
+    });
+  }
+
+  function scheduleAutoRegeneration(source: string): void {
+    if (
+      regenerationMode !== "auto" ||
+      !canRegenerateCurrentRust() ||
+      source === suppressedAutoRegenerationSource
+    ) {
+      setRegenerateControlState();
+      return;
+    }
+    const alreadyQueued = Boolean(rustMainAutoRegenerateTimer);
+    if (rustMainAutoRegenerateTimer) {
+      clearTimeout(rustMainAutoRegenerateTimer);
+    }
+    rustMainAutoRegenerateTimer = setTimeout(() => {
+      rustMainAutoRegenerateTimer = null;
+      setRegenerateControlState();
+      if (!disposed && currentView?.state.doc.toString() === source) {
+        void regenerateRustMainWorkspace("auto");
+      }
+    }, autoRegenerationDelayMs);
+    if (!alreadyQueued) {
+      options.ui.logEvent("Auto regeneration queued after Rust edits settle.");
+    }
+    setRegenerateControlState();
+  }
+
+  function setRegenerationMode(mode: RegenerationMode, logTransition = false): void {
+    regenerationMode = session.canRegenerate ? mode : "manual";
+    suppressedAutoRegenerationSource = null;
+    saveRegenerationMode(regenerationMode);
+    options.ui.setRegenerationMode(regenerationMode, Boolean(session.canRegenerate));
+    if (regenerationMode === "auto") {
+      const source = currentView?.state.doc.toString();
+      if (source) {
+        scheduleAutoRegeneration(source);
+      }
+    } else {
+      clearAutoRegenerationTimer();
+    }
+    setRegenerateControlState();
+    if (logTransition) {
+      options.ui.logEvent(`Regeneration mode set to ${regenerationMode}.`);
+    }
+  }
+
+  function syncRustMainExtractionState(
+    source: string,
+    config: { logTransition?: boolean } = {},
+  ): boolean {
+    if (rustMainRegenerationInFlight) {
+      setRegenerateControlState();
+      return false;
+    }
+    if (!session.rustMainDocumentUri) {
+      options.ui.setExtractionState("N/A", "pending");
+      rustMainExtractionFresh = null;
+      setRegenerateControlState();
+      return true;
+    }
+    if (rustMainBaselineFingerprint === null) {
+      options.ui.setExtractionState("Checking", "pending");
+      rustMainExtractionFresh = null;
+      setRegenerateControlState();
+      return true;
+    }
+    const fresh = embeddedLeanHostFingerprint(source) === rustMainBaselineFingerprint;
+    const previousFresh = rustMainExtractionFresh;
+    rustMainExtractionFresh = fresh;
+    options.ui.setExtractionState(fresh ? "Fresh" : "Stale", fresh ? "fresh" : "stale");
+    if (fresh) {
+      clearAutoRegenerationTimer();
+    } else {
+      scheduleAutoRegeneration(source);
+    }
+    setRegenerateControlState();
+    if (config.logTransition !== false && fresh !== previousFresh) {
+      options.ui.logEvent(
+        fresh
+          ? "Rust host matches the startup extraction again."
+          : "Rust changed outside embedded Lean blocks; generated Lean is stale until regeneration.",
+      );
+    }
+    return fresh;
+  }
+
   function scheduleRustMainPersist(session: DemoSession, uri: string, source: string): void {
     if (uri !== session.rustMainDocumentUri) {
       return;
     }
+    const extractionFresh = syncRustMainExtractionState(source);
     if (source === lastRustMainSourceSent) {
       return;
     }
@@ -607,6 +761,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       rustMainPersistTimer = null;
       const revision = ++rustMainRevision;
       const embeddedLeanDocument = buildEmbeddedLeanDocument(source, {
+        defaultImports: session.embeddedLeanDefaultImports ?? [],
+        preamble: session.embeddedLeanPreamble ?? [],
+        postamble: session.embeddedLeanPostamble ?? [],
         sourceName: uri.split("/").at(-1) ?? "Main.rs",
       });
       const leanDocument = embeddedLeanDocument.doc;
@@ -631,7 +788,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           lastEmbeddedLeanDocument = embeddedLeanDocument;
           refreshLeanWorkspaceArtifacts(result, leanDocument);
           options.ui.setDocumentSyncState(uri, "clean");
-          options.ui.logEvent("Rust driver saved; Lean snippets refreshed.");
+          options.ui.logEvent(
+            extractionFresh
+              ? "Rust driver saved; Lean snippets refreshed."
+              : "Lean snippets refreshed against stale generated Rust context.",
+          );
         })
         .catch((error) => {
           if (disposed) {
@@ -647,6 +808,99 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           );
         });
     }, 450);
+  }
+
+  async function regenerateRustMainWorkspace(trigger: RegenerationMode = "manual"): Promise<void> {
+    const uri = session.rustMainDocumentUri;
+    if (!session.canRegenerate || !uri || currentUri !== uri || !currentView || rustMainRegenerationInFlight) {
+      return;
+    }
+    clearAutoRegenerationTimer();
+    if (rustMainPersistTimer) {
+      clearTimeout(rustMainPersistTimer);
+      rustMainPersistTimer = null;
+    }
+    rustMainRegenerationInFlight = true;
+    options.ui.setExtractionState("Regenerating", "pending");
+    options.ui.setDocumentSyncState(uri, "dirty");
+    options.ui.setStatus("Regenerating");
+    options.ui.logEvent(
+      trigger === "auto"
+        ? "Auto-regenerating Anneal workspace from current Rust source."
+        : "Regenerating Anneal workspace from current Rust source.",
+    );
+    setRegenerateControlState();
+
+    let restartRequested = false;
+    const job = rustMainQueue.then(async () => {
+      if (disposed || !currentView || currentUri !== uri) {
+        return;
+      }
+      const source = currentView.state.doc.toString();
+      const revision = ++rustMainRevision;
+      const embeddedLeanDocument = buildEmbeddedLeanDocument(source, {
+        defaultImports: session.embeddedLeanDefaultImports ?? [],
+        preamble: session.embeddedLeanPreamble ?? [],
+        postamble: session.embeddedLeanPostamble ?? [],
+        sourceName: uri.split("/").at(-1) ?? "Main.rs",
+      });
+      const request = rustRuntime.beginRequest("rust-main/regenerate");
+      await options.sessionApi
+        .regenerateRustMainDocument({
+          code: source,
+          leanDocument: embeddedLeanDocument.doc,
+          revision,
+          uri,
+        })
+        .then(
+          (value) => {
+            request.succeeded();
+            return value;
+          },
+          (error) => {
+            request.failed(error);
+            throw error;
+          },
+        );
+      if (disposed) {
+        return;
+      }
+      lastRustMainSourceSent = source;
+      lastEmbeddedLeanDocument = embeddedLeanDocument;
+      options.ui.setDocumentSyncState(uri, "clean");
+      options.ui.logEvent("Anneal workspace regenerated. Restarting Lean services.");
+      options.ui.setExtractionState("Restarting", "pending");
+      options.ui.setStatus("Reconnecting");
+      restartRequested = true;
+      options.requestRestart("Anneal workspace regenerated.");
+    });
+    rustMainQueue = job.catch(() => {});
+    try {
+      await job;
+    } catch (error) {
+      if (disposed) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Anneal workspace regeneration failed.";
+      if (trigger === "auto") {
+        suppressedAutoRegenerationSource = currentView?.state.doc.toString() ?? null;
+      }
+      options.ui.logEvent(`Anneal workspace regeneration failed: ${message}`);
+      options.ui.setDocumentSyncState(uri, "failed", message);
+      options.ui.setStatus("Ready");
+    } finally {
+      rustMainRegenerationInFlight = false;
+      if (!disposed && !restartRequested) {
+        const source = currentView?.state.doc.toString() ?? "";
+        syncRustMainExtractionState(source, { logTransition: false });
+        setRegenerateControlState();
+      } else if (!disposed) {
+        options.ui.setRegenerateState({
+          enabled: false,
+          title: "Regenerate the Anneal workspace from the current Rust source.",
+        });
+      }
+    }
   }
 
   async function mountDocument(uri: string, doc: string): Promise<EditorView> {
@@ -675,6 +929,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
                 rustMainDiagnosticGate.beginEdit();
+                suppressedAutoRegenerationSource = null;
                 options.ui.setDocumentSyncState(uri, "dirty");
                 clearRustMainDiagnostics();
                 scheduleRustMainSync();
@@ -713,52 +968,100 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     options.ui.setCurrentDocument(uri, languageId);
     options.ui.setActiveDocument(uri);
     if (languageId === "rust") {
+      syncRustMainExtractionState(doc, { logTransition: false });
       scheduleRustMainPersist(session, uri, doc);
+    } else {
+      setRegenerateControlState();
     }
     return view;
   }
 
   let lastPreparationMessage = "";
 
-  function preparationStatusMessage(status: DemoPreparationStatus): string {
-    return status.detail ? `${status.message} ${status.detail}` : status.message;
-  }
-
   function logPreparationStatus(status: DemoPreparationStatus): void {
-    const message = preparationStatusMessage(status);
-    if (message !== lastPreparationMessage) {
-      options.ui.logEvent(message);
-      lastPreparationMessage = message;
+    if (status.message === lastPreparationMessage) {
+      return;
     }
-    if (status.phase === "idle" || status.phase === "preparing") {
-      options.ui.setStatus(status.message);
-    }
+    lastPreparationMessage = status.message;
+    options.ui.logEvent(status.message);
   }
 
   async function fetchSessionWithPreparationProgress(): Promise<DemoSession> {
+    const sessionResult = options.sessionApi.fetchSession().then(
+      (session) => ({ kind: "session" as const, session }),
+      (error: unknown) => ({ kind: "error" as const, error }),
+    );
     while (!disposed) {
-      const status = await options.sessionApi.fetchPreparationStatus();
-      logPreparationStatus(status);
-      if (status.phase === "failed") {
-        throw new Error(preparationStatusMessage(status));
+      const result = await Promise.race([
+        sessionResult,
+        delay(preparationPollDelayMs).then(() => ({ kind: "tick" as const })),
+      ]);
+      if (result.kind === "session") {
+        return result.session;
       }
-      if (status.phase === "ready") {
-        break;
+      if (result.kind === "error") {
+        throw result.error;
       }
-      await delay(preparationPollDelayMs);
+      try {
+        const status = await options.sessionApi.fetchPreparationStatus();
+        logPreparationStatus(status);
+        if (status.phase === "failed") {
+          options.ui.setStatus("Preparation failed");
+          throw new Error(status.message);
+        }
+        if (status.phase === "preparing") {
+          options.ui.setStatus("Preparing");
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === lastPreparationMessage) {
+          throw error;
+        }
+      }
     }
-    options.ui.setStatus("Loading session");
-    const nextSession = await options.sessionApi.fetchSession();
-    if (nextSession.preparationStatus) {
-      logPreparationStatus(nextSession.preparationStatus);
-    }
-    return nextSession;
+    throw new Error("Demo runtime is disposed.");
   }
 
   options.ui.setStatus("Loading session");
   const session = await fetchSessionWithPreparationProgress();
+  if (session.preparationStatus) {
+    logPreparationStatus(session.preparationStatus);
+  }
+  if (!session.canRegenerate) {
+    regenerationMode = "manual";
+  }
+  options.ui.setRegenerateAction(() => {
+    void regenerateRustMainWorkspace();
+  });
+  options.ui.setRegenerationModeAction((mode) => {
+    setRegenerationMode(mode, true);
+  });
+  options.ui.setRegenerationMode(regenerationMode, Boolean(session.canRegenerate));
+  options.ui.setRegenerateState({
+    enabled: false,
+    title: session.canRegenerate
+      ? "Regenerate the Anneal workspace from the current Rust source."
+      : "Regeneration is only available for manifest-backed Anneal demos.",
+  });
+  rustMainBaselineFingerprint = session.rustMainDocumentUri
+    ? embeddedLeanHostFingerprint(session.initialDoc)
+    : null;
+  options.ui.setDemoContext({
+    activeExampleLabel:
+      session.availableExamples?.find((example) => example.id === session.activeExampleId)?.label ??
+      session.activeExampleId ??
+      "Default workspace",
+    project: session.demoProject,
+    summary: session.demoSummary,
+    title: session.demoTitle,
+  });
+  options.ui.renderExampleButtons(
+    session.availableExamples ?? [],
+    session.activeExampleId,
+    options.switchExample,
+  );
   options.ui.setRootUri(session.rootUri);
   options.ui.setCurrentDocument(session.documentUri);
+  syncRustMainExtractionState(session.initialDoc, { logTransition: false });
 
   options.ui.setStatus("Connecting to Lean");
   leanRuntime.connecting();
@@ -968,7 +1271,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           return applyRustMainDiagnostics(params);
         },
       },
-      rootUri: session.rootUri,
+      rootUri: session.rustRootUri ?? session.rootUri,
       sanitizeHTML: sanitizeHtml,
       timeout: 20_000,
     });
@@ -1011,6 +1314,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         clearTimeout(rustMainPersistTimer);
         rustMainPersistTimer = null;
       }
+      if (rustMainAutoRegenerateTimer) {
+        clearTimeout(rustMainAutoRegenerateTimer);
+        rustMainAutoRegenerateTimer = null;
+      }
       if (rustMainSyncTimer) {
         clearTimeout(rustMainSyncTimer);
         rustMainSyncTimer = null;
@@ -1023,6 +1330,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         clearTimeout(embeddedLeanDiagnosticTimer);
         embeddedLeanDiagnosticTimer = null;
       }
+      options.ui.setRegenerateAction(null);
+      options.ui.setRegenerateState({ enabled: false });
+      options.ui.setRegenerationModeAction(null);
+      options.ui.setRegenerationMode("manual", false);
       window.removeEventListener("beforeunload", handleBeforeUnload);
       detachLeanSocketListeners?.();
       detachLeanSocketListeners = null;

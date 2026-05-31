@@ -7,12 +7,22 @@ import { readDemoConfig } from "./demo-config.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const demo = readDemoConfig(process.env);
+const defaultBackendReadyTimeoutMs =
+  process.env.LEAN_DEMO_ANNEAL_MANIFEST || process.env.LEAN_DEMO_LEAN_ROOT ? "300000" : "60000";
+const backendReadyTimeoutMs = Number.parseInt(
+  process.env.DEMO_BACKEND_READY_TIMEOUT_MS ?? defaultBackendReadyTimeoutMs,
+  10,
+);
 
 process.env.DEMO_BACKEND_HOST = demo.backendHost;
 process.env.DEMO_BACKEND_PORT = demo.backendPort;
 process.env.DEMO_FRONTEND_HOST = demo.frontendHost;
 process.env.DEMO_FRONTEND_PORT = demo.frontendPort;
 process.env.VITE_LEAN_DEMO_API = demo.apiBase;
+
+if (!Number.isFinite(backendReadyTimeoutMs) || backendReadyTimeoutMs <= 0) {
+  throw new Error("DEMO_BACKEND_READY_TIMEOUT_MS must be a positive integer.");
+}
 
 let backendChild = null;
 let backendStopping = false;
@@ -43,6 +53,7 @@ function shouldRestartBridges(path) {
     return false;
   }
   return (
+    file === "demo/externalGeneration.mjs" ||
     file === "demo/index.html" ||
     file === "demo/server.mjs" ||
     file.startsWith("demo/server/") ||
@@ -85,7 +96,7 @@ async function fetchBackendStatus() {
   };
 }
 
-async function waitForBackendReady(timeoutMs = 15_000) {
+async function waitForBackendReady(timeoutMs = backendReadyTimeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastMessage = "";
   while (Date.now() < deadline) {
@@ -113,10 +124,11 @@ async function waitForBackendReady(timeoutMs = 15_000) {
       if (error instanceof Error && error.message.startsWith("Demo backend failed:")) {
         throw error;
       }
-      const aborted = error instanceof Error && error.name === "AbortError";
-      if (!aborted && error instanceof Error && error.message !== lastMessage) {
-        console.log(`[demo] Waiting for backend: ${error.message}`);
-        lastMessage = error.message;
+      if (error instanceof Error && error.message !== "The operation was aborted.") {
+        if (lastMessage !== error.message) {
+          console.log(`[demo] Waiting for backend: ${error.message}`);
+          lastMessage = error.message;
+        }
       }
     }
     await delay(250);
@@ -253,6 +265,7 @@ viteServer = await createServer({
 });
 
 viteServer.watcher.add([
+  resolve(rootDir, "demo/externalGeneration.mjs"),
   resolve(rootDir, "demo/server.mjs"),
   resolve(rootDir, "demo/server"),
   resolve(rootDir, "demo/shared"),

@@ -4,6 +4,7 @@ const frontendHost = process.env.DEMO_FRONTEND_HOST ?? "127.0.0.1";
 const frontendPort = process.env.DEMO_FRONTEND_PORT ?? "4174";
 const backendHost = process.env.DEMO_BACKEND_HOST ?? "127.0.0.1";
 const backendPort = process.env.DEMO_BACKEND_PORT ?? "7360";
+const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
 
 export default defineConfig({
   testDir: "./test/e2e",
@@ -28,6 +29,6 @@ export default defineConfig({
     },
     url: `http://${frontendHost}:${frontendPort}`,
     timeout: 120_000,
-    reuseExistingServer: false,
+    reuseExistingServer,
   },
 });

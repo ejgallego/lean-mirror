@@ -18,6 +18,8 @@ import {
   type ServiceEvent,
 } from "@leanprover/editor-platform";
 
+import type { DemoExample } from "./demoSession.js";
+
 const hostService: EditorServiceDescriptor = {
   id: "demo-host",
   kind: "demo-host",
@@ -41,6 +43,8 @@ const demoWorkspaceShellClassNames = {
   secondaryHost: "help-host",
 };
 
+export type RegenerationMode = "manual" | "auto";
+
 export interface DemoUi {
   editorHost: HTMLDivElement;
   infoviewHost: HTMLDivElement;
@@ -50,10 +54,26 @@ export interface DemoUi {
     documents: readonly string[],
     openDocument: (uri: string) => Promise<void>,
   ): void;
+  renderExampleButtons(
+    examples: readonly DemoExample[],
+    activeExampleId: string | undefined,
+    switchExample: (example: DemoExample) => Promise<void>,
+  ): void;
+  setDemoContext(context: {
+    activeExampleLabel?: string | undefined;
+    project?: string | undefined;
+    summary?: string | undefined;
+    title?: string | undefined;
+  }): void;
   setActiveDocument(uri: string): void;
   setCurrentDocument(uri: string, languageId?: string): void;
   setDocumentDiagnostics(uri: string, diagnostics: readonly EditorDiagnostic[]): void;
   setDocumentSyncState(uri: string, syncState: DocumentSyncState, lastError?: string): void;
+  setExtractionState(text: string, tone?: "fresh" | "stale" | "pending"): void;
+  setRegenerateAction(action: (() => void) | null): void;
+  setRegenerateState(state: { busy?: boolean; enabled: boolean; label?: string; title?: string }): void;
+  setRegenerationMode(mode: RegenerationMode, enabled: boolean): void;
+  setRegenerationModeAction(action: ((mode: RegenerationMode) => void) | null): void;
   setRootUri(uri: string): void;
   setStatus(text: string): void;
 }
@@ -114,9 +134,26 @@ export function createDemoUi(
         "Try hover, completion, go-to-definition, rename, diagnostics, Rust formatting, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
       infoAriaLabel: "Lean InfoView",
       infoTitle: "InfoView",
-      secondaryTitle: "Help",
+      secondaryTitle: "Runtime",
     },
   });
+
+  const header = container.querySelector<HTMLElement>(".hero");
+  const projectEl = header?.querySelector<HTMLElement>(".eyebrow");
+  if (projectEl) {
+    projectEl.id = "demo-project";
+  }
+  if (header) {
+    const titleEl = document.createElement("h1");
+    titleEl.id = "demo-title";
+    titleEl.textContent = "Embedded Lean over Rust comments";
+    const summaryEl = document.createElement("p");
+    summaryEl.id = "demo-summary";
+    summaryEl.className = "lede";
+    summaryEl.textContent =
+      "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
+    header.append(titleEl, summaryEl);
+  }
 
   const helpHost = container.querySelector<HTMLElement>("[data-platform-shell-slot='secondary']");
   if (!helpHost) {
@@ -136,23 +173,44 @@ export function queryDemoUi(
   platformStore = new EditorPlatformStore(),
 ): DemoUi | null {
   const statusPanelEl = root.querySelector<HTMLDivElement>("#status-panel");
+  const activeExampleEl = root.querySelector<HTMLElement>("#active-example");
+  const demoProjectEl = root.querySelector<HTMLElement>("#demo-project");
+  const demoSummaryEl = root.querySelector<HTMLElement>("#demo-summary");
+  const demoTitleEl = root.querySelector<HTMLElement>("#demo-title");
+  const extractionEl = root.querySelector<HTMLElement>("#extraction-state");
+  const regenerationModeEl = root.querySelector<HTMLDivElement>("#regeneration-mode");
+  const regenerateButton = root.querySelector<HTMLButtonElement>("#regenerate-workspace");
   const eventsEl = root.querySelector<HTMLDivElement>("#events");
   const editorHost = root.querySelector<HTMLDivElement>("#editor");
   const infoviewHost = root.querySelector<HTMLDivElement>("#lean-infoview");
   const documentsEl = root.querySelector<HTMLDivElement>("#documents");
+  const examplesEl = root.querySelector<HTMLDivElement>("#examples");
 
   if (
     !statusPanelEl ||
+    !activeExampleEl ||
+    !demoProjectEl ||
+    !demoSummaryEl ||
+    !demoTitleEl ||
+    !extractionEl ||
+    !regenerationModeEl ||
+    !regenerateButton ||
     !eventsEl ||
     !editorHost ||
     !infoviewHost ||
-    !documentsEl
+    !documentsEl ||
+    !examplesEl
   ) {
     return null;
   }
 
   let rootUri = "Loading";
   let currentShellView: EditorPlatformShellView | null = null;
+  let regenerateAction: (() => void) | null = null;
+  let regenerationModeAction: ((mode: RegenerationMode) => void) | null = null;
+  const regenerationModeButtons = [...regenerationModeEl.querySelectorAll<HTMLButtonElement>("button[data-mode]")];
+  const isRegenerationMode = (value: string | undefined): value is RegenerationMode =>
+    value === "manual" || value === "auto";
   const renderStatusPanel = () => {
     if (!currentShellView) {
       return;
@@ -166,6 +224,16 @@ export function queryDemoUi(
     renderEditorPlatformLogPanel(eventsEl, snapshot.logs, { levels: ["info", "warn", "error"] });
   }, { emitCurrent: true });
   const hostRuntime = new EditorServiceRuntime(platformStore, hostService);
+  regenerateButton.addEventListener("click", () => {
+    regenerateAction?.();
+  });
+  for (const button of regenerationModeButtons) {
+    button.addEventListener("click", () => {
+      if (isRegenerationMode(button.dataset.mode)) {
+        regenerationModeAction?.(button.dataset.mode);
+      }
+    });
+  }
 
   return {
     editorHost,
@@ -190,6 +258,33 @@ export function queryDemoUi(
         });
         documentsEl.append(button);
       }
+    },
+    renderExampleButtons(examples, activeExampleId, switchExample) {
+      examplesEl.replaceChildren();
+      for (const example of examples) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.disabled = example.ready === false;
+        button.dataset.active = String(example.id === activeExampleId);
+        button.dataset.ready = String(example.ready !== false);
+        button.textContent = example.label;
+        if (example.summary) {
+          button.title = example.summary;
+        }
+        button.addEventListener("click", () => {
+          void switchExample(example);
+        });
+        examplesEl.append(button);
+      }
+    },
+    setDemoContext({ activeExampleLabel, project, summary, title }) {
+      activeExampleEl.textContent = activeExampleLabel ?? "Default";
+      demoProjectEl.textContent = project ?? "Lean 4 + CodeMirror 6";
+      demoSummaryEl.textContent =
+        summary ??
+        "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
+      demoTitleEl.textContent = title ?? "Embedded Lean over Rust comments";
+      document.title = title ?? "Anneal Embedded Lean Demo";
     },
     setActiveDocument(uri: string) {
       for (const button of documentsEl.querySelectorAll<HTMLButtonElement>("button")) {
@@ -222,6 +317,28 @@ export function queryDemoUi(
         ...(lastError ? { lastError } : {})
       }));
     },
+    setExtractionState(text: string, tone = "pending") {
+      extractionEl.textContent = text;
+      extractionEl.dataset.tone = tone;
+    },
+    setRegenerateAction(action) {
+      regenerateAction = action;
+    },
+    setRegenerateState({ busy = false, enabled, label, title }) {
+      regenerateButton.disabled = busy || !enabled;
+      regenerateButton.textContent = label ?? (busy ? "Regenerating" : "Regenerate");
+      regenerateButton.title = title ?? "";
+      regenerateButton.dataset.busy = String(busy);
+    },
+    setRegenerationMode(mode, enabled) {
+      for (const button of regenerationModeButtons) {
+        button.disabled = !enabled;
+        button.dataset.active = String(button.dataset.mode === mode);
+      }
+    },
+    setRegenerationModeAction(action) {
+      regenerationModeAction = action;
+    },
     setRootUri(uri: string) {
       rootUri = uri;
       renderStatusPanel();
@@ -234,9 +351,35 @@ export function queryDemoUi(
 
 function renderDemoHelp(host: HTMLElement): void {
   const ownerDocument = host.ownerDocument;
+
+  const examplesWrap = ownerDocument.createElement("div");
+  examplesWrap.className = "examples-wrap";
+  examplesWrap.append(sectionHeading(ownerDocument, "Prepared Examples"));
+  const examplesEl = ownerDocument.createElement("div");
+  examplesEl.id = "examples";
+  examplesEl.className = "examples";
+  examplesWrap.append(examplesEl);
+
+  const runtimeWrap = ownerDocument.createElement("div");
+  runtimeWrap.className = "extraction-wrap";
+  runtimeWrap.append(sectionHeading(ownerDocument, "Runtime"));
+  const runtimeFacts = ownerDocument.createElement("div");
+  runtimeFacts.className = "runtime-facts";
+  runtimeFacts.append(
+    statusRow(ownerDocument, "Example", "active-example", "Loading"),
+    statusRow(ownerDocument, "Extraction", "extraction-state", "Checking", "pending"),
+    regenerationModeRow(ownerDocument),
+    regenerationActionRow(ownerDocument),
+  );
+  runtimeWrap.append(runtimeFacts);
+
+  const documentsWrap = ownerDocument.createElement("div");
+  documentsWrap.className = "documents-wrap";
+  documentsWrap.append(sectionHeading(ownerDocument, "Open Documents"));
   const documentsEl = ownerDocument.createElement("div");
   documentsEl.id = "documents";
   documentsEl.className = "documents";
+  documentsWrap.append(documentsEl);
 
   const helpList = ownerDocument.createElement("ul");
   helpList.className = "help-list";
@@ -266,20 +409,83 @@ function renderDemoHelp(host: HTMLElement): void {
     helpCode(ownerDocument, "Ctrl-Z"),
     ".",
   );
-  appendHelpItem(helpList, "Each embedded Rust block has its own small inline enable/disable button.");
+  appendHelpItem(helpList, "Prepared examples come from the Anneal extraction flow over local Rust sources.");
   appendHelpItem(
     helpList,
-    "Open ",
-    helpCode(ownerDocument, "Main.rs"),
-    " to edit Rust comments that contain Lean snippets.",
+    "Host Rust edits outside embedded Lean blocks flip extraction from ",
+    helpCode(ownerDocument, "Fresh"),
+    " to ",
+    helpCode(ownerDocument, "Stale"),
+    ".",
   );
-  appendHelpItem(helpList, "Edit the file to force diagnostics or signature help.");
 
   const eventsEl = ownerDocument.createElement("div");
   eventsEl.id = "events";
   eventsEl.className = "events";
 
-  host.replaceChildren(documentsEl, helpList, eventsEl);
+  host.replaceChildren(examplesWrap, runtimeWrap, documentsWrap, helpList, eventsEl);
+}
+
+function sectionHeading(ownerDocument: Document, text: string): HTMLElement {
+  const heading = ownerDocument.createElement("h3");
+  heading.textContent = text;
+  return heading;
+}
+
+function statusRow(
+  ownerDocument: Document,
+  label: string,
+  id: string,
+  value: string,
+  tone?: "fresh" | "stale" | "pending",
+): HTMLElement {
+  const row = ownerDocument.createElement("div");
+  row.className = "status-row";
+  const labelEl = ownerDocument.createElement("span");
+  labelEl.textContent = label;
+  const valueEl = ownerDocument.createElement("strong");
+  valueEl.id = id;
+  valueEl.textContent = value;
+  if (tone) {
+    valueEl.dataset.tone = tone;
+  }
+  row.append(labelEl, valueEl);
+  return row;
+}
+
+function regenerationModeRow(ownerDocument: Document): HTMLElement {
+  const row = ownerDocument.createElement("div");
+  row.className = "status-row runtime-mode";
+  const labelEl = ownerDocument.createElement("span");
+  labelEl.textContent = "Mode";
+  const control = ownerDocument.createElement("div");
+  control.id = "regeneration-mode";
+  control.className = "segmented-control";
+  control.role = "group";
+  control.setAttribute("aria-label", "Regeneration mode");
+  for (const [mode, label] of [["manual", "Manual"], ["auto", "Auto"]] as const) {
+    const button = ownerDocument.createElement("button");
+    button.type = "button";
+    button.dataset.mode = mode;
+    button.textContent = label;
+    control.append(button);
+  }
+  row.append(labelEl, control);
+  return row;
+}
+
+function regenerationActionRow(ownerDocument: Document): HTMLElement {
+  const row = ownerDocument.createElement("div");
+  row.className = "status-row runtime-actions";
+  const labelEl = ownerDocument.createElement("span");
+  labelEl.textContent = "Workspace";
+  const button = ownerDocument.createElement("button");
+  button.id = "regenerate-workspace";
+  button.type = "button";
+  button.disabled = true;
+  button.textContent = "Regenerate";
+  row.append(labelEl, button);
+  return row;
 }
 
 function appendHelpItem(list: HTMLUListElement, ...parts: Array<HTMLElement | string>): void {

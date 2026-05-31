@@ -37,5 +37,9 @@ export default defineConfig({
     fs: {
       allow: [resolve(__dirname, "..")],
     },
+    watch: {
+      interval: Number(process.env.DEMO_WATCH_POLL_INTERVAL_MS ?? "500"),
+      usePolling: process.env.DEMO_WATCH_USE_POLLING !== "0",
+    },
   },
 });

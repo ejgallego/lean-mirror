@@ -1,6 +1,6 @@
 import { diagnosticCount } from "@codemirror/lint";
 import { LSPPlugin } from "@codemirror/lsp-client";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -168,12 +168,15 @@ const leanExecutable =
 const leanAvailable =
   spawnSync(leanExecutable, ["--version"], { stdio: "ignore" }).status === 0;
 const smokeTest = leanAvailable ? it : it.skip;
+const rootDir = process.cwd();
+const testCacheDir = join(rootDir, ".demo-cache", "tests");
 
 describe("real Lean server", () => {
   smokeTest(
     "opens a Lean file, receives diagnostics and semantic tokens, and answers hover requests",
     async () => {
-      const workspace = await mkdtemp(join(tmpdir(), "cm-lean4-"));
+      await mkdir(testCacheDir, { recursive: true });
+      const workspace = await mkdtemp(join(testCacheDir, "cm-lean4-"));
       const filePath = join(workspace, "Smoke.lean");
       const source = "#check Nat.succ\n#check MissingLeanName\n";
       await writeFile(filePath, source, "utf8");

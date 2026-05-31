@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildEmbeddedLeanDocument,
+  embeddedLeanHostFingerprint,
   mapEmbeddedLeanDiagnostics,
   parseEmbeddedLeanBlocks,
   serializeEmbeddedLeanBlock,
@@ -195,6 +196,34 @@ describe("embeddedRust", () => {
     expect(blocks[0]?.code.includes("\r")).toBe(false);
   });
 
+  it("parses Anneal Lean doc-comment fences without conflating duplicate labels", () => {
+    const source = [
+      "/// ```lean, editor-prelude",
+      "/// open Aeneas Aeneas.Std Result",
+      "/// ```",
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "pub fn first() {}",
+      "",
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "pub fn second() {}",
+      "",
+    ].join("\n");
+
+    const blocks = parseEmbeddedLeanBlocks(source);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]?.role).toBe("prelude");
+    expect(blocks[0]?.info).toBe("editor-prelude");
+    expect(blocks[1]?.label).toBe("anneal spec");
+    expect(blocks[1]?.key).not.toBe(blocks[2]?.key);
+    expect(blocks[1]?.code).toContain("theorem spec");
+  });
+
   it("serializes Lean snippets back into Rust comments", () => {
     const source = [
       "//! ```lean proof",
@@ -227,6 +256,7 @@ describe("embeddedRust", () => {
       code: "",
       from: 0,
       indent: "",
+      info: null,
       key: "lean:proof",
       label: "proof",
       linePrefix: "//!",
@@ -236,6 +266,22 @@ describe("embeddedRust", () => {
       to: 0,
     }, "#check Nat.succ\n#eval 1"));
     expect(lean[0]?.code).toBe("#check Nat.succ\n#eval 1");
+  });
+
+  it("preserves Anneal fence info when serializing Lean doc comments", () => {
+    const source = [
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "",
+    ].join("\n");
+    const block = parseEmbeddedLeanBlocks(source)[0];
+    expect(block).toBeDefined();
+
+    const serialized = serializeEmbeddedLeanBlock(block!, "theorem spec : True := by\n  trivial");
+    expect(serialized).toContain("/// ```lean, anneal, spec");
+    expect(serialized).toContain("/// theorem spec : True := by");
   });
 
   it("builds one Lean document from Rust-comment prelude and snippets", () => {
@@ -291,5 +337,68 @@ describe("embeddedRust", () => {
         to: 10,
       },
     ]);
+  });
+
+  it("builds an embedded Lean document with external imports and preamble", () => {
+    const source = [
+      "/// ```lean, editor-prelude",
+      "/// namespace demo",
+      "/// ```",
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "pub fn demo() {}",
+      "",
+    ].join("\n");
+
+    const document = buildEmbeddedLeanDocument(source, {
+      defaultImports: ["Anneal", "Generated"],
+      preamble: ["open Aeneas Aeneas.Std Result", "noncomputable section"],
+      sourceName: "abs.rs",
+    }).doc;
+
+    expect(document.startsWith("import Anneal\nimport Generated")).toBe(true);
+    expect(document).toContain("open Aeneas Aeneas.Std Result\nnoncomputable section");
+    expect(document.indexOf("namespace demo")).toBeLessThan(document.indexOf("theorem spec"));
+  });
+
+  it("appends a postamble after embedded Lean snippets", () => {
+    const source = [
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "pub fn demo() {}",
+      "",
+    ].join("\n");
+
+    const document = buildEmbeddedLeanDocument(source, {
+      defaultImports: ["Anneal"],
+      postamble: ["end Demo", "end Outer"],
+      preamble: ["namespace Outer", "namespace Demo"],
+      sourceName: "demo.rs",
+    }).doc;
+
+    expect(document).toContain("namespace Outer\nnamespace Demo");
+    expect(document.trimEnd().endsWith("end Demo\nend Outer")).toBe(true);
+  });
+
+  it("ignores embedded Lean block edits when computing the Rust host fingerprint", () => {
+    const before = [
+      "/// ```lean, anneal, spec",
+      "/// theorem spec : True := by",
+      "///   trivial",
+      "/// ```",
+      "pub fn demo() -> i32 {",
+      "    1",
+      "}",
+      "",
+    ].join("\n");
+    const commentEdited = before.replace("trivial", "simpa");
+    const rustEdited = before.replace("1", "2");
+
+    expect(embeddedLeanHostFingerprint(commentEdited)).toBe(embeddedLeanHostFingerprint(before));
+    expect(embeddedLeanHostFingerprint(rustEdited)).not.toBe(embeddedLeanHostFingerprint(before));
   });
 });

@@ -73,6 +73,7 @@ export interface EmbeddedBlockScaffold<TBlock extends EmbeddedBlock> {
 
 export interface LineCommentEmbeddedBlock extends EmbeddedBlock {
   codeLineStarts?: readonly number[];
+  info: string | null;
   indent: string;
   linePrefix: string;
 }
@@ -219,6 +220,35 @@ function parseLineComment(
   return null;
 }
 
+function parseLineCommentFence(
+  content: string,
+  kind: string,
+): { info: string | null; label: string | null } | null {
+  if (!content.startsWith("```")) {
+    return null;
+  }
+  const rest = content.slice(3);
+  if (!rest.startsWith(kind)) {
+    return null;
+  }
+  const suffix = rest.slice(kind.length);
+  if (suffix.length > 0 && !/^[\s,]/.test(suffix)) {
+    return null;
+  }
+  const trimmed = suffix.trim();
+  if (trimmed.length === 0) {
+    return { info: null, label: null };
+  }
+  if (trimmed.startsWith(",")) {
+    const info = trimmed.slice(1).trim();
+    return {
+      info,
+      label: info.length > 0 ? info.replace(/\s*,\s*/g, " ") : null,
+    };
+  }
+  return { info: trimmed, label: trimmed };
+}
+
 export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedBlock = LineCommentEmbeddedBlock>(
   source: string,
   spec: Pick<LineCommentAdapterSpec<TBlock>, "defaultTitle" | "kind" | "linePrefixes">,
@@ -227,7 +257,6 @@ export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedB
   const blocks: TBlock[] = [];
   let ordinal = 0;
   const seenKeys = new Map<string, number>();
-  const headerPattern = new RegExp(`^\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -238,13 +267,13 @@ export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedB
     if (!parsed) {
       continue;
     }
-    const header = headerPattern.exec(parsed.content);
+    const header = parseLineCommentFence(parsed.content.trim(), spec.kind);
     if (!header) {
       continue;
     }
 
     const from = line.from;
-    const label = header[1]?.trim() || null;
+    const label = header.label;
     const codeLines: string[] = [];
     const codeLineStarts: number[] = [];
 
@@ -263,6 +292,7 @@ export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedB
           code: codeLines.join("\n"),
           codeLineStarts,
           from,
+          info: header.info,
           indent: parsed.indent,
           key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
@@ -306,10 +336,12 @@ export function serializeLineCommentFencedBlock(
 ): string {
   const indent = block.indent ?? "";
   const prefix = block.linePrefix ?? fallbackPrefix;
+  const info = block.info ?? block.label;
+  const header = info?.includes(",") ? `${kind}, ${info}` : `${kind}${info ? ` ${info}` : ""}`;
   const commentLine = (content: string): string =>
     content.length > 0 ? `${indent}${prefix} ${content}` : `${indent}${prefix}`;
   return [
-    commentLine(`\`\`\`${kind}${block.label ? ` ${block.label}` : ""}`),
+    commentLine(`\`\`\`${header}`),
     ...code.split("\n").map(commentLine),
     commentLine("```"),
   ].join("\n") + "\n";

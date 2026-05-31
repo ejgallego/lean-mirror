@@ -20,6 +20,8 @@ export interface EmbeddedLeanDocument {
 
 export interface EmbeddedLeanDocumentOptions {
   defaultImports?: readonly string[];
+  preamble?: readonly string[];
+  postamble?: readonly string[];
   sourceName?: string;
 }
 
@@ -39,8 +41,15 @@ export interface EmbeddedLeanDiagnosticInput {
 }
 
 function leanRole(block: EmbeddedBlock): EmbeddedLeanBlock["role"] {
+  const info = "info" in block && typeof block.info === "string" ? block.info.trim().toLowerCase() : "";
   const label = block.label?.trim().toLowerCase();
-  return label === "prelude" || label === "imports" ? "prelude" : "snippet";
+  return info === "editor-prelude" ||
+    info === "prelude" ||
+    label === "editor-prelude" ||
+    label === "prelude" ||
+    label === "imports"
+    ? "prelude"
+    : "snippet";
 }
 
 function lineNumberAt(source: string, offset: number): number {
@@ -84,12 +93,17 @@ export function buildEmbeddedLeanDocument(
   if (defaultImports.length > 0) {
     lines.push("");
   }
+  if (options.preamble && options.preamble.length > 0) {
+    lines.push(...options.preamble);
+    lines.push("");
+  }
 
   for (const block of [...prelude, ...snippets]) {
     const line = lineNumberAt(source, block.from);
     const title = block.label ?? `block ${block.ordinal}`;
     lines.push(`/- ${title} from ${options.sourceName ?? "Rust source"}:${line} -/`);
-    for (const [index, codeLine] of block.code.split("\n").entries()) {
+    const codeLines = block.code.split("\n");
+    for (const [index, codeLine] of codeLines.entries()) {
       mappings.push({
         blockKey: block.key,
         blockLineStart: block.code
@@ -100,6 +114,11 @@ export function buildEmbeddedLeanDocument(
       });
       lines.push(codeLine);
     }
+    lines.push("");
+  }
+
+  if (options.postamble && options.postamble.length > 0) {
+    lines.push(...options.postamble);
     lines.push("");
   }
 
@@ -139,6 +158,21 @@ export function mapEmbeddedLeanDiagnostics(
     byBlock.set(start.blockKey, mapped);
   }
   return byBlock;
+}
+
+export function embeddedLeanHostFingerprint(source: string): string {
+  const blocks = parseEmbeddedLeanBlocks(source).sort((left, right) => left.from - right.from);
+  if (blocks.length === 0) {
+    return source;
+  }
+  let cursor = 0;
+  const parts: string[] = [];
+  for (const block of blocks) {
+    parts.push(source.slice(cursor, block.from));
+    cursor = block.to;
+  }
+  parts.push(source.slice(cursor));
+  return parts.join("");
 }
 
 const baseLeanAdapter = createLineCommentAdapter<EmbeddedLeanBlock>({

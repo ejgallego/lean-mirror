@@ -274,13 +274,27 @@ provide its own `Workspace` implementation.
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
 demo workspace pin Lean 4.33.0-rc1; an elan installation selects and installs that
 toolchain automatically. `rust-analyzer` can be installed with
-`rustup component add rust-analyzer rust-src`.
+`rustup component add rust-analyzer rust-src`. External Anneal mode also needs
+`cargo` and a checkout of the Rust project whose examples you want to open.
 
 If the Lean WebSocket closes, the demo starts a fresh client/server generation
 without remounting the active CodeMirror editor. A complete runtime restart is
 retained as the fallback when generation recovery itself fails.
 
-Run `npm run demo` and open `http://127.0.0.1:5173`.
+Install the npm dependencies if needed, then start the in-repo sample workspace:
+
+```bash
+npm install
+npm run demo
+```
+
+Open `http://127.0.0.1:5173`. The all-in-one script starts:
+
+- a Vite frontend in `demo/`
+- a small WebSocket bridge that proxies browser JSON-RPC frames to `lake env lean --server`
+- a rust-analyzer bridge for the active Rust source
+- a multi-file editor demo that can switch between the default Lean files, the Rust source, and the synthesized Lean snippet document
+- a pure Rust-driver path where edits to `Main.rs` refresh `RustSnippets.lean` without importing generated Aeneas output
 
 If those ports are busy, override them:
 
@@ -292,9 +306,94 @@ The backend binds to loopback by default. Directly binding it to a non-loopback 
 unless `LEAN_DEMO_ALLOW_REMOTE=1` is set. Remote mode is intended only for controlled experiments;
 configure `LEAN_DEMO_ALLOWED_ORIGINS`, payload limits, and the LSP process cap before using it.
 
-That starts:
+External generation can take several minutes. When `LEAN_DEMO_ANNEAL_MANIFEST`
+or `LEAN_DEMO_LEAN_ROOT` is set, `npm run demo` waits up to 5 minutes for the
+backend by default; override that with `DEMO_BACKEND_READY_TIMEOUT_MS`.
 
-- a Vite frontend in `demo/`
-- a small WebSocket bridge that proxies browser JSON-RPC frames to `lean --server`
-- a multi-file editor demo that can switch between `Main.lean`, `Helper.lean`, `Main.rs`, and the concatenated Lean snippets extracted from Rust comments
-- a pure Rust-driver path where edits to `Main.rs` refresh `RustSnippets.lean` without importing generated Aeneas output
+### Zerocopy Anneal examples
+
+For the PR-specific demo, use the setup wrapper:
+
+```bash
+npm run demo:zerocopy-anneal
+```
+
+That script:
+
+- creates or updates a persistent checkout of `google/zerocopy` PR 3321 under `.demo-cache/`
+- runs `npm install` first if `node_modules` is missing
+- starts the normal `npm run demo` stack with the required `LEAN_DEMO_*` variables
+- prebuilds every built-in prepared example through the demo backend
+
+Useful options:
+
+```bash
+npm run demo:zerocopy-anneal -- --root /path/to/zerocopy-pr3321
+npm run demo:zerocopy-anneal -- --checkout-dir /path/to/local/zerocopy-pr3321
+npm run demo:zerocopy-anneal -- --active namespaces
+npm run demo:zerocopy-anneal -- --no-warm
+```
+
+Use `--root` to reuse an existing checkout without letting the wrapper update it.
+Use `--checkout-dir` to choose where the wrapper creates and updates its
+persistent local checkout. The same port overrides still apply:
+
+```bash
+DEMO_BACKEND_PORT=7358 DEMO_FRONTEND_PORT=5174 npm run demo:zerocopy-anneal
+```
+
+By default the Anneal tool manifest is read from
+`$LEAN_DEMO_RUST_ROOT/anneal/Cargo.toml`. If your Anneal tool checkout lives
+somewhere else, export this before running the wrapper:
+
+```bash
+LEAN_DEMO_ANNEAL_TOOL_MANIFEST=/path/to/anneal/Cargo.toml
+```
+
+If the generated Lean workspace's `lake-manifest.json` contains an Anneal
+toolchain placeholder URL, also set
+`ANNEAL_TOOLCHAIN_DIR=/path/to/toolchain` so the demo can rewrite that manifest
+entry before running `lake build`.
+
+The built-in `zerocopy-pr3321` presets are:
+
+- `linked_list`
+- `namespaces`
+- `size_of_align_of`
+- `abs`
+
+The wrapper prepares all of them by default. Without the wrapper, startup
+generates and builds only the active example; prepared example buttons are
+enabled after their generated Lean workspace has been cached and built. To make
+all built-in examples available in manual external mode, start the external demo
+once, wait for `Demo backend listening on http://127.0.0.1:7357`, and run this
+from a second terminal:
+
+```bash
+for example in linked_list namespaces size_of_align_of abs; do
+  curl -fsS \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"$example\"}" \
+    http://127.0.0.1:7357/switch-example
+done
+```
+
+Each request may run Anneal generation plus `lake exe cache get` and
+`lake build`. Refresh the browser after the loop; all successfully built
+examples should be clickable in the Prepared Examples panel. If you changed
+`DEMO_BACKEND_PORT`, use that port in the `curl` URL.
+
+Useful external-mode variables:
+
+- `LEAN_DEMO_RUST_ROOT`: root of the Rust checkout used by rust-analyzer
+- `LEAN_DEMO_RUST_FILE`: one Rust file to open when not using an example set
+- `LEAN_DEMO_ANNEAL_MANIFEST`: `Cargo.toml` for the Rust project Anneal should generate from
+- `LEAN_DEMO_ANNEAL_TOOL_MANIFEST`: `Cargo.toml` for the Anneal generator tool
+- `LEAN_DEMO_ANNEAL_ARGS`: extra generator args, either shell-style text or a JSON string array
+- `LEAN_DEMO_LEAN_ROOT`: use an already generated Lean workspace instead of invoking Anneal; this disables example switching
+- `LEAN_DEMO_EXAMPLE_SET=zerocopy-pr3321`: enable the built-in zerocopy presets
+- `LEAN_DEMO_ACTIVE_EXAMPLE`: choose the startup preset, for example `namespaces`
+- `LEAN_DEMO_EXAMPLE_PRESETS`: JSON array of custom presets with `id`, `label`, `rustFile`, optional `summary`, and optional `annealArgs`
+- `LEAN_DEMO_SKIP_LEAN_BUILD=1`: skip `lake exe cache get` and `lake build` for an external Lean workspace
+- `DEMO_WATCH_USE_POLLING=0`: opt out of the default polling Vite watcher and use native filesystem watches
+- `PLAYWRIGHT_BROWSERS_PATH`: browser cache for E2E tests; defaults to `.demo-cache/playwright-browsers`

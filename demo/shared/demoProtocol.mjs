@@ -1,10 +1,12 @@
 export const DEMO_ENDPOINTS = Object.freeze({
   document: "/document",
+  regenerateRustMain: "/regenerate-rust-main",
   rustDocument: "/rust-document",
   rustMain: "/rust-main",
   rustSession: "/rust-session",
   session: "/session",
   status: "/status",
+  switchExample: "/switch-example",
 });
 
 export function documentEndpoint(apiBase, uri) {
@@ -14,17 +16,36 @@ export function documentEndpoint(apiBase, uri) {
 export function parseDemoSession(value) {
   const record = expectRecord(value, "DemoSession");
   const documentLanguageIds = optionalStringRecord(record.documentLanguageIds, "documentLanguageIds");
+  const availableExamples = optionalDemoExamples(record.availableExamples, "availableExamples");
   const preparationStatus = optionalDemoPreparationStatus(record.preparationStatus, "preparationStatus");
   return {
+    ...(record.activeExampleId === undefined
+      ? {}
+      : { activeExampleId: expectString(record.activeExampleId, "activeExampleId") }),
+    ...(availableExamples ? { availableExamples } : {}),
+    ...(record.canRegenerate === undefined ? {} : { canRegenerate: expectBoolean(record.canRegenerate, "canRegenerate") }),
+    ...(record.demoProject === undefined ? {} : { demoProject: expectString(record.demoProject, "demoProject") }),
+    ...(record.demoSummary === undefined ? {} : { demoSummary: expectString(record.demoSummary, "demoSummary") }),
+    ...(record.demoTitle === undefined ? {} : { demoTitle: expectString(record.demoTitle, "demoTitle") }),
+    ...(preparationStatus ? { preparationStatus } : {}),
     rootUri: expectString(record.rootUri, "rootUri"),
     documentUri: expectString(record.documentUri, "documentUri"),
     ...(documentLanguageIds ? { documentLanguageIds } : {}),
     documents: expectStringArray(record.documents, "documents"),
+    ...(record.embeddedLeanDefaultImports === undefined
+      ? {}
+      : { embeddedLeanDefaultImports: expectStringArray(record.embeddedLeanDefaultImports, "embeddedLeanDefaultImports") }),
     ...(record.embeddedLeanDocumentUri === undefined
       ? {}
       : { embeddedLeanDocumentUri: expectString(record.embeddedLeanDocumentUri, "embeddedLeanDocumentUri") }),
+    ...(record.embeddedLeanPreamble === undefined
+      ? {}
+      : { embeddedLeanPreamble: expectStringArray(record.embeddedLeanPreamble, "embeddedLeanPreamble") }),
+    ...(record.embeddedLeanPostamble === undefined
+      ? {}
+      : { embeddedLeanPostamble: expectStringArray(record.embeddedLeanPostamble, "embeddedLeanPostamble") }),
     initialDoc: expectString(record.initialDoc, "initialDoc"),
-    ...(preparationStatus ? { preparationStatus } : {}),
+    ...(record.rustRootUri === undefined ? {} : { rustRootUri: expectString(record.rustRootUri, "rustRootUri") }),
     ...(record.rustMainDocumentUri === undefined
       ? {}
       : { rustMainDocumentUri: expectString(record.rustMainDocumentUri, "rustMainDocumentUri") }),
@@ -37,6 +58,13 @@ export function parseDemoSession(value) {
 
 export function parseDemoPreparationStatus(value) {
   return expectDemoPreparationStatus(value, "DemoPreparationStatus");
+}
+
+export function parseSwitchExampleRequest(value) {
+  const record = expectRecord(value, "SwitchExampleRequest");
+  return {
+    id: expectString(record.id, "id"),
+  };
 }
 
 export function parseDocumentResponse(value) {
@@ -149,10 +177,10 @@ function expectDemoPreparationStatus(value, name) {
     throw new Error(`${name}.phase is invalid`);
   }
   return {
-    ...(record.detail === undefined ? {} : { detail: expectString(record.detail, `${name}.detail`) }),
-    message: expectString(record.message, `${name}.message`),
     phase,
+    message: expectString(record.message, `${name}.message`),
     updatedAt: expectString(record.updatedAt, `${name}.updatedAt`),
+    ...(record.detail === undefined ? {} : { detail: expectString(record.detail, `${name}.detail`) }),
   };
 }
 
@@ -164,4 +192,24 @@ function optionalStringRecord(value, name) {
   return Object.fromEntries(
     Object.entries(record).map(([key, entry]) => [key, expectString(entry, `${name}.${key}`)]),
   );
+}
+
+function optionalDemoExamples(value, name) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  return value.map((entry, index) => {
+    const record = expectRecord(entry, `${name}[${index}]`);
+    return {
+      id: expectString(record.id, `${name}[${index}].id`),
+      label: expectString(record.label, `${name}[${index}].label`),
+      ...(record.ready === undefined ? {} : { ready: expectBoolean(record.ready, `${name}[${index}].ready`) }),
+      ...(record.summary === undefined
+        ? {}
+        : { summary: expectString(record.summary, `${name}[${index}].summary`) }),
+    };
+  });
 }

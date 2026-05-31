@@ -2,7 +2,7 @@ import {
   createDemoEmbeddedAdapters,
 } from "./embeddedAdapters.js";
 import { bootDemoRuntime, type DemoRuntime } from "./demoRuntime.js";
-import { createDemoSessionApi } from "./demoSession.js";
+import { createDemoSessionApi, type DemoExample } from "./demoSession.js";
 import { createDemoUi, demoTheme } from "./demoUi.js";
 
 import "./style.css";
@@ -20,6 +20,7 @@ let runToken = 0;
 let stopped = false;
 let lastReconnectMessage: string | null = null;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
+let switchPromise: Promise<void> | null = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +83,7 @@ async function startDemoLoop() {
           }, 250);
         },
         sessionApi,
+        switchExample,
         ui: demoUi,
       });
       lastReconnectMessage = null;
@@ -100,6 +102,35 @@ async function startDemoLoop() {
       await delay(Math.min(1500, 250 * attempt));
     }
   }
+}
+
+async function switchExample(example: DemoExample): Promise<void> {
+  if (switchPromise) {
+    return switchPromise;
+  }
+  switchPromise = (async () => {
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    runToken += 1;
+    runtime?.dispose();
+    runtime = null;
+    demoUi.setStatus("Switching example");
+    demoUi.logEvent(`Switching to ${example.label}`);
+    try {
+      await sessionApi.switchExample(example.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      demoUi.logEvent(`Example switch failed: ${message}`);
+      await startDemoLoop();
+      return;
+    }
+    await startDemoLoop();
+  })().finally(() => {
+    switchPromise = null;
+  });
+  return switchPromise;
 }
 
 if (import.meta.hot) {

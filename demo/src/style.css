@@ -30,6 +30,21 @@ code {
   margin-bottom: 10px;
 }
 
+.hero h1 {
+  margin: 2px 0 0;
+  font-size: clamp(1.45rem, 2.8vw, 2.35rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+  color: #263128;
+}
+
+.lede {
+  max-width: 78ch;
+  margin: 8px 0 0;
+  color: #566253;
+  line-height: 1.42;
+}
+
 .eyebrow {
   margin: 4px 0 0;
   text-transform: uppercase;
@@ -84,7 +99,7 @@ code {
 }
 
 .panel-editor {
-  min-height: calc(100vh - 86px);
+  min-height: calc(100vh - 128px);
   display: flex;
   flex-direction: column;
 }
@@ -165,6 +180,18 @@ code {
   text-overflow: ellipsis;
 }
 
+.status-row strong[data-tone="fresh"] {
+  color: #4e8d62;
+}
+
+.status-row strong[data-tone="stale"] {
+  color: #a33b34;
+}
+
+.status-row strong[data-tone="pending"] {
+  color: #8a681b;
+}
+
 .service-statuses {
   display: grid;
   gap: 4px;
@@ -216,14 +243,14 @@ code {
 }
 
 .panel-help {
-  max-height: min(26vh, 260px);
+  max-height: min(33vh, 340px);
   overflow: auto;
   padding-bottom: 12px;
 }
 
 .panel-infoview {
   min-height: 360px;
-  height: clamp(380px, 56vh, 620px);
+  height: clamp(380px, 49vh, 620px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -284,21 +311,94 @@ code {
   white-space: pre-wrap;
 }
 
-.help-list {
-  margin: 10px 0 0;
-  padding: 0 14px 0 30px;
-  color: #505a4d;
-  font-size: 0.83rem;
-  line-height: 1.42;
+.examples-wrap,
+.documents-wrap,
+.extraction-wrap {
+  padding: 10px 14px 0;
 }
 
+.examples-wrap h3,
+.documents-wrap h3,
+.extraction-wrap h3 {
+  margin: 0 0 8px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: #506147;
+}
+
+.runtime-facts {
+  display: grid;
+  gap: 6px;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 10.5rem);
+  border: 1px solid #cbd6c9;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f8faf2;
+}
+
+.segmented-control button {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #384536;
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.2;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.segmented-control button + button {
+  border-left: 1px solid #cbd6c9;
+}
+
+.segmented-control button[data-active="true"] {
+  background: #274d40;
+  color: #f8fbf9;
+}
+
+.segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.runtime-actions button {
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid #cbd6c9;
+  border-radius: 6px;
+  background: #f8faf2;
+  color: #384536;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.runtime-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.examples,
 .documents {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  padding: 10px 14px 0;
 }
 
+.documents {
+  padding: 0;
+}
+
+.examples button,
 .documents button {
   border: 1px solid #cbd6c9;
   border-radius: 6px;
@@ -311,14 +411,34 @@ code {
   transition: transform 120ms ease, background-color 120ms ease;
 }
 
+.examples button:hover,
 .documents button:hover {
   transform: translateY(-1px);
 }
 
+.examples button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  border-style: dashed;
+}
+
+.examples button:disabled:hover {
+  transform: none;
+}
+
+.examples button[data-active="true"],
 .documents button[data-active="true"] {
   background: #274d40;
   border-color: #274d40;
   color: #f8fbf9;
+}
+
+.help-list {
+  margin: 10px 0 0;
+  padding: 0 14px 0 30px;
+  color: #505a4d;
+  font-size: 0.83rem;
+  line-height: 1.42;
 }
 
 .events {
