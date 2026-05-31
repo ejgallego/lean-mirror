@@ -1,4 +1,9 @@
-import type { DemoSession, RustMainUpdateRequest, RustMainUpdateResult } from "../shared/demoProtocol.mjs";
+import type {
+  DemoPreparationStatus,
+  DemoSession,
+  RustMainUpdateRequest,
+  RustMainUpdateResult,
+} from "../shared/demoProtocol.mjs";
 
 export interface DemoWorkspacePaths {
   workspaceDir: string;
@@ -38,6 +43,7 @@ export interface DemoWorkspace {
   uris: DemoWorkspaceUris;
   documentLanguageIds: Record<string, string>;
   prepare(): Promise<void>;
+  readPreparationStatus(): DemoPreparationStatus;
   readSession(urls: DemoSessionUrls): Promise<DemoSession>;
   createRustBlockSession(key: string, code: string): Promise<RustBlockSession>;
   readDocument(uri: string): Promise<string>;
@@ -46,4 +52,9 @@ export interface DemoWorkspace {
   updateRustMainDocument(payload: RustMainUpdateRequest): Promise<RustMainUpdateResult>;
 }
 
-export function createDemoWorkspace(demoDir: string): DemoWorkspace;
+export function createDemoWorkspace(
+  demoDir: string,
+  options?: {
+    onStatusChange?: (status: DemoPreparationStatus) => void;
+  },
+): DemoWorkspace;

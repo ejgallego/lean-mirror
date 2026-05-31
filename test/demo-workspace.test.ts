@@ -17,6 +17,23 @@ async function createFixture(): Promise<{ demoDir: string; workspace: DemoWorksp
   await writeFile(join(workspaceDir, "Main.lean"), "import Helper\n", "utf8");
   await writeFile(join(workspaceDir, "Helper.lean"), "def helperValue := 1\n", "utf8");
   await writeFile(join(workspaceDir, "RustSnippets.lean"), "import Helper\n", "utf8");
+  await writeFile(
+    join(workspaceDir, "lakefile.toml"),
+    [
+      'name = "lean_mirror_demo_test"',
+      'version = "0.1.0"',
+      'defaultTargets = ["Helper"]',
+      "",
+      "[[lean_lib]]",
+      'name = "Helper"',
+      "",
+      "[[lean_lib]]",
+      'name = "RustSnippets"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(join(workspaceDir, "lean-toolchain"), "leanprover/lean4:v4.29.0\n", "utf8");
   return { demoDir, workspace: createDemoWorkspace(demoDir) };
 }
 
@@ -25,6 +42,22 @@ afterEach(async () => {
 });
 
 describe("demo workspace backend", () => {
+  it("reports preparation status", async () => {
+    const { workspace } = await createFixture();
+
+    expect(workspace.readPreparationStatus().phase).toBe("idle");
+    await workspace.prepare();
+    const status = workspace.readPreparationStatus();
+    const session = await workspace.readSession({
+      rustMainWebsocketUrl: "ws://127.0.0.1:7357/rust-main-lsp",
+      websocketUrl: "ws://127.0.0.1:7357/lsp",
+    });
+
+    expect(status.phase).toBe("ready");
+    expect(status.message).toBe("Demo workspace ready.");
+    expect(session.preparationStatus).toEqual(status);
+  });
+
   it("builds session metadata from the workspace files", async () => {
     const { workspace } = await createFixture();
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   documentEndpoint,
   parseCreateRustSessionRequest,
+  parseDemoPreparationStatus,
   parseDemoSession,
   parseDocumentResponse,
   parseRustMainUpdateRequest,
@@ -22,6 +23,11 @@ describe("demo protocol", () => {
       documents: ["file:///workspace/Main.rs"],
       embeddedLeanDocumentUri: "file:///workspace/RustSnippets.lean",
       initialDoc: "fn main() {}\n",
+      preparationStatus: {
+        message: "Demo workspace ready.",
+        phase: "ready",
+        updatedAt: "2026-05-26T00:00:00.000Z",
+      },
       rustMainDocumentUri: "file:///workspace/Main.rs",
       rustMainWebsocketUrl: "ws://127.0.0.1:7357/rust-main-lsp",
       websocketUrl: "ws://127.0.0.1:7357/lsp",
@@ -31,6 +37,8 @@ describe("demo protocol", () => {
     expect(session.documentLanguageIds).toEqual({
       "file:///workspace/Main.rs": "rust",
     });
+    expect(session.preparationStatus?.phase).toBe("ready");
+    expect(parseDemoPreparationStatus(session.preparationStatus)).toEqual(session.preparationStatus);
     expect(parseDocumentResponse({ uri: session.documentUri, text: "text" })).toEqual({
       uri: session.documentUri,
       text: "text",
