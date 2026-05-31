@@ -232,6 +232,23 @@ test("demo infoview follows embedded Lean editors", async ({ page }) => {
   await expect(infoview).toContainText("helperValue : Nat", { timeout: 30_000 });
 });
 
+test("demo shows hovers in embedded Lean editors", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
+
+  const helperToken = page
+    .locator(".cm-embedded-block-widget .cm-content span")
+    .filter({ hasText: "helperValue" })
+    .first();
+  await expect(helperToken).toBeVisible();
+  await helperToken.hover();
+
+  const tooltip = page.locator(".cm-tooltip .cm-lsp-hover-tooltip").first();
+  await expect(tooltip).toContainText("helperValue", { timeout: 10_000 });
+});
+
 test("demo highlights Rust and embedded Lean code", async ({ page }) => {
   await page.goto("/");
 
