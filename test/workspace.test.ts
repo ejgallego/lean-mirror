@@ -178,7 +178,7 @@ describe("LeanWorkspace", () => {
         }
         return null;
       },
-      async displayDocument(uri) {
+      async displayDocument() {
         displayCount += 1;
         helperView = createTestView("def helperValue : Nat := 41\n", lean4({ client, uri: HELPER_URI }));
         return helperView;

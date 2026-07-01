@@ -1,21 +1,4 @@
-import type { LSPClient, Transport } from "@codemirror/lsp-client";
-
-export type LspNotificationHandler<T = unknown> = (
-  client: LSPClient,
-  params: T,
-) => boolean;
-
-export function composeNotificationHandlers<T>(
-  ...handlers: readonly (LspNotificationHandler<T> | undefined)[]
-): LspNotificationHandler<T> {
-  return (client, params) => {
-    let handled = false;
-    for (const handler of handlers) {
-      handled = handler?.(client, params) || handled;
-    }
-    return handled;
-  };
-}
+import type { Transport } from "@codemirror/lsp-client";
 
 export type JsonRpcId = string | number | null;
 

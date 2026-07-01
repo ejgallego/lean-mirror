@@ -1,5 +1,5 @@
 import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
-import { EditorView, GutterMarker, WidgetType, gutter, type BlockInfo, type ViewUpdate } from "@codemirror/view";
+import { EditorView, GutterMarker, gutter, type BlockInfo, type ViewUpdate } from "@codemirror/view";
 import { setDiagnostics } from "@codemirror/lint";
 
 import {

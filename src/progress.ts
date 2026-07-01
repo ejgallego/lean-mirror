@@ -35,7 +35,7 @@ export interface LeanFileProgressDocumentState {
 
 export interface LeanFileProgressUpdate {
   ignored: boolean;
-  reason?: "malformed" | "stale";
+  reason?: "stale";
   state: LeanFileProgressDocumentState | null;
   uri: string | null;
 }

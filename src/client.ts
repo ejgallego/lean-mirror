@@ -124,10 +124,13 @@ export function createLeanLspClient(config: LeanLspClientConfig = {}): LSPClient
   }
   const disconnect = client.disconnect.bind(client);
   client.disconnect = () => {
-    for (const extension of lifecycleExtensions) {
-      extension.onClientDisconnect?.(client);
+    try {
+      for (const extension of lifecycleExtensions) {
+        extension.onClientDisconnect?.(client);
+      }
+    } finally {
+      disconnect();
     }
-    disconnect();
   };
   return client;
 }
