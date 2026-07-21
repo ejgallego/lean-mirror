@@ -164,6 +164,38 @@ describe("LeanWorkspace", () => {
     client.disconnect();
   });
 
+  it("synchronizes successive hidden-document edit batches", async () => {
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+      }),
+    );
+    await client.initializing;
+
+    const workspace = client.workspace as LeanWorkspace;
+    const helper = await workspace.openServerDocument(HELPER_URI);
+    workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "d" } });
+    client.sync();
+    await waitFor(() => transport.notifications("textDocument/didChange").length === 1);
+
+    workspace.updateFile(HELPER_URI, {
+      changes: { from: 0, to: helper!.doc.length, insert: "abc" },
+    });
+    expect(helper?.doc.toString()).toBe("abc");
+    client.sync();
+    await waitFor(() => transport.notifications("textDocument/didChange").length === 2);
+
+    expect(transport.notifications("textDocument/didChange")[1]?.params).toMatchObject({
+      contentChanges: [{ text: "abc" }],
+      textDocument: { uri: HELPER_URI, version: 2 },
+    });
+    expect(helper?.version).toBe(2);
+
+    client.disconnect();
+  });
+
   it("does not advance a hidden document version for a no-op update", async () => {
     let changes = 0;
     const { client, transport } = createInitializedClient(

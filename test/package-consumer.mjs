@@ -63,6 +63,19 @@ const NO_EDITOR_FEATURES = {
   renameKeymap: false,
   signatureHelp: false,
 };
+
+async function waitFor(predicate, message, timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const value = predicate();
+    if (value) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(message);
+}
+
 const progress = leanFileProgress();
 const states = [];
 let disposedTransports = 0;
@@ -151,6 +164,7 @@ console.log("deterministic public package consumer experiment passed");
 class StdioTransport {
   subscribers = new Set();
   buffer = Buffer.alloc(0);
+  sent = [];
 
   constructor(command, args) {
     this.process = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -169,6 +183,7 @@ class StdioTransport {
   }
 
   send(message) {
+    this.sent.push(JSON.parse(message));
     const payload = Buffer.from(message, "utf8");
     this.process.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
     this.process.stdin.write(payload);
@@ -224,9 +239,16 @@ async function runRealLeanConsumerExperiment() {
   const uri = pathToFileURL(filePath).toString();
   const rootUri = pathToFileURL(directory).toString();
   const transport = new StdioTransport("lean", ["--server"]);
+  const diagnostics = [];
   const leanSession = createLeanEditorSession({
     client: {
       features: NO_EDITOR_FEATURES,
+      notificationHandlers: {
+        "textDocument/publishDiagnostics": (_client, params) => {
+          diagnostics.push(params);
+          return true;
+        },
+      },
       rootUri,
       timeout: 15_000,
       workspace: createLeanWorkspace({
@@ -247,6 +269,46 @@ async function runRealLeanConsumerExperiment() {
     const file = await connection.client.workspace.openServerDocument(uri);
     assert(file, "the real Lean experiment should open its document");
     await Promise.resolve();
+
+    const brokenSource = `${source}#check MissingLeanName\n`;
+    connection.client.workspace.updateFile(uri, {
+      changes: { from: 0, to: file.doc.length, insert: brokenSource },
+    });
+    connection.client.sync();
+    const brokenVersion = file.version;
+    const brokenDiagnostics = await waitFor(
+      () => diagnostics.find(
+        (params) =>
+          params.uri === uri &&
+          params.version === brokenVersion &&
+          Array.isArray(params.diagnostics) &&
+          params.diagnostics.some((diagnostic) => diagnostic.severity === 1),
+      ),
+      `Lean did not publish diagnostics for broken version ${brokenVersion}`,
+    );
+    assert(
+      brokenDiagnostics.diagnostics.every(
+        (diagnostic) =>
+          typeof diagnostic.message === "string" && diagnostic.message.length > 0,
+      ),
+      "Lean diagnostics should contain messages",
+    );
+
+    connection.client.workspace.updateFile(uri, {
+      changes: { from: 0, to: file.doc.length, insert: source },
+    });
+    connection.client.sync();
+    const recoveredVersion = file.version;
+    await waitFor(
+      () => diagnostics.find(
+        (params) =>
+          params.uri === uri &&
+          params.version === recoveredVersion &&
+          Array.isArray(params.diagnostics) &&
+          params.diagnostics.every((diagnostic) => diagnostic.severity !== 1),
+      ),
+      `Lean did not recover version ${recoveredVersion}: diagnostics=${JSON.stringify(diagnostics)} changes=${JSON.stringify(transport.sent.filter((message) => message.method === "textDocument/didChange"))}`,
+    );
 
     const hover = await connection.client.request("textDocument/hover", {
       position: { line: 0, character: 5 },

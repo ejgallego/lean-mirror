@@ -16,7 +16,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
 - First-class `LeanEditorSession` ownership for initialization state, teardown, and fresh-client reconnection.
-- A built-package consumer experiment covering public exports with both deterministic and real `lean --server` transports.
+- A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including versioned diagnostic recovery.
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
