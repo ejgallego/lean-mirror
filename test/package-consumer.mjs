@@ -316,6 +316,19 @@ async function runRealLeanConsumerExperiment() {
     });
     assert(hover, "Lean should return hover information for answer");
 
+    const references = await connection.client.request("textDocument/references", {
+      context: { includeDeclaration: true },
+      position: { line: 0, character: 5 },
+      textDocument: { uri },
+    });
+    assert(Array.isArray(references), "Lean should return a references array");
+    assert(
+      references.some(
+        (location) => location.uri === uri && location.range?.start?.line === 1,
+      ),
+      "Lean references should include the #check use in the experiment document",
+    );
+
     leanSession.dispose();
     const exit = await transport.close();
     assert(
