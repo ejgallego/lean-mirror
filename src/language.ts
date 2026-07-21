@@ -7,7 +7,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
+import { tags, type Highlighter } from "@lezer/highlight";
 
 interface LeanTokenizerState {
   blockCommentDepth: number;
@@ -15,10 +15,14 @@ interface LeanTokenizerState {
 
 const COMMANDS = new Set([
   "abbrev",
+  "alias",
   "axiom",
+  "builtin_initialize",
   "class",
+  "declare_syntax_cat",
   "def",
   "elab",
+  "elab_rules",
   "example",
   "export",
   "inductive",
@@ -28,6 +32,7 @@ const COMMANDS = new Set([
   "initialize",
   "instance",
   "macro",
+  "macro_rules",
   "mutual",
   "namespace",
   "notation",
@@ -36,25 +41,31 @@ const COMMANDS = new Set([
   "postfix",
   "prefix",
   "private",
+  "scoped",
   "section",
   "set_option",
   "structure",
   "syntax",
   "theorem",
+  "unsafe",
   "universe",
   "variable",
 ]);
 
 const KEYWORDS = new Set([
   "as",
+  "at",
   "attribute",
   "by",
+  "case",
+  "catch",
   "deriving",
   "do",
   "else",
   "end",
   "extends",
   "forall",
+  "for",
   "from",
   "fun",
   "have",
@@ -66,15 +77,21 @@ const KEYWORDS = new Set([
   "match",
   "nomatch",
   "of",
+  "partial",
   "renaming",
   "repeat",
+  "return",
   "show",
   "simp",
   "termination_by",
   "then",
+  "try",
+  "unless",
   "using",
   "where",
+  "while",
   "with",
+  "yield",
 ]);
 
 const BUILTINS = new Set(["Prop", "Type", "Sort", "True", "False"]);
@@ -136,7 +153,7 @@ function readIdentifier(stream: {
   return stream.current();
 }
 
-export const leanHighlightStyle = HighlightStyle.define([
+export const leanFallbackHighlightStyle = HighlightStyle.define([
   { tag: tags.keyword, color: "#7d2c1f", fontWeight: "600" },
   { tag: [tags.definitionKeyword, tags.moduleKeyword], color: "#7d2c1f", fontWeight: "600" },
   { tag: tags.controlKeyword, color: "#5b2e91", fontWeight: "600" },
@@ -149,7 +166,7 @@ export const leanHighlightStyle = HighlightStyle.define([
   { tag: tags.variableName, color: "#253238" },
 ]);
 
-export const leanLanguage = StreamLanguage.define<LeanTokenizerState>({
+export const leanFallbackLanguage = StreamLanguage.define<LeanTokenizerState>({
   name: "lean4",
   startState() {
     return { blockCommentDepth: 0 };
@@ -234,9 +251,15 @@ export const leanLanguage = StreamLanguage.define<LeanTokenizerState>({
   },
 });
 
-export function leanLanguageSupport(): LanguageSupport {
-  return new LanguageSupport(leanLanguage, [
-    syntaxHighlighting(leanHighlightStyle),
+export interface LeanFallbackLanguageSupportOptions {
+  highlightStyle?: Highlighter | false;
+}
+
+export function leanFallbackLanguageSupport(
+  options: LeanFallbackLanguageSupportOptions = {},
+): LanguageSupport {
+  return new LanguageSupport(leanFallbackLanguage, [
+    ...(options.highlightStyle ? [syntaxHighlighting(options.highlightStyle)] : []),
     bracketMatching(),
     closeBrackets(),
     keymap.of(closeBracketsKeymap),

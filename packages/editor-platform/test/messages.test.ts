@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   isEditorPlatformMessage,
+  isEditorToHostMessage,
   platformMessage,
   type EditorToHostMessage,
   type HostToEditorMessage
@@ -50,5 +51,53 @@ describe("platform protocol messages", () => {
     );
     expect(isEditorPlatformMessage({ protocol: "editor-platform", version: 1, type: "ready" })).toBe(false);
     expect(isEditorPlatformMessage(null)).toBe(false);
+  });
+
+  test("rejects malformed payloads at every protocol boundary", () => {
+    const envelope = (type: string, payload: unknown) => ({
+      protocol: "editor-platform",
+      version: 1,
+      type,
+      payload
+    });
+
+    expect(isEditorToHostMessage(envelope("ready", []))).toBe(false);
+    expect(isEditorToHostMessage(envelope("ready", { unexpected: true }))).toBe(false);
+    expect(isEditorToHostMessage(envelope("open-document", {}))).toBe(false);
+    expect(isEditorToHostMessage(envelope("set-active-document", { uri: 42 }))).toBe(false);
+    expect(
+      isEditorToHostMessage(envelope("document-changed", { uri: "file:///Main.lean", text: 4 }))
+    ).toBe(false);
+    expect(
+      isEditorToHostMessage(
+        envelope("document-changed", { uri: "file:///Main.lean", text: "", version: -1 })
+      )
+    ).toBe(false);
+    expect(
+      isEditorPlatformMessage(
+        envelope("diagnostics", {
+          uri: "file:///Main.lean",
+          diagnostics: [{ message: "bad", severity: "fatal" }]
+        })
+      )
+    ).toBe(false);
+    expect(
+      isEditorPlatformMessage(
+        envelope("service-event", { event: { type: "failed", serviceId: "lean" } })
+      )
+    ).toBe(false);
+    expect(
+      isEditorPlatformMessage(
+        envelope("document-opened", {
+          document: {
+            uri: "file:///Main.lean",
+            languageId: "lean4",
+            version: 0,
+            openState: "visible",
+            syncState: "clean"
+          }
+        })
+      )
+    ).toBe(false);
   });
 });

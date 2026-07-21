@@ -16,7 +16,7 @@ import {
 import type { Language } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 
-import { leanLanguage } from "./language.js";
+import { leanFallbackLanguage } from "./language.js";
 
 interface LeanClientLifecycleExtension extends LSPClientExtension {
   onClientDisconnect?(client: LSPClient): void;
@@ -92,7 +92,7 @@ function defaultHighlightLanguage(
       return overridden;
     }
     if (normalized === "lean" || normalized === "lean4") {
-      return leanLanguage;
+      return leanFallbackLanguage;
     }
     return null;
   };

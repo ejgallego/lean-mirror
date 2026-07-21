@@ -6,7 +6,7 @@ The top-level package export is intentionally Lean-focused. If you want raw `@co
 
 This package stays intentionally thin:
 
-- Lean syntax/highlighting via `leanLanguageSupport()`
+- Lightweight fallback Lean syntax tokenization via `leanFallbackLanguageSupport()`
 - Lean-aware `LSPClient` factory via `createLeanLspClient()`
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
@@ -25,19 +25,27 @@ npm install codemirror-lean4-lsp
 ```ts
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { createLeanLspClient, createWebSocketTransport, lean4 } from "codemirror-lean4-lsp";
+import {
+  createLeanLspClient,
+  createWebSocketTransport,
+  lean4,
+  leanFallbackHighlightStyle,
+  waitForWebSocketOpen,
+} from "codemirror-lean4-lsp";
 
 const socket = new WebSocket("ws://localhost:8080");
 const client = createLeanLspClient({
   rootUri: "file:///workspace",
 });
 
+await waitForWebSocketOpen(socket);
 client.connect(createWebSocketTransport(socket));
 
 const state = EditorState.create({
   doc: "#check Nat.succ\n",
   extensions: lean4({
     client,
+    highlightStyle: leanFallbackHighlightStyle,
     uri: "file:///workspace/Main.lean",
   }),
 });
@@ -98,12 +106,18 @@ const client = createLeanLspClient({
 });
 ```
 
+`LeanWorkspace` keeps hidden documents available for server-initiated edits, but intentionally
+allows only one editor view per URI. A host that needs split views should share one CodeMirror
+state between those views or provide its own `Workspace` implementation.
+
 ## Notes
 
 - The default client configuration delegates to CodeMirror's official `languageServerExtensions()` bundle.
 - If you need finer control, pass `features` to `createLeanLspClient()` or import the official passthrough exports from `codemirror-lean4-lsp/codemirror`.
 - The package does not start Lean itself. The embedding app owns transport and process lifecycle.
-- URL-specific package metadata such as `repository`/`homepage` is intentionally not set yet because this local repo does not have a configured public remote.
+- LSP Markdown can contain raw HTML. Production hosts should pass a trusted `sanitizeHTML`
+  function to `createLeanLspClient()` before enabling hover or signature documentation.
+- Repository, issue tracker, and release metadata point to `ejgallego/lean-mirror` on GitHub.
 - API, release policy, and backlog docs live in [docs/README.md](./docs/README.md), [CONTRIBUTING.md](./CONTRIBUTING.md), and [docs/BACKLOG.md](./docs/BACKLOG.md).
 
 ## Demo
@@ -119,6 +133,10 @@ If those ports are busy, override them:
 ```bash
 DEMO_BACKEND_PORT=7358 DEMO_FRONTEND_PORT=5174 npm run demo
 ```
+
+The backend binds to loopback by default. Directly binding it to a non-loopback address is refused
+unless `LEAN_DEMO_ALLOW_REMOTE=1` is set. Remote mode is intended only for controlled experiments;
+configure `LEAN_DEMO_ALLOWED_ORIGINS`, payload limits, and the LSP process cap before using it.
 
 That starts:
 

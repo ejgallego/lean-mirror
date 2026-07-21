@@ -1,6 +1,6 @@
 import type { Extension } from "@codemirror/state";
 
-import { lean4 } from "../../src/index.js";
+import { lean4, leanFallbackHighlightStyle } from "../../src/index.js";
 import {
   createLineCommentAdapter,
   type EmbeddedBlock,
@@ -148,6 +148,7 @@ const baseLeanAdapter = createLineCommentAdapter<EmbeddedLeanBlock>({
   displayName: "Lean",
   editorExtensions(): Extension[] {
     return lean4({
+      highlightStyle: leanFallbackHighlightStyle,
       utilities: {
         activeLine: false,
         defaultKeymap: true,

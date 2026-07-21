@@ -90,12 +90,41 @@ export function createEditorPlatformCustomEditorHost(
     }
   );
   const subscriptions: Unsubscribe[] = [];
+  const messageQueues = new Map<string, Promise<void>>();
+  const documentVersions = new Map<string, number>();
+  let disposed = false;
+
+  const dispatch = (message: EditorToHostMessage): Promise<void> => {
+    if (disposed) {
+      return Promise.resolve();
+    }
+    return handleEditorMessage(options, message, documentVersions);
+  };
+
+  const reportFailure = (error: unknown, message: EditorToHostMessage): void => {
+    options.onHandlerError?.(error, message);
+  };
 
   subscriptions.push(
     endpoint.subscribe((message) => {
-      void handleEditorMessage(options, message).catch((error: unknown) => {
-        options.onHandlerError?.(error, message);
-      });
+      const queueKey = editorMessageQueueKey(message);
+      if (!queueKey) {
+        void dispatch(message).catch((error: unknown) => reportFailure(error, message));
+        return;
+      }
+
+      const previous = messageQueues.get(queueKey);
+      const task = previous
+        ? previous.catch(() => undefined).then(() => dispatch(message))
+        : dispatch(message);
+      messageQueues.set(queueKey, task);
+      void task
+        .catch((error: unknown) => reportFailure(error, message))
+        .finally(() => {
+          if (messageQueues.get(queueKey) === task) {
+            messageQueues.delete(queueKey);
+          }
+        });
     })
   );
 
@@ -113,6 +142,8 @@ export function createEditorPlatformCustomEditorHost(
       endpoint.postMessage(message);
     },
     dispose() {
+      disposed = true;
+      messageQueues.clear();
       for (const unsubscribe of subscriptions.splice(0)) {
         unsubscribe();
       }
@@ -171,7 +202,8 @@ export function vscodeUriToString(uri: VsCodeUriLike): string {
 
 async function handleEditorMessage(
   options: EditorPlatformCustomEditorHostOptions,
-  message: EditorToHostMessage
+  message: EditorToHostMessage,
+  documentVersions: Map<string, number>
 ): Promise<void> {
   switch (message.type) {
     case "ready":
@@ -181,11 +213,20 @@ async function handleEditorMessage(
       await options.handlers?.openDocument?.({ uri: message.payload.uri });
       return;
     case "document-changed":
+      if (
+        message.payload.version !== undefined &&
+        message.payload.version <= (documentVersions.get(message.payload.uri) ?? -1)
+      ) {
+        return;
+      }
       await options.handlers?.documentChanged?.({
         uri: message.payload.uri,
         text: message.payload.text,
         ...(message.payload.version === undefined ? {} : { version: message.payload.version })
       });
+      if (message.payload.version !== undefined) {
+        documentVersions.set(message.payload.uri, message.payload.version);
+      }
       return;
     case "restart-service":
       await options.handlers?.restartService?.({
@@ -200,5 +241,17 @@ async function handleEditorMessage(
         ...(message.payload.languageId === undefined ? {} : { languageId: message.payload.languageId })
       });
       return;
+  }
+}
+
+function editorMessageQueueKey(message: EditorToHostMessage): string | undefined {
+  switch (message.type) {
+    case "open-document":
+    case "document-changed":
+    case "set-active-document":
+      return `document:${message.payload.uri}`;
+    case "ready":
+    case "restart-service":
+      return undefined;
   }
 }

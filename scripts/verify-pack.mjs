@@ -16,6 +16,20 @@ function fail(message) {
   process.exit(1);
 }
 
+const demoOnlyDependencies = [
+  "@codemirror/lint",
+  "@codemirror/stream-parser",
+  "@leanprover/infoview",
+  "marked",
+  "react",
+  "react-dom",
+];
+for (const dependency of demoOnlyDependencies) {
+  if (packageJson.dependencies?.[dependency]) {
+    fail(`Demo-only dependency ${dependency} must not be published as a runtime dependency`);
+  }
+}
+
 const pack =
   process.platform === "win32"
     ? spawnSync(npmCommand, ["pack", "--json", "--dry-run", "--cache", npmCache], {

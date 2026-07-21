@@ -131,6 +131,82 @@ describe("LeanWorkspace", () => {
     client.disconnect();
   });
 
+  it("coalesces hidden edits into one correctly versioned document change", async () => {
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+      }),
+    );
+    await client.initializing;
+
+    const workspace = client.workspace as LeanWorkspace;
+    const helper = await workspace.openServerDocument(HELPER_URI);
+    expect(helper?.version).toBe(0);
+
+    workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "1" } });
+    workspace.updateFile(HELPER_URI, { changes: { from: 4, insert: "2" } });
+    expect(helper?.doc.toString()).toBe("abc12");
+    expect(helper?.version).toBe(0);
+
+    client.sync();
+
+    await waitFor(() => transport.notifications("textDocument/didChange").length === 1);
+    const changes = transport.notifications("textDocument/didChange");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.params).toMatchObject({
+      contentChanges: [{ text: "abc12" }],
+      textDocument: { uri: HELPER_URI, version: 1 },
+    });
+    expect(helper?.version).toBe(1);
+
+    client.disconnect();
+  });
+
+  it("does not advance a hidden document version for a no-op update", async () => {
+    let changes = 0;
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+        onDocumentChange() {
+          changes += 1;
+        },
+      }),
+    );
+    await client.initializing;
+
+    const workspace = client.workspace as LeanWorkspace;
+    const helper = await workspace.openServerDocument(HELPER_URI);
+    const version = helper!.version;
+    workspace.updateFile(HELPER_URI, { changes: { from: 1, to: 1, insert: "" } });
+    client.sync();
+
+    expect(helper?.version).toBe(version);
+    expect(changes).toBe(0);
+    expect(transport.notifications("textDocument/didChange")).toHaveLength(0);
+
+    client.disconnect();
+  });
+
+  it("rejects multiple editor views for the same URI", async () => {
+    const { client } = createInitializedClient(createLeanWorkspace());
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+    const first = createTestView("#check Nat", []);
+    const second = createTestView("#check Nat", []);
+
+    workspace.openFile(MAIN_URI, "lean4", first);
+    expect(() => workspace.openFile(MAIN_URI, "lean4", second)).toThrow(/multiple editor views/);
+
+    workspace.closeFile(MAIN_URI, first);
+    first.destroy();
+    second.destroy();
+    client.disconnect();
+  });
+
   it("does not send duplicate didOpen when a server-open file is displayed", async () => {
     let client!: ReturnType<typeof createLeanLspClient>;
     let helperView = null as ReturnType<typeof createTestView> | null;

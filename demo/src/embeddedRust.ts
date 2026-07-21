@@ -25,6 +25,7 @@ import {
   type EmbeddedBlockInlineHandle,
 } from "./embeddedBlocks.js";
 import type { DemoSessionApi } from "./demoSession.js";
+import { sanitizeHtml } from "./sanitizeHtml.js";
 
 export interface EmbeddedRustBlock extends EmbeddedBlock {}
 
@@ -146,7 +147,7 @@ function rustHoverTooltips(
           create() {
             const dom = document.createElement("div");
             dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
-            dom.innerHTML = plugin.docToHTML(contents);
+            dom.innerHTML = sanitizeHtml(plugin.docToHTML(contents));
             return { dom };
           },
         };
@@ -412,6 +413,8 @@ function createRustInlineHandle(
           },
         },
         rootUri: session.rootUri,
+        sanitizeHTML: sanitizeHtml,
+        timeout: 20_000,
       });
       socket = await sessionApi.connectWebSocket(session.websocketUrl);
       if (destroyed) {

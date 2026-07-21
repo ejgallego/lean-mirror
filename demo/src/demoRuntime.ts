@@ -15,12 +15,17 @@ import {
   createWebSocketTransport,
   lean4,
   leanFileProgress,
+  leanFallbackHighlightStyle,
   leanUtilities,
   type Transport,
   type LeanWorkspace,
 } from "../../src/index.js";
 import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
 import { createDemoBridge } from "./demoBridge.js";
+import {
+  DiagnosticGenerationGate,
+  type DiagnosticGenerationTicket,
+} from "./diagnosticGeneration.js";
 import type { DemoPreparationStatus, DemoSession, DemoSessionApi } from "./demoSession.js";
 import type { DemoUi } from "./demoUi.js";
 import {
@@ -35,6 +40,7 @@ import {
   forwardLeanClientNotifications,
   type LeanInfoviewHost,
 } from "./leanInfoview.js";
+import { sanitizeHtml } from "./sanitizeHtml.js";
 
 const leanService: EditorServiceDescriptor = {
   id: "lean-lsp",
@@ -151,6 +157,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let leanInitializeResult: lsp.InitializeResult | null = null;
   const leanRuntime = new EditorServiceRuntime(options.ui.platformStore, leanService);
   const rustRuntime = new EditorServiceRuntime(options.ui.platformStore, rustService);
+  const embeddedLeanDiagnosticGate = new DiagnosticGenerationGate();
+  const rustMainDiagnosticGate = new DiagnosticGenerationGate();
   const leanProgress = leanFileProgress({
     onUpdate(update) {
       if (update.uri !== currentUri) {
@@ -232,6 +240,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   }, leanDocument: string): void {
     const leanFile = workspace?.getFile(result.leanDocumentUri);
     if (leanFile) {
+      embeddedLeanDiagnosticGate.beginEdit();
       workspace?.updateFile(result.leanDocumentUri, {
         changes: {
           from: 0,
@@ -240,7 +249,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         },
       });
       client?.sync();
-      scheduleEmbeddedLeanDiagnosticPull(result.leanDocumentUri);
+      const ticket = embeddedLeanDiagnosticGate.recordSync(leanFile.version);
+      scheduleEmbeddedLeanDiagnosticPull(result.leanDocumentUri, ticket);
     }
     client?.notification("workspace/didChangeWatchedFiles", {
       changes: [
@@ -356,7 +366,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   function renderLeanHoverMarkdown(value: string): string {
     const html = leanHoverMarkdown.parse(value, { async: false });
-    return typeof html === "string" ? html : "";
+    return typeof html === "string" ? sanitizeHtml(html) : "";
   }
 
   function leanHoverHtml(
@@ -450,8 +460,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     leanInfoview.setCursorLocation(embeddedLeanLocation(editor));
   }
 
-  function scheduleEmbeddedLeanDiagnosticPull(uri: string, attempt = 0): void {
-    if (!client || disposed) {
+  function scheduleEmbeddedLeanDiagnosticPull(
+    uri: string,
+    ticket: DiagnosticGenerationTicket,
+    attempt = 0,
+  ): void {
+    if (!client || disposed || !embeddedLeanDiagnosticGate.isCurrent(ticket)) {
       return;
     }
     if (embeddedLeanDiagnosticTimer) {
@@ -459,9 +473,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
     embeddedLeanDiagnosticTimer = setTimeout(() => {
       embeddedLeanDiagnosticTimer = null;
+      if (!client || disposed || !embeddedLeanDiagnosticGate.isCurrent(ticket)) {
+        return;
+      }
       const request = leanRuntime.beginRequest("textDocument/diagnostic");
       void client
-        ?.request<
+        .request<
           { textDocument: { uri: string } },
           { items?: lsp.Diagnostic[]; kind: "full" | "unchanged" }
         >("textDocument/diagnostic", {
@@ -469,7 +486,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         })
         .then((report) => {
           request.succeeded();
-          if (disposed || report.kind !== "full") {
+          if (
+            disposed ||
+            !embeddedLeanDiagnosticGate.isCurrent(ticket) ||
+            report.kind !== "full"
+          ) {
             return;
           }
           applyEmbeddedLeanDiagnostics({
@@ -477,17 +498,28 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             uri,
           });
           if ((!report.items || report.items.length === 0) && attempt < 3) {
-            scheduleEmbeddedLeanDiagnosticPull(uri, attempt + 1);
+            scheduleEmbeddedLeanDiagnosticPull(uri, ticket, attempt + 1);
           }
         })
         .catch((error) => {
           request.failed(error);
+          if (
+            attempt < 3 &&
+            !disposed &&
+            embeddedLeanDiagnosticGate.isCurrent(ticket)
+          ) {
+            scheduleEmbeddedLeanDiagnosticPull(uri, ticket, attempt + 1);
+          }
         });
     }, attempt === 0 ? 350 : 500);
   }
 
-  function scheduleRustMainDiagnosticPull(uri: string, attempt = 0): void {
-    if (!rustClient || disposed) {
+  function scheduleRustMainDiagnosticPull(
+    uri: string,
+    ticket: DiagnosticGenerationTicket,
+    attempt = 0,
+  ): void {
+    if (!rustClient || disposed || !rustMainDiagnosticGate.isCurrent(ticket)) {
       return;
     }
     if (rustMainDiagnosticTimer) {
@@ -495,9 +527,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
     rustMainDiagnosticTimer = setTimeout(() => {
       rustMainDiagnosticTimer = null;
+      if (!rustClient || disposed || !rustMainDiagnosticGate.isCurrent(ticket)) {
+        return;
+      }
       const request = rustRuntime.beginRequest("textDocument/diagnostic");
       void rustClient
-        ?.request<
+        .request<
           { textDocument: { uri: string } },
           { items?: lsp.Diagnostic[]; kind: "full" | "unchanged" }
         >("textDocument/diagnostic", {
@@ -505,7 +540,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         })
         .then((report) => {
           request.succeeded();
-          if (disposed || report.kind !== "full") {
+          if (
+            disposed ||
+            !rustMainDiagnosticGate.isCurrent(ticket) ||
+            report.kind !== "full"
+          ) {
             return;
           }
           applyRustMainDiagnostics({
@@ -513,11 +552,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             uri,
           });
           if ((!report.items || report.items.length === 0) && attempt < 4) {
-            scheduleRustMainDiagnosticPull(uri, attempt + 1);
+            scheduleRustMainDiagnosticPull(uri, ticket, attempt + 1);
           }
         })
         .catch((error) => {
           request.failed(error);
+          if (attempt < 4 && !disposed && rustMainDiagnosticGate.isCurrent(ticket)) {
+            scheduleRustMainDiagnosticPull(uri, ticket, attempt + 1);
+          }
         });
     }, attempt === 0 ? 650 : 700);
   }
@@ -533,7 +575,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       rustMainSyncTimer = null;
       rustClient?.sync();
       if (session.rustMainDocumentUri) {
-        scheduleRustMainDiagnosticPull(session.rustMainDocumentUri);
+        const version = rustClient?.workspace.getFile(session.rustMainDocumentUri)?.version;
+        const ticket = rustMainDiagnosticGate.recordSync(version);
+        scheduleRustMainDiagnosticPull(session.rustMainDocumentUri, ticket);
       }
     }, 150);
   }
@@ -633,6 +677,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
               : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
+                rustMainDiagnosticGate.beginEdit();
                 options.ui.setDocumentSyncState(uri, "dirty");
                 clearRustMainDiagnostics();
                 scheduleRustMainSync();
@@ -642,6 +687,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           ]
         : lean4({
             client,
+            highlightStyle: leanFallbackHighlightStyle,
             uri,
             utilities: {
               lineWrapping: true,
@@ -664,6 +710,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       }),
     });
     currentView = view;
+    if (languageId === "rust" && rustClient && uri === session.rustMainDocumentUri) {
+      rustMainDiagnosticGate.recordSync(rustClient.workspace.getFile(uri)?.version);
+    }
     options.ui.setCurrentDocument(uri, languageId);
     options.ui.setActiveDocument(uri);
     if (languageId === "rust") {
@@ -723,6 +772,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     notificationHandlers: {
       "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
         leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
+        if (
+          params.uri === session.embeddedLeanDocumentUri &&
+          !embeddedLeanDiagnosticGate.acceptsPush(params.version)
+        ) {
+          return true;
+        }
         applyEmbeddedLeanDiagnostics(params);
         return false;
       },
@@ -731,6 +786,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       leanInfoview?.forwardServerNotification(method, params);
     },
     rootUri: session.rootUri,
+    sanitizeHTML: sanitizeHtml,
+    timeout: 20_000,
     workspace: createLeanWorkspace({
       async loadDocument(uri) {
         return {
@@ -778,7 +835,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   restoreLeanNotificationForwarding = forwardLeanClientNotifications(client, leanInfoview);
   leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
   if (session.embeddedLeanDocumentUri) {
-    await workspace.openServerDocument(session.embeddedLeanDocumentUri);
+    const embeddedFile = await workspace.openServerDocument(session.embeddedLeanDocumentUri);
+    embeddedLeanDiagnosticGate.recordSync(embeddedFile?.version);
   }
 
   if (session.rustMainWebsocketUrl) {
@@ -788,10 +846,19 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     rustClient = new LSPClient({
       extensions: [rustProgress, ...languageServerExtensions()],
       notificationHandlers: {
-        "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) =>
-          applyRustMainDiagnostics(params),
+        "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+          if (
+            params.uri === session.rustMainDocumentUri &&
+            !rustMainDiagnosticGate.acceptsPush(params.version)
+          ) {
+            return true;
+          }
+          return applyRustMainDiagnostics(params);
+        },
       },
       rootUri: session.rootUri,
+      sanitizeHTML: sanitizeHtml,
+      timeout: 20_000,
     });
     rustClient.connect(rustProgress.wrapTransport(createWebSocketTransport(rustSocket)));
     await rustClient.initializing;

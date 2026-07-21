@@ -1,26 +1,32 @@
 # Contributing
 
-## Public API policy
+## Experimental API policy
 
-The top-level package export is the stable Lean-specific API:
+The top-level package export is the current Lean-specific experimentation surface:
 
 - `createLeanLspClient`
 - `leanLspExtensions`
 - `lean4`
-- `leanLanguageSupport`
+- `leanFallbackLanguageSupport`
 - `leanUtilities`
 - `createLeanWorkspace`
 - transport helpers and Lean-specific types
 
 If a change only affects implementation details, keep it out of the top-level export.
 
+Until `1.0.0`, there is no compatibility guarantee for this surface. Exports, options, and
+behavior may be changed or removed without aliases, overloads, or a deprecation period. Consumers
+that need reproducible experiments should pin an exact version or commit.
+
 The `codemirror-lean4-lsp/codemirror` subpath is an explicit passthrough for official `@codemirror/lsp-client` exports. Changes there should track upstream CodeMirror behavior, not invent a wrapper policy.
 
 ## Versioning policy
 
-- Patch: bug fixes, packaging fixes, non-breaking test/demo/tooling changes
-- Minor: new backward-compatible Lean helpers, utilities, workspace features, or subpath exports
-- Major: top-level export changes, behavior changes in stable helpers, or removed options
+- The entire `0.x` series is initial development and intentionally unstable.
+- Patch releases contain focused fixes or refinements; they may still break the experimental API.
+- Minor releases mark broader feature or architecture milestones; they may also break the API.
+- API changes do not require compatibility aliases or a particular `0.x` version increment.
+- Starting at `1.0.0`, normal SemVer compatibility rules apply and breaking changes require a major release.
 
 ## Changelog policy
 
@@ -33,15 +39,7 @@ The `codemirror-lean4-lsp/codemirror` subpath is an explicit passthrough for off
 Before publishing, run:
 
 ```bash
-npm run check
-npm test
-npm run build
-npm run pack:check
+npm run ci
 ```
 
-If browser coverage is available in the environment, also run:
-
-```bash
-npm run playwright:install
-npm run test:e2e
-```
+`npm run ci` includes browser coverage. Run `npm run playwright:install` first on a new machine.

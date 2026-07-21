@@ -45,7 +45,7 @@ function normalizeLoadedDocument(
 
 export class LeanWorkspaceFile implements WorkspaceFile {
   serverOpen = false;
-  readonly views = new Set<EditorView>();
+  view: EditorView | null = null;
 
   constructor(
     readonly uri: string,
@@ -55,25 +55,25 @@ export class LeanWorkspaceFile implements WorkspaceFile {
   ) {}
 
   getView(main?: EditorView): EditorView | null {
-    if (main && this.views.has(main)) {
-      return main;
+    if (main && this.view !== main) {
+      return null;
     }
-    return this.views.values().next().value ?? null;
+    return this.view;
   }
 
   hasOpenView(): boolean {
-    return this.views.size > 0;
+    return this.view !== null;
   }
 }
 
 export class LeanWorkspace extends Workspace {
   readonly files: LeanWorkspaceFile[] = [];
   private readonly fileVersions = new Map<string, number>();
-  private readonly pendingUpdates: Array<{
+  private readonly pendingUpdates = new Map<string, {
     file: LeanWorkspaceFile;
     prevDoc: Text;
     changes: ChangeSet;
-  }> = [];
+  }>();
   private readonly pendingLoads = new Map<string, Promise<LeanWorkspaceFile | null>>();
 
   constructor(
@@ -149,13 +149,15 @@ export class LeanWorkspace extends Workspace {
   override connected(): void {
     for (const file of this.files) {
       if (file.serverOpen || file.hasOpenView()) {
+        this.pendingUpdates.delete(file.uri);
         this.client.didOpen(file);
       }
     }
   }
 
   override syncFiles() {
-    const updates = this.pendingUpdates.splice(0, this.pendingUpdates.length);
+    const updates = new Map(this.pendingUpdates);
+    this.pendingUpdates.clear();
 
     for (const file of this.files) {
       const view = file.getView();
@@ -166,17 +168,24 @@ export class LeanWorkspace extends Workspace {
       if (!plugin || plugin.unsyncedChanges.empty) {
         continue;
       }
-      updates.push({
-        changes: plugin.unsyncedChanges,
-        file,
-        prevDoc: file.doc,
-      });
+      const pending = updates.get(file.uri);
+      if (pending) {
+        pending.changes = pending.changes.compose(plugin.unsyncedChanges);
+      } else {
+        updates.set(file.uri, {
+          changes: plugin.unsyncedChanges,
+          file,
+          prevDoc: file.doc,
+        });
+      }
       file.doc = view.state.doc;
-      file.version = this.nextFileVersion(file.uri);
       plugin.clear();
     }
 
-    return updates;
+    for (const update of updates.values()) {
+      update.file.version = this.nextFileVersion(update.file.uri);
+    }
+    return [...updates.values()];
   }
 
   override async requestFile(uri: string): Promise<LeanWorkspaceFile | null> {
@@ -189,25 +198,36 @@ export class LeanWorkspace extends Workspace {
       return file;
     }
     file.serverOpen = true;
+    this.pendingUpdates.delete(uri);
     this.client.didOpen(file);
     return file;
   }
 
   override openFile(uri: string, languageId: string, view: EditorView): void {
     let file = this.getFile(uri);
-    const wasOpen = file?.hasOpenView() ?? false;
 
     if (!file) {
       file = this.addFile(
         new LeanWorkspaceFile(uri, languageId, this.nextFileVersion(uri), view.state.doc),
       );
     } else {
+      if (file.view === view) {
+        return;
+      }
+      if (file.view && file.view !== view) {
+        throw new Error(`LeanWorkspace does not support multiple editor views for ${uri}.`);
+      }
+      if (!file.doc.eq(view.state.doc)) {
+        throw new Error(
+          `Cannot open ${uri} with content that differs from the workspace document.`,
+        );
+      }
       file.languageId = languageId || file.languageId;
-      file.doc = view.state.doc;
     }
 
-    file.views.add(view);
-    if (!wasOpen && !file.serverOpen) {
+    file.view = view;
+    if (!file.serverOpen) {
+      this.pendingUpdates.delete(uri);
       this.client.didOpen(file);
     }
   }
@@ -217,7 +237,10 @@ export class LeanWorkspace extends Workspace {
     if (!file) {
       return;
     }
-    file.views.delete(view);
+    if (file.view !== view) {
+      return;
+    }
+    file.view = null;
     if (!file.hasOpenView() && !file.serverOpen) {
       this.client.didClose(uri);
     }
@@ -235,11 +258,16 @@ export class LeanWorkspace extends Workspace {
     }
     const state = EditorState.create({ doc: file.doc });
     const transaction = state.update(update);
+    if (transaction.changes.empty) {
+      return;
+    }
     const prevDoc = file.doc;
     file.doc = transaction.state.doc;
-    file.version = this.nextFileVersion(uri);
-    if (!transaction.changes.empty) {
-      this.pendingUpdates.push({
+    const pending = this.pendingUpdates.get(uri);
+    if (pending) {
+      pending.changes = pending.changes.compose(transaction.changes);
+    } else {
+      this.pendingUpdates.set(uri, {
         changes: transaction.changes,
         file,
         prevDoc,

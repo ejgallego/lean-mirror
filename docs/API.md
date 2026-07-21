@@ -1,15 +1,15 @@
 # API Surface
 
-## Stable top-level API
+## Experimental top-level API
 
 Import these from `codemirror-lean4-lsp`:
 
 - `createLeanLspClient`
 - `leanLspExtensions`
 - `lean4`
-- `leanLanguage`
-- `leanLanguageSupport`
-- `leanHighlightStyle`
+- `leanFallbackLanguage`
+- `leanFallbackLanguageSupport`
+- `leanFallbackHighlightStyle`
 - `leanUtilities`
 - `leanFileProgress`
 - `leanFileProgressMethod`
@@ -19,9 +19,23 @@ Import these from `codemirror-lean4-lsp`:
 - `LeanWorkspace`
 - `LeanWorkspaceFile`
 - `createWebSocketTransport`
+- `waitForWebSocketOpen`
 - `createMessagePortTransport`
 
-These exports define the package-specific contract. Changes to them should be treated as SemVer-significant.
+These exports are the current experimental package surface. During `0.x`, they may be renamed,
+changed, or removed without aliases or a deprecation window. Pin an exact package version for
+experiments that need reproducibility.
+
+`createWebSocketTransport()` reports sends attempted while a socket is still connecting and
+ignores terminal sends during teardown. Await `waitForWebSocketOpen()` before connecting an
+`LSPClient`. `LeanWorkspace` supports multiple documents but deliberately enforces one editor
+view per URI.
+
+The built-in Lean language is deliberately named and documented as a fallback tokenizer. It
+provides lightweight comments, literals, identifiers, commands, and punctuation highlighting,
+but it is not a complete Lean parser. Language support does not install an opinionated color
+theme; pass `{ highlightStyle: leanFallbackHighlightStyle }` or install a host-selected
+CodeMirror style.
 
 ### Lean file progress
 

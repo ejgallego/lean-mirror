@@ -1,7 +1,8 @@
 import type { Extension } from "@codemirror/state";
 import type { LSPClient } from "@codemirror/lsp-client";
+import type { Highlighter } from "@lezer/highlight";
 
-import { leanLanguageSupport } from "./language.js";
+import { leanFallbackLanguageSupport } from "./language.js";
 import { leanUtilities, type LeanUtilityOptions } from "./utilities.js";
 
 export interface Lean4Config {
@@ -10,10 +11,15 @@ export interface Lean4Config {
   languageId?: string;
   utilities?: boolean | LeanUtilityOptions;
   extraExtensions?: readonly Extension[];
+  highlightStyle?: Highlighter | false;
 }
 
 export function lean4(config: Lean4Config = {}): Extension[] {
-  const extensions: Extension[] = [leanLanguageSupport()];
+  const extensions: Extension[] = [
+    leanFallbackLanguageSupport(
+      config.highlightStyle === undefined ? {} : { highlightStyle: config.highlightStyle },
+    ),
+  ];
   if (config.utilities) {
     extensions.push(
       ...leanUtilities(config.utilities === true ? undefined : config.utilities),

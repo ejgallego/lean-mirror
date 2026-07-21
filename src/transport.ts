@@ -24,6 +24,12 @@ export interface WebSocketLike {
   removeEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
 }
 
+export interface WebSocketLifecycleLike {
+  readonly readyState: number;
+  addEventListener(type: "open" | "close" | "error", listener: () => void): void;
+  removeEventListener(type: "open" | "close" | "error", listener: () => void): void;
+}
+
 export interface MessageEventLike {
   data: unknown;
 }
@@ -32,14 +38,13 @@ export function createWebSocketTransport(socket: WebSocketLike): Transport {
   const handlers = new Map<MessageHandler, (event: MessageEventLike) => void>();
   return {
     send(message) {
-      if (typeof socket.readyState === "number" && socket.readyState !== 1) {
+      if (socket.readyState === 0) {
+        throw new Error(`Cannot send an LSP message while WebSocket readyState is ${socket.readyState}.`);
+      }
+      if (socket.readyState === 2 || socket.readyState === 3) {
         return;
       }
-      try {
-        socket.send(message);
-      } catch {
-        // Ignore late sends during connection teardown.
-      }
+      socket.send(message);
     },
     subscribe(handler) {
       const wrapped = (event: MessageEventLike) => {
@@ -57,6 +62,53 @@ export function createWebSocketTransport(socket: WebSocketLike): Transport {
       socket.removeEventListener("message", wrapped);
     },
   };
+}
+
+export function waitForWebSocketOpen(socket: WebSocketLifecycleLike): Promise<void> {
+  if (socket.readyState === 1) {
+    return Promise.resolve();
+  }
+  if (socket.readyState !== 0) {
+    return Promise.reject(
+      new Error(`Cannot open WebSocket because readyState is ${socket.readyState}.`),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      socket.removeEventListener("open", handleOpen);
+      socket.removeEventListener("close", handleClose);
+      socket.removeEventListener("error", handleError);
+    };
+    const finish = (action: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      action();
+    };
+    const handleOpen = () => {
+      finish(resolve);
+    };
+    const handleClose = () => {
+      finish(() => reject(new Error("WebSocket closed before it opened.")));
+    };
+    const handleError = () => {
+      finish(() => reject(new Error("WebSocket failed before it opened.")));
+    };
+
+    socket.addEventListener("open", handleOpen);
+    socket.addEventListener("close", handleClose);
+    socket.addEventListener("error", handleError);
+
+    if (socket.readyState === 1) {
+      handleOpen();
+    } else if (socket.readyState !== 0) {
+      handleClose();
+    }
+  });
 }
 
 export interface MessagePortLike {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createMessagePortTransport, createWebSocketTransport } from "../src/index.js";
+import {
+  createMessagePortTransport,
+  createWebSocketTransport,
+  waitForWebSocketOpen,
+} from "../src/index.js";
 import { waitFor } from "./support/helpers.js";
 
 describe("transport helpers", () => {
@@ -54,5 +58,61 @@ describe("transport helpers", () => {
     await waitFor(() => received.length === 1);
 
     expect(received).toEqual(["{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"]);
+  });
+
+  it("waits for a connecting WebSocket before allowing LSP traffic", async () => {
+    const listeners = new Map<"open" | "close" | "error", Set<() => void>>();
+    const socket = {
+      readyState: 0,
+      addEventListener(type: "open" | "close" | "error", listener: () => void) {
+        const current = listeners.get(type) ?? new Set();
+        current.add(listener);
+        listeners.set(type, current);
+      },
+      removeEventListener(type: "open" | "close" | "error", listener: () => void) {
+        listeners.get(type)?.delete(listener);
+      },
+    };
+
+    let opened = false;
+    const opening = waitForWebSocketOpen(socket).then(() => {
+      opened = true;
+    });
+    expect(opened).toBe(false);
+
+    socket.readyState = 1;
+    for (const listener of listeners.get("open") ?? []) {
+      listener();
+    }
+    await opening;
+
+    expect(opened).toBe(true);
+    expect([...listeners.values()].every((entries) => entries.size === 0)).toBe(true);
+  });
+
+  it("reports sends attempted before a WebSocket is open", () => {
+    const socket = {
+      readyState: 0,
+      send() {},
+      addEventListener() {},
+      removeEventListener() {},
+    };
+
+    expect(() => createWebSocketTransport(socket).send("{}")).toThrow(/readyState is 0/);
+  });
+
+  it("ignores terminal sends during WebSocket teardown", () => {
+    let sends = 0;
+    const socket = {
+      readyState: 2,
+      send() {
+        sends += 1;
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+
+    expect(() => createWebSocketTransport(socket).send("{}")).not.toThrow();
+    expect(sends).toBe(0);
   });
 });

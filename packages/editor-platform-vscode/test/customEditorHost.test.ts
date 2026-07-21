@@ -63,7 +63,7 @@ class FakePanel implements VsCodeWebviewPanelLike {
 }
 
 describe("custom editor host", () => {
-  test("publishes snapshots and handles editor commands", () => {
+  test("publishes snapshots and handles editor commands", async () => {
     const store = new EditorPlatformStore();
     const webview = new FakeWebview();
     const opened: string[] = [];
@@ -92,6 +92,8 @@ describe("custom editor host", () => {
     webview.receive(platformMessage("set-active-document", { uri: "file:///Main.lean", languageId: "lean" }));
     webview.receive(platformMessage("restart-service", { serviceId: "lean" }));
 
+    await waitFor(() => active.length === 1);
+
     expect(opened).toEqual(["file:///Main.lean"]);
     expect(active).toEqual(["file:///Main.lean"]);
     expect(restarted).toEqual(["lean"]);
@@ -117,6 +119,77 @@ describe("custom editor host", () => {
 
     webview.receive({ protocol: "editor-platform", version: 1, type: "platform-snapshot", payload: {} });
 
+    expect(invalid).toHaveLength(1);
+  });
+
+  test("serializes document changes and ignores stale versions", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    const handled: number[] = [];
+    let releaseFirst!: () => void;
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        async documentChanged({ version }) {
+          handled.push(version ?? -1);
+          if (version === 1) {
+            await firstCanFinish;
+          }
+        }
+      }
+    });
+
+    webview.receive(
+      platformMessage("document-changed", { uri: "file:///Main.lean", text: "one", version: 1 })
+    );
+    webview.receive(
+      platformMessage("document-changed", { uri: "file:///Main.lean", text: "two", version: 2 })
+    );
+    expect(handled).toEqual([1]);
+
+    releaseFirst();
+    await waitFor(() => handled.length === 2);
+    expect(handled).toEqual([1, 2]);
+
+    webview.receive(
+      platformMessage("document-changed", { uri: "file:///Main.lean", text: "stale", version: 1 })
+    );
+    await Promise.resolve();
+    expect(handled).toEqual([1, 2]);
+  });
+
+  test("rejects malformed editor commands before invoking handlers", () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    const invalid: unknown[] = [];
+    let changes = 0;
+
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        documentChanged() {
+          changes += 1;
+        }
+      },
+      onInvalidMessage(message) {
+        invalid.push(message);
+      }
+    });
+
+    webview.receive({
+      protocol: "editor-platform",
+      version: 1,
+      type: "document-changed",
+      payload: {}
+    });
+
+    expect(changes).toBe(0);
     expect(invalid).toHaveLength(1);
   });
 
@@ -166,3 +239,13 @@ describe("custom editor host", () => {
     });
   });
 });
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Timed out waiting for condition.");
+}

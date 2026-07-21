@@ -141,4 +141,23 @@ describe("editor platform shell view", () => {
       ).statusText
     ).toBe("Lean: Starting");
   });
+
+  test("reports ready when every hostless service is ready", () => {
+    const view = createEditorPlatformShellView(
+      snapshot({
+        lean: {
+          id: "lean",
+          kind: "lean-lsp",
+          label: "Lean",
+          status: { state: "ready" },
+          documents: [],
+          updatedAt: 1
+        }
+      }),
+      { emptyStatusText: "Booting" }
+    );
+
+    expect(view.statusText).toBe("Ready");
+    expect(createEditorPlatformShellView(snapshot({}), { emptyStatusText: "Idle" }).statusText).toBe("Idle");
+  });
 });

@@ -11,18 +11,10 @@
 Run:
 
 ```bash
-npm run check
-npm test
-npm run build
-npm run pack:check
+npm run ci
 ```
 
-If the environment supports it, also run:
-
-```bash
-npm run playwright:install
-npm run test:e2e
-```
+On a new machine, run `npm run playwright:install` before the verification command.
 
 ## Package checks
 
@@ -30,4 +22,6 @@ npm run test:e2e
 
 ## Publish
 
-When the repository remote is decided, publishing should be done from a clean taggable commit after updating the package metadata with the final repository URLs.
+Publishing is performed from `https://github.com/ejgallego/lean-mirror`. Publish only from a
+clean, taggable commit whose package version and changelog agree. After verification, create the
+matching `v<version>` tag and publish the package with its public access setting.

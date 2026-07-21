@@ -6,6 +6,14 @@ import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
 import {
+  DemoRequestTooLargeError,
+  assertSafeDemoBind,
+  parseAllowedOrigins,
+  parsePositiveInteger,
+  readBoundedJsonBody,
+  requestOriginAllowed,
+} from "./server/security.mjs";
+import {
   DEMO_ENDPOINTS,
   parseCreateRustSessionRequest,
   parseRustMainUpdateRequest,
@@ -15,6 +23,29 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const host = process.env.LEAN_DEMO_HOST ?? "127.0.0.1";
 const port = Number(process.env.LEAN_DEMO_PORT ?? "7357");
+const allowRemote = process.env.LEAN_DEMO_ALLOW_REMOTE === "1";
+assertSafeDemoBind(host, allowRemote);
+const frontendHost = process.env.DEMO_FRONTEND_HOST ?? "127.0.0.1";
+const frontendPort = process.env.DEMO_FRONTEND_PORT ?? "5173";
+const allowedOrigins = parseAllowedOrigins(process.env.LEAN_DEMO_ALLOWED_ORIGINS, [
+  `http://${frontendHost}:${frontendPort}`,
+  ...(frontendHost === "127.0.0.1" ? [`http://localhost:${frontendPort}`] : []),
+]);
+const maxBodyBytes = parsePositiveInteger(
+  process.env.LEAN_DEMO_MAX_BODY_BYTES,
+  1_048_576,
+  "LEAN_DEMO_MAX_BODY_BYTES",
+);
+const maxWebSocketBytes = parsePositiveInteger(
+  process.env.LEAN_DEMO_MAX_WEBSOCKET_BYTES,
+  1_048_576,
+  "LEAN_DEMO_MAX_WEBSOCKET_BYTES",
+);
+const maxLspProcesses = parsePositiveInteger(
+  process.env.LEAN_DEMO_MAX_LSP_PROCESSES,
+  8,
+  "LEAN_DEMO_MAX_LSP_PROCESSES",
+);
 const demoWorkspace = createDemoWorkspace(__dirname, {
   onStatusChange(status) {
     console.log(`[demo] ${status.message}`);
@@ -25,29 +56,25 @@ const preparePromise = demoWorkspace.prepare().catch((error) => {
   prepareError = error;
 });
 
-function withCorsHeaders(headers = {}) {
+function withCorsHeaders(req, headers = {}) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
   return {
-    "Access-Control-Allow-Origin": "*",
+    ...(origin && allowedOrigins.has(origin)
+      ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" }
+      : {}),
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     ...headers,
   };
 }
 
-async function readJsonBody(req) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
 async function readValidatedJsonBody(req, res, parser, invalidMessage) {
   try {
-    return parser(await readJsonBody(req));
-  } catch {
-    res.writeHead(400, withCorsHeaders());
-    res.end(invalidMessage);
+    return parser(await readBoundedJsonBody(req, maxBodyBytes));
+  } catch (error) {
+    const tooLarge = error instanceof DemoRequestTooLargeError;
+    res.writeHead(tooLarge ? 413 : 400, withCorsHeaders(req));
+    res.end(tooLarge ? "Request body too large" : invalidMessage);
     return null;
   }
 }
@@ -60,20 +87,26 @@ async function ensureWorkspacePrepared() {
 }
 
 async function handleHttpRequest(req, res) {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+  if (!requestOriginAllowed(origin, allowedOrigins)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Origin not allowed");
+    return;
+  }
   if (!req.url) {
-    res.writeHead(400, withCorsHeaders());
+    res.writeHead(400, withCorsHeaders(req));
     res.end("Missing URL");
     return;
   }
   if (req.method === "OPTIONS") {
-    res.writeHead(204, withCorsHeaders());
+    res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
   }
   if (req.url === DEMO_ENDPOINTS.status) {
     res.writeHead(
       200,
-      withCorsHeaders({
+      withCorsHeaders(req, {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
@@ -84,7 +117,7 @@ async function handleHttpRequest(req, res) {
     await ensureWorkspacePrepared();
     res.writeHead(
       200,
-      withCorsHeaders({
+      withCorsHeaders(req, {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
@@ -110,7 +143,7 @@ async function handleHttpRequest(req, res) {
     const session = await demoWorkspace.createRustBlockSession(payload.key, payload.code);
     res.writeHead(
       200,
-      withCorsHeaders({
+      withCorsHeaders(req, {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
@@ -133,7 +166,7 @@ async function handleHttpRequest(req, res) {
     );
     if (!payload) return;
     await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
-    res.writeHead(204, withCorsHeaders());
+    res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
   }
@@ -147,14 +180,14 @@ async function handleHttpRequest(req, res) {
     );
     if (!payload) return;
     if (payload.uri !== demoWorkspace.uris.rustMainUri) {
-      res.writeHead(400, withCorsHeaders());
+      res.writeHead(400, withCorsHeaders(req));
       res.end("Invalid rust-main payload");
       return;
     }
     const result = await demoWorkspace.updateRustMainDocument(payload);
     res.writeHead(
       200,
-      withCorsHeaders({
+      withCorsHeaders(req, {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
@@ -166,7 +199,7 @@ async function handleHttpRequest(req, res) {
     const url = new URL(req.url, `http://${host}:${port}`);
     const uri = url.searchParams.get("uri");
     if (!uri) {
-      res.writeHead(400, withCorsHeaders());
+      res.writeHead(400, withCorsHeaders(req));
       res.end("Missing uri parameter");
       return;
     }
@@ -174,14 +207,14 @@ async function handleHttpRequest(req, res) {
       const text = await demoWorkspace.readDocument(uri);
       res.writeHead(
         200,
-        withCorsHeaders({
+        withCorsHeaders(req, {
           "Content-Type": "application/json; charset=utf-8",
         }),
       );
       res.end(JSON.stringify({ uri, text }));
     } catch (error) {
       if (error && typeof error === "object" && error.code === "ERR_DEMO_DOCUMENT_OUTSIDE_WORKSPACE") {
-        res.writeHead(403, withCorsHeaders());
+        res.writeHead(403, withCorsHeaders(req));
         res.end("URI outside demo workspace");
         return;
       }
@@ -191,7 +224,7 @@ async function handleHttpRequest(req, res) {
   }
   res.writeHead(
     404,
-    withCorsHeaders({
+    withCorsHeaders(req, {
       "Content-Type": "text/plain; charset=utf-8",
     }),
   );
@@ -200,31 +233,67 @@ async function handleHttpRequest(req, res) {
 
 const httpServer = createServer((req, res) => {
   void handleHttpRequest(req, res).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
+    console.error("[demo] request failed", error);
     res.writeHead(
       500,
-      withCorsHeaders({
+      withCorsHeaders(req, {
         "Content-Type": "text/plain; charset=utf-8",
       }),
     );
-    res.end(message);
+    res.end("Internal server error");
   });
 });
 
-const wsServer = new WebSocketServer({ noServer: true });
+const wsServer = new WebSocketServer({
+  maxPayload: maxWebSocketBytes,
+  noServer: true,
+});
+let activeLspProcesses = 0;
 
-wsServer.on("connection", (socket) => {
-  const lean = spawn("lake", ["env", "lean", "--server"], {
-    cwd: demoWorkspace.paths.workspaceDir,
+function rejectUpgrade(socket, status, message) {
+  socket.write(
+    `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`,
+  );
+  socket.destroy();
+}
+
+function attachSpawnedLsp(connection, command, args, cwd) {
+  activeLspProcesses += 1;
+  let released = false;
+  const release = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    activeLspProcesses = Math.max(0, activeLspProcesses - 1);
+  };
+  connection.once("close", release);
+
+  const child = spawn(command, args, {
+    cwd,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  pipeServerStderr(lean.stderr);
-  attachLspProcess(socket, lean);
+  child.once("error", () => connection.close());
+  pipeServerStderr(child.stderr);
+  attachLspProcess(connection, child);
+}
+
+wsServer.on("connection", (socket) => {
+  attachSpawnedLsp(socket, "lake", ["env", "lean", "--server"], demoWorkspace.paths.workspaceDir);
 });
 
 httpServer.on("upgrade", (req, socket, head) => {
   if (!req.url) {
     socket.destroy();
+    return;
+  }
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+  if (!requestOriginAllowed(origin, allowedOrigins)) {
+    rejectUpgrade(socket, "403 Forbidden", "Origin not allowed");
+    return;
+  }
+  if (activeLspProcesses >= maxLspProcesses) {
+    rejectUpgrade(socket, "503 Service Unavailable", "Too many active LSP sessions");
     return;
   }
   const url = new URL(req.url, `http://${host}:${port}`);
@@ -242,23 +311,13 @@ httpServer.on("upgrade", (req, socket, head) => {
     }
     const { rootPath } = demoWorkspace.rustBlockPaths(block);
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      const rustAnalyzer = spawn("rust-analyzer", [], {
-        cwd: rootPath,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      pipeServerStderr(rustAnalyzer.stderr);
-      attachLspProcess(connection, rustAnalyzer);
+      attachSpawnedLsp(connection, "rust-analyzer", [], rootPath);
     });
     return;
   }
   if (url.pathname === "/rust-main-lsp") {
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      const rustAnalyzer = spawn("rust-analyzer", [], {
-        cwd: demoWorkspace.paths.workspaceDir,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      pipeServerStderr(rustAnalyzer.stderr);
-      attachLspProcess(connection, rustAnalyzer);
+      attachSpawnedLsp(connection, "rust-analyzer", [], demoWorkspace.paths.workspaceDir);
     });
     return;
   }

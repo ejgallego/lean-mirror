@@ -130,5 +130,13 @@ function overallStatusText(
     return `${stale.label}: ${serviceStatusLabel(stale.status)}`;
   }
 
-  return host ? serviceStatusLabel(host.status) : emptyStatusText;
+  const stopped = services.find((service) => service.status.state === "stopped");
+  if (stopped) {
+    return `${stopped.label}: ${serviceStatusLabel(stopped.status)}`;
+  }
+
+  if (host) {
+    return serviceStatusLabel(host.status);
+  }
+  return services.length > 0 ? "Ready" : emptyStatusText;
 }
