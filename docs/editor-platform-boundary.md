@@ -7,6 +7,7 @@
 These APIs are already inside the package and are good examples of the intended boundary:
 
 - service lifecycle and connection status models
+- request timing and failure telemetry for LSP and custom bridge calls
 - document identity, language, title, version, open state, and sync state helpers
 - document-scoped diagnostics, diagnostic summaries, and logs
 - observable platform snapshots
@@ -22,7 +23,6 @@ These APIs should remain pure TypeScript and avoid direct dependencies on CodeMi
 
 These are plausible extraction candidates, but should require two real consumers and a clear customization story first:
 
-- request telemetry helpers for LSP and custom bridge calls
 - VS Code webview host helpers for message wiring, state publication, and test harnesses
 - common document/session test utilities for editor shell demos
 - retry/reconnect policy helpers, if Lean, Rust, and Verso bridge runtimes converge on the same behavior
@@ -55,11 +55,8 @@ Before adding a new shared API:
 
 ## Near-Term Backlog
 
-1. Request telemetry:
-   Consolidate request timing and failure summaries if both LSP clients and custom bridge calls need the same reporting.
-
-2. VS Code webview wiring:
+1. VS Code webview wiring:
    Share typed message/state publication helpers before sharing any VS Code extension classes.
 
-3. Test harness utilities:
+2. Test harness utilities:
    Share document/session fixture helpers once both demos exercise the same host protocol shape.

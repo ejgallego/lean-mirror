@@ -11,6 +11,10 @@
 
 This keeps iteration cheap while the boundary is still moving. It does not require publishing a package for every shared edit.
 
+`EditorServiceRuntime.trackRequest()` is the shared telemetry boundary for both LSP requests and
+custom bridge calls. It records start, duration, success, and failure without depending on either
+protocol.
+
 ## Update Flow
 
 When changing `editor-platform` for `lean-mirror`:

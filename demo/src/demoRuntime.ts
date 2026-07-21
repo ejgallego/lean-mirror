@@ -478,16 +478,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       if (!client || disposed || !embeddedLeanDiagnosticGate.isCurrent(ticket)) {
         return;
       }
-      const request = leanRuntime.beginRequest("textDocument/diagnostic");
-      void client
-        .request<
+      const activeClient = client;
+      void leanRuntime
+        .trackRequest("textDocument/diagnostic", () => activeClient.request<
           { textDocument: { uri: string } },
           { items?: lsp.Diagnostic[]; kind: "full" | "unchanged" }
         >("textDocument/diagnostic", {
           textDocument: { uri },
-        })
+        }))
         .then((report) => {
-          request.succeeded();
           if (
             disposed ||
             !embeddedLeanDiagnosticGate.isCurrent(ticket) ||
@@ -503,8 +502,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             scheduleEmbeddedLeanDiagnosticPull(uri, ticket, attempt + 1);
           }
         })
-        .catch((error) => {
-          request.failed(error);
+        .catch(() => {
           if (
             attempt < 3 &&
             !disposed &&
@@ -532,16 +530,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       if (!rustClient || disposed || !rustMainDiagnosticGate.isCurrent(ticket)) {
         return;
       }
-      const request = rustRuntime.beginRequest("textDocument/diagnostic");
-      void rustClient
-        .request<
+      const activeRustClient = rustClient;
+      void rustRuntime
+        .trackRequest("textDocument/diagnostic", () => activeRustClient.request<
           { textDocument: { uri: string } },
           { items?: lsp.Diagnostic[]; kind: "full" | "unchanged" }
         >("textDocument/diagnostic", {
           textDocument: { uri },
-        })
+        }))
         .then((report) => {
-          request.succeeded();
           if (
             disposed ||
             !rustMainDiagnosticGate.isCurrent(ticket) ||
@@ -557,8 +554,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             scheduleRustMainDiagnosticPull(uri, ticket, attempt + 1);
           }
         })
-        .catch((error) => {
-          request.failed(error);
+        .catch(() => {
           if (attempt < 4 && !disposed && rustMainDiagnosticGate.isCurrent(ticket)) {
             scheduleRustMainDiagnosticPull(uri, ticket, attempt + 1);
           }
@@ -613,21 +609,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           if (disposed || revision !== rustMainRevision) {
             return;
           }
-          const request = rustRuntime.beginRequest("rust-main/update");
-          const result = await options.sessionApi.updateRustMainDocument({
-            code: source,
-            leanDocument,
-            revision,
-            uri,
-          }).then(
-            (value) => {
-              request.succeeded();
-              return value;
-            },
-            (error) => {
-              request.failed(error);
-              throw error;
-            },
+          const result = await rustRuntime.trackRequest(
+            "rust-main/update",
+            () => options.sessionApi.updateRustMainDocument({
+              code: source,
+              leanDocument,
+              revision,
+              uri,
+            }),
           );
           if (disposed || result.stale || revision !== rustMainRevision) {
             return;

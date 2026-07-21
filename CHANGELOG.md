@@ -19,6 +19,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including references, rename, semantic tokens, and versioned diagnostic recovery.
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
+- Shared `EditorServiceRuntime.trackRequest()` telemetry for LSP and custom bridge requests.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
 
 ### Changed

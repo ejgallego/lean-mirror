@@ -175,6 +175,24 @@ export class EditorServiceRuntime {
     };
   }
 
+  async trackRequest<Result>(
+    method: string,
+    operation: () => Result | PromiseLike<Result>,
+    requestId?: ServiceRequestId
+  ): Promise<Result> {
+    const request = requestId === undefined
+      ? this.beginRequest(method)
+      : this.beginRequest(method, requestId);
+    try {
+      const result = await operation();
+      request.succeeded();
+      return result;
+    } catch (error) {
+      request.failed(error);
+      throw error;
+    }
+  }
+
   recordRequestEvent(event: ServiceRequestEvent): void {
     if (event.serviceId !== this.descriptor.id) {
       throw new Error(`Request event for ${event.serviceId} cannot update ${this.descriptor.id}.`);

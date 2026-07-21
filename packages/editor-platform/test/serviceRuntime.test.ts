@@ -104,4 +104,63 @@ describe("EditorServiceRuntime", () => {
       message: "Rust request failed: textDocument/diagnostic: server busy"
     });
   });
+
+  test("tracks successful promise-returning requests", async () => {
+    let now = 20;
+    const store = new EditorPlatformStore();
+    const runtime = new EditorServiceRuntime(
+      store,
+      {
+        id: "lean",
+        kind: "lean-lsp",
+        label: "Lean"
+      },
+      {
+        now: () => now
+      }
+    );
+
+    const result = await runtime.trackRequest("textDocument/hover", async () => {
+      now = 45;
+      return { contents: "Nat" };
+    }, "hover-1");
+
+    expect(result).toEqual({ contents: "Nat" });
+    expect(store.snapshot.logs.map((event) => event.message)).toEqual([
+      "Lean request started: textDocument/hover",
+      "Lean request completed: textDocument/hover"
+    ]);
+    expect(store.snapshot.logs.at(-1)?.details).toMatchObject({
+      event: {
+        durationMs: 25,
+        requestId: "hover-1",
+        type: "request-succeeded"
+      }
+    });
+  });
+
+  test("tracks and rethrows request failures", async () => {
+    const store = new EditorPlatformStore();
+    const runtime = new EditorServiceRuntime(store, {
+      id: "rust",
+      kind: "rust-lsp",
+      label: "Rust"
+    });
+    const failure = new Error("bridge unavailable");
+
+    await expect(
+      runtime.trackRequest("rust-main/update", () => Promise.reject(failure))
+    ).rejects.toBe(failure);
+
+    expect(store.snapshot.logs.at(-1)).toMatchObject({
+      level: "error",
+      message: "Rust request failed: rust-main/update: bridge unavailable",
+      details: {
+        event: {
+          message: "bridge unavailable",
+          type: "request-failed"
+        }
+      }
+    });
+  });
 });
