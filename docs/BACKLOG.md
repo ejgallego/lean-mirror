@@ -3,5 +3,5 @@
 ## Real Lean server coverage
 
 - Expand the real Lean-server test suite beyond the current smoke and built-package consumer paths.
-- Add coverage for formatting and semantic tokens against a real Lean server; hover, references, rename, and versioned diagnostic recovery now have real-server paths.
+- Decide whether formatting should come from a separate formatter integration; Lean 4.30 does not advertise document formatting, while hover, references, rename, semantic tokens, and versioned diagnostic recovery now have real-server paths.
 - Prefer real workspace-style scenarios over demo-only transport tests where possible.

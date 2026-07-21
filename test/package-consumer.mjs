@@ -345,6 +345,21 @@ async function runRealLeanConsumerExperiment() {
       "Lean rename should edit answer to result",
     );
 
+    const semanticTokens = await connection.client.request(
+      "textDocument/semanticTokens/full",
+      { textDocument: { uri } },
+    );
+    assert(
+      semanticTokens && Array.isArray(semanticTokens.data),
+      "Lean should return semantic token data",
+    );
+    assert(semanticTokens.data.length > 0, "Lean semantic token data should not be empty");
+    assert.equal(
+      semanticTokens.data.length % 5,
+      0,
+      "LSP semantic token data should contain five integers per token",
+    );
+
     leanSession.dispose();
     const exit = await transport.close();
     assert(
