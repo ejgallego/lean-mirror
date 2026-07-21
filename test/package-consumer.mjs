@@ -329,6 +329,22 @@ async function runRealLeanConsumerExperiment() {
       "Lean references should include the #check use in the experiment document",
     );
 
+    const rename = await connection.client.request("textDocument/rename", {
+      newName: "result",
+      position: { line: 0, character: 5 },
+      textDocument: { uri },
+    });
+    assert(rename && typeof rename === "object", "Lean should return a rename workspace edit");
+    const renameEdits = Array.isArray(rename.changes?.[uri])
+      ? rename.changes[uri]
+      : (rename.documentChanges ?? [])
+          .filter((change) => change.textDocument?.uri === uri)
+          .flatMap((change) => change.edits ?? []);
+    assert(
+      renameEdits.some((edit) => edit.newText === "result"),
+      "Lean rename should edit answer to result",
+    );
+
     leanSession.dispose();
     const exit = await transport.close();
     assert(
