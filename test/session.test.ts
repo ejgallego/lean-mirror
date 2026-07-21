@@ -98,6 +98,49 @@ describe("LeanEditorSession", () => {
     expect(session.state).toEqual({ generation: 1, phase: "idle" });
   });
 
+  it("recovers from failed initialization with a fresh client generation", async () => {
+    const states: string[] = [];
+    let disposedTransports = 0;
+    const failedTransport = new MockTransport();
+    failedTransport.onRequest("initialize", () => {
+      throw new Error("synthetic initialization failure");
+    });
+    const session = createLeanEditorSession({
+      onStateChange(state) {
+        states.push(`${state.generation}:${state.phase}`);
+      },
+    });
+
+    const failed = session.connect(failedTransport, {
+      disposeTransport() {
+        disposedTransports++;
+      },
+    });
+    await expect(failed.initialized).rejects.toThrow(/synthetic initialization failure/);
+    expect(session.state).toMatchObject({ generation: 1, phase: "failed" });
+
+    const recovered = session.reconnect(initializedTransport(), {
+      disposeTransport() {
+        disposedTransports++;
+      },
+    });
+    await recovered.initialized;
+
+    expect(recovered.generation).toBe(2);
+    expect(recovered.client).not.toBe(failed.client);
+    expect(disposedTransports).toBe(1);
+    expect(states).toEqual([
+      "1:initializing",
+      "1:failed",
+      "1:idle",
+      "2:initializing",
+      "2:ready",
+    ]);
+
+    session.dispose();
+    expect(disposedTransports).toBe(2);
+  });
+
   it("requires reconnect when a generation is already active", () => {
     const session = createLeanEditorSession();
     session.connect(new MockTransport());

@@ -13,7 +13,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
 - Internal WorkDoneProgress handling for demo rust-analyzer progress without conflating it with Lean file-processing ranges.
-- Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
+- Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, session failure recovery, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
 - First-class `LeanEditorSession` ownership for initialization state, teardown, and fresh-client reconnection.
 - A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including references, rename, semantic tokens, and versioned diagnostic recovery.
