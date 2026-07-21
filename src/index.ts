@@ -20,6 +20,17 @@ export {
   type LeanFileProgressUpdate,
 } from "./progress.js";
 export {
+  LeanEditorSession,
+  LeanEditorSessionDisconnectedError,
+  createLeanEditorSession,
+  type LeanEditorConnection,
+  type LeanEditorSessionConnectOptions,
+  type LeanEditorSessionExtension,
+  type LeanEditorSessionOptions,
+  type LeanEditorSessionPhase,
+  type LeanEditorSessionState,
+} from "./session.js";
+export {
   createMessagePortTransport,
   createWebSocketTransport,
   waitForWebSocketOpen,

@@ -7,6 +7,7 @@ The top-level package export is intentionally Lean-focused. If you want raw `@co
 This package stays intentionally thin:
 
 - Lightweight fallback Lean syntax tokenization via `leanFallbackLanguageSupport()`
+- Explicit client-generation lifecycle via `createLeanEditorSession()`
 - Lean-aware `LSPClient` factory via `createLeanLspClient()`
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
@@ -26,7 +27,7 @@ npm install codemirror-lean4-lsp
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
-  createLeanLspClient,
+  createLeanEditorSession,
   createWebSocketTransport,
   lean4,
   leanFallbackHighlightStyle,
@@ -34,12 +35,19 @@ import {
 } from "codemirror-lean4-lsp";
 
 const socket = new WebSocket("ws://localhost:8080");
-const client = createLeanLspClient({
-  rootUri: "file:///workspace",
+const session = createLeanEditorSession({
+  client: {
+    rootUri: "file:///workspace",
+  },
 });
 
 await waitForWebSocketOpen(socket);
-client.connect(createWebSocketTransport(socket));
+const { client, initialized } = session.connect(createWebSocketTransport(socket), {
+  disposeTransport() {
+    socket.close();
+  },
+});
+await initialized;
 
 const state = EditorState.create({
   doc: "#check Nat.succ\n",
@@ -57,11 +65,11 @@ new EditorView({
 ```
 
 To observe Lean's per-file processing ranges, add the Lean progress extension to
-the client. The store is cleared automatically when a client created by
-`createLeanLspClient()` disconnects.
+the session's client configuration. The session clears connection-scoped state
+when it disconnects, reconnects, or is disposed.
 
 ```ts
-import { createLeanLspClient, leanFileProgress } from "codemirror-lean4-lsp";
+import { createLeanEditorSession, leanFileProgress } from "codemirror-lean4-lsp";
 
 const progress = leanFileProgress({
   onUpdate(update) {
@@ -69,10 +77,17 @@ const progress = leanFileProgress({
   },
 });
 
-const client = createLeanLspClient({
-  extensions: [progress],
+const session = createLeanEditorSession({
+  client: {
+    extensions: [progress],
+  },
 });
 ```
+
+`session.reconnect(transport)` creates a fresh client generation. Destroy or
+remount editor views with the returned client; a view must not retain a client
+from an older generation. Use `createLeanLspClient()` directly only when the host
+already owns equivalent connection and extension cleanup.
 
 If you want standard editor ergonomics such as undo/history, search, folding, and line numbers, enable utilities explicitly:
 

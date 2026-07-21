@@ -5,6 +5,9 @@
 Import these from `codemirror-lean4-lsp`:
 
 - `createLeanLspClient`
+- `createLeanEditorSession`
+- `LeanEditorSession`
+- `LeanEditorSessionDisconnectedError`
 - `leanLspExtensions`
 - `lean4`
 - `leanFallbackLanguage`
@@ -30,6 +33,23 @@ experiments that need reproducibility.
 ignores terminal sends during teardown. Await `waitForWebSocketOpen()` before connecting an
 `LSPClient`. `LeanWorkspace` supports multiple documents but deliberately enforces one editor
 view per URI.
+
+### Session lifecycle
+
+`createLeanEditorSession()` owns one active client generation. `connect()` returns
+the generation's `client` and `initialized` promise. `disconnect()` runs
+connection-scoped extension and transport cleanup, while `dispose()` permanently
+closes the owner.
+
+`reconnect()` always creates a fresh `LSPClient` because the upstream client does
+not provide a complete reusable connection lifecycle. Hosts must destroy or
+remount editor views with the newly returned client. Session state moves through
+`idle`, `initializing`, `ready`, `failed`, and `disposed`; the generation number
+lets asynchronous host code reject stale results.
+
+Extensions with `onSessionDisconnect(client)` participate in owned teardown.
+`leanFileProgress()` implements this hook. Hosts using `createLeanLspClient()`
+directly must clear connection-scoped extension state themselves.
 
 The built-in Lean language is deliberately named and documented as a fallback tokenizer. It
 provides lightweight comments, literals, identifiers, commands, and punctuation highlighting,

@@ -2,6 +2,7 @@ import type { LSPClient, LSPClientExtension, Transport } from "@codemirror/lsp-c
 import type * as lsp from "vscode-languageserver-protocol";
 
 import { createClientRequestHandlingTransport } from "./lspProtocol.js";
+import type { LeanEditorSessionExtension } from "./session.js";
 
 export const leanFileProgressMethod = "$/lean/fileProgress";
 
@@ -50,9 +51,9 @@ export interface LeanFileProgressTrackerOptions {
   store?: LeanFileProgressStore;
 }
 
-export interface LeanFileProgressExtension extends LSPClientExtension {
+export interface LeanFileProgressExtension extends LSPClientExtension, LeanEditorSessionExtension {
   clear(): void;
-  onClientDisconnect(client: LSPClient): void;
+  onSessionDisconnect(client: LSPClient): void;
   readonly store: LeanFileProgressStore;
 }
 
@@ -187,7 +188,7 @@ export function leanFileProgress(
     clear() {
       store.clear();
     },
-    onClientDisconnect() {
+    onSessionDisconnect() {
       store.clear();
     },
     notificationHandlers: {
@@ -239,9 +240,9 @@ export interface WorkDoneProgressTrackerOptions {
   store?: WorkDoneProgressStore;
 }
 
-export interface WorkDoneProgressExtension extends LSPClientExtension {
+export interface WorkDoneProgressExtension extends LSPClientExtension, LeanEditorSessionExtension {
   clear(): void;
-  onClientDisconnect(client: LSPClient): void;
+  onSessionDisconnect(client: LSPClient): void;
   readonly store: WorkDoneProgressStore;
   wrapTransport(transport: Transport): Transport;
 }
@@ -362,7 +363,7 @@ export function workDoneProgress(
     clear() {
       store.clear();
     },
-    onClientDisconnect() {
+    onSessionDisconnect() {
       store.clear();
     },
     clientCapabilities: {

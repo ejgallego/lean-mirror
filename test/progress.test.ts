@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LSPClient } from "../src/codemirror.js";
 import {
   createLeanLspClient,
+  createLeanEditorSession,
   createLeanWorkspace,
   lean4,
   leanFileProgress,
@@ -204,17 +205,26 @@ describe("Lean file progress", () => {
 
   it("clears tracked progress on disconnect", async () => {
     const progress = leanFileProgress();
-    const { client, transport } = createInitializedLeanClient({
-      extensions: [progress],
+    const transport = new MockTransport();
+    transport.onRequest("initialize", () => ({
+      capabilities: {
+        textDocumentSync: 2,
+      },
+    }));
+    const session = createLeanEditorSession({
+      client: {
+        extensions: [progress],
+      },
     });
+    const { client, initialized } = session.connect(transport);
     const view = createTestView("def x := 1\n", lean4({ client, uri: MAIN_URI }));
-    await client.initializing;
+    await initialized;
     await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
 
     transport.emitNotification(leanFileProgressMethod, progressParams(MAIN_URI, openedVersion(transport, MAIN_URI)));
     await waitFor(() => progress.store.entries().length === 1);
 
-    client.disconnect();
+    session.disconnect();
     expect(progress.store.entries()).toEqual([]);
 
     view.destroy();

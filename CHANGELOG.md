@@ -15,12 +15,15 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Internal WorkDoneProgress handling for demo rust-analyzer progress without conflating it with Lean file-processing ranges.
 - Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
+- First-class `LeanEditorSession` ownership for initialization state, teardown, and fresh-client reconnection.
+- A built-package consumer experiment covering public exports with both deterministic and real `lean --server` transports.
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
 
 ### Changed
 
+- `leanFileProgress()` cleanup is driven by `LeanEditorSession`; direct `createLeanLspClient()` users own extension cleanup.
 - Embedded fenced-block parsing now preserves correct UTF-16 offsets on CRLF input and gives duplicate labels stable generated keys.
 - Lean fallback language support leaves syntax colors to the host unless a `highlightStyle` is supplied.
 - `LeanWorkspace` explicitly supports one editor view per URI and rejects divergent duplicate views.
