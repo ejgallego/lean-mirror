@@ -24,6 +24,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 ### Changed
 
 - `leanFileProgress()` cleanup is driven by `LeanEditorSession`; direct `createLeanLspClient()` users own extension cleanup.
+- The demo now owns its Lean client, progress state, and WebSocket through `LeanEditorSession`, including unload/reload coverage.
 - Embedded fenced-block parsing now preserves correct UTF-16 offsets on CRLF input and gives duplicate labels stable generated keys.
 - Lean fallback language support leaves syntax colors to the host unless a `highlightStyle` is supplied.
 - `LeanWorkspace` explicitly supports one editor view per URI and rejects divergent duplicate views.

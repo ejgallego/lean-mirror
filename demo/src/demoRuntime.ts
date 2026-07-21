@@ -10,7 +10,7 @@ import { EditorServiceRuntime, type EditorDiagnostic, type EditorServiceDescript
 import { Marked } from "marked";
 
 import {
-  createLeanLspClient,
+  createLeanEditorSession,
   createLeanWorkspace,
   createWebSocketTransport,
   lean4,
@@ -18,6 +18,7 @@ import {
   leanFallbackHighlightStyle,
   leanUtilities,
   type Transport,
+  type LeanEditorSession,
   type LeanWorkspace,
 } from "../../src/index.js";
 import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
@@ -139,7 +140,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let currentLanguageId: string | null = null;
   let currentUri: string | null = null;
   let workspace: LeanWorkspace | null = null;
-  let client: ReturnType<typeof createLeanLspClient> | null = null;
+  let client: LSPClient | null = null;
+  let leanSessionOwner: LeanEditorSession | null = null;
   let leanInfoview: LeanInfoviewHost | null = null;
   let rustClient: LSPClient | null = null;
   let socket: WebSocket | null = null;
@@ -767,47 +769,57 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   leanRuntime.connecting();
   socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
   leanRuntime.initializing();
-  client = createLeanLspClient({
-    extensions: [leanProgress],
-    notificationHandlers: {
-      "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
-        leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
-        if (
-          params.uri === session.embeddedLeanDocumentUri &&
-          !embeddedLeanDiagnosticGate.acceptsPush(params.version)
-        ) {
-          return true;
-        }
-        applyEmbeddedLeanDiagnostics(params);
-        return false;
+  leanSessionOwner = createLeanEditorSession({
+    client: {
+      extensions: [leanProgress],
+      notificationHandlers: {
+        "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+          leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
+          if (
+            params.uri === session.embeddedLeanDocumentUri &&
+            !embeddedLeanDiagnosticGate.acceptsPush(params.version)
+          ) {
+            return true;
+          }
+          applyEmbeddedLeanDiagnostics(params);
+          return false;
+        },
       },
+      unhandledNotification(_client, method, params) {
+        leanInfoview?.forwardServerNotification(method, params);
+      },
+      rootUri: session.rootUri,
+      sanitizeHTML: sanitizeHtml,
+      timeout: 20_000,
+      workspace: createLeanWorkspace({
+        async loadDocument(uri) {
+          return {
+            doc:
+              uri === session.documentUri
+                ? session.initialDoc
+                : await options.sessionApi.fetchDocument(uri),
+          };
+        },
+        async displayDocument(uri, currentWorkspace) {
+          const file = await currentWorkspace.requestFile(uri);
+          const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
+          return mountDocument(uri, doc);
+        },
+      }),
     },
-    unhandledNotification(_client, method, params) {
-      leanInfoview?.forwardServerNotification(method, params);
-    },
-    rootUri: session.rootUri,
-    sanitizeHTML: sanitizeHtml,
-    timeout: 20_000,
-    workspace: createLeanWorkspace({
-      async loadDocument(uri) {
-        return {
-          doc:
-            uri === session.documentUri
-              ? session.initialDoc
-              : await options.sessionApi.fetchDocument(uri),
-        };
-      },
-      async displayDocument(uri, currentWorkspace) {
-        const file = await currentWorkspace.requestFile(uri);
-        const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
-        return mountDocument(uri, doc);
-      },
-    }),
   });
-  client.connect(observeInitializeResult(createWebSocketTransport(socket), (result) => {
-    leanInitializeResult = result;
-  }));
-  await client.initializing;
+  const leanConnection = leanSessionOwner.connect(
+    observeInitializeResult(createWebSocketTransport(socket), (result) => {
+      leanInitializeResult = result;
+    }),
+    {
+      disposeTransport() {
+        socket?.close();
+      },
+    },
+  );
+  client = leanConnection.client;
+  await leanConnection.initialized;
   leanRuntime.ready();
   workspace = client.workspace as LeanWorkspace;
   leanInfoview = createLeanInfoviewHost({
@@ -943,10 +955,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       leanInfoview?.serverStopped({ message: "Lean server stopped.", reason: "Demo runtime disposed." });
       leanInfoview?.dispose();
       leanInfoview = null;
-      client?.disconnect();
-      leanProgress.clear();
+      leanSessionOwner?.dispose();
+      leanSessionOwner = null;
       leanRuntime.stopped();
-      socket?.close();
       rustClient?.disconnect();
       rustProgress.clear();
       rustRuntime.stopped();

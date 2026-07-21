@@ -136,6 +136,18 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
   await openDocumentContaining(page, "Helper.lean", "def helperValue");
 });
 
+test("demo recreates its Lean session after a page reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(page.locator("#events")).toContainText("Lean server initialized.");
+
+  await page.reload();
+
+  await expect(statusValue(page, "status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#events")).toContainText("Lean server initialized.");
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
 test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await page.goto("/");
 
