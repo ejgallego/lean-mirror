@@ -20,6 +20,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
 - Shared `EditorServiceRuntime.trackRequest()` telemetry for LSP and custom bridge requests.
+- Correlated `command-result` acknowledgements for typed VS Code webview commands.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
 
 ### Changed

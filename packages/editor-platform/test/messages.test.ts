@@ -3,7 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   isEditorPlatformMessage,
   isEditorToHostMessage,
+  isHostToEditorMessage,
   platformMessage,
+  type EditorCommandResult,
   type EditorToHostMessage,
   type HostToEditorMessage
 } from "../src/index.js";
@@ -43,6 +45,23 @@ describe("platform protocol messages", () => {
     });
   });
 
+  test("supports correlated command results", () => {
+    const result: HostToEditorMessage = platformMessage("command-result", {
+      command: "document-changed",
+      handled: true,
+      ok: true,
+      requestId: "change-7"
+    } satisfies EditorCommandResult);
+
+    expect(isHostToEditorMessage(result)).toBe(true);
+    expect(result.payload).toEqual({
+      command: "document-changed",
+      handled: true,
+      ok: true,
+      requestId: "change-7"
+    });
+  });
+
   test("rejects unrelated messages", () => {
     expect(isEditorPlatformMessage({ type: "ready" })).toBe(false);
     expect(isEditorPlatformMessage({ protocol: "editor-platform", version: 2, type: "ready" })).toBe(false);
@@ -64,6 +83,7 @@ describe("platform protocol messages", () => {
     expect(isEditorToHostMessage(envelope("ready", []))).toBe(false);
     expect(isEditorToHostMessage(envelope("ready", { unexpected: true }))).toBe(false);
     expect(isEditorToHostMessage(envelope("open-document", {}))).toBe(false);
+    expect(isEditorToHostMessage(envelope("open-document", { uri: "file:///Main.lean", requestId: {} }))).toBe(false);
     expect(isEditorToHostMessage(envelope("set-active-document", { uri: 42 }))).toBe(false);
     expect(
       isEditorToHostMessage(envelope("document-changed", { uri: "file:///Main.lean", text: 4 }))
@@ -78,6 +98,15 @@ describe("platform protocol messages", () => {
         envelope("diagnostics", {
           uri: "file:///Main.lean",
           diagnostics: [{ message: "bad", severity: "fatal" }]
+        })
+      )
+    ).toBe(false);
+    expect(
+      isHostToEditorMessage(
+        envelope("command-result", {
+          command: "document-changed",
+          ok: false,
+          requestId: "change-1"
         })
       )
     ).toBe(false);

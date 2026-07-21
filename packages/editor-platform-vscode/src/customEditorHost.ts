@@ -7,6 +7,9 @@ import {
   publishPlatformSnapshots,
   type DisposableLike,
   type DocumentSnapshot,
+  type EditorCommandRequestId,
+  type EditorCommandResult,
+  type EditorCommandType,
   type EditorPlatformEndpoint,
   type EditorToHostMessage,
   type HostToEditorMessage,
@@ -98,7 +101,7 @@ export function createEditorPlatformCustomEditorHost(
     if (disposed) {
       return Promise.resolve();
     }
-    return handleEditorMessage(options, message, documentVersions);
+    return dispatchEditorMessage(options, endpoint, message, documentVersions, () => disposed);
   };
 
   const reportFailure = (error: unknown, message: EditorToHostMessage): void => {
@@ -204,22 +207,25 @@ async function handleEditorMessage(
   options: EditorPlatformCustomEditorHostOptions,
   message: EditorToHostMessage,
   documentVersions: Map<string, number>
-): Promise<void> {
+): Promise<boolean> {
   switch (message.type) {
     case "ready":
-      await options.handlers?.ready?.();
-      return;
+      if (!options.handlers?.ready) return false;
+      await options.handlers.ready();
+      return true;
     case "open-document":
-      await options.handlers?.openDocument?.({ uri: message.payload.uri });
-      return;
+      if (!options.handlers?.openDocument) return false;
+      await options.handlers.openDocument({ uri: message.payload.uri });
+      return true;
     case "document-changed":
       if (
         message.payload.version !== undefined &&
         message.payload.version <= (documentVersions.get(message.payload.uri) ?? -1)
       ) {
-        return;
+        return false;
       }
-      await options.handlers?.documentChanged?.({
+      if (!options.handlers?.documentChanged) return false;
+      await options.handlers.documentChanged({
         uri: message.payload.uri,
         text: message.payload.text,
         ...(message.payload.version === undefined ? {} : { version: message.payload.version })
@@ -227,21 +233,65 @@ async function handleEditorMessage(
       if (message.payload.version !== undefined) {
         documentVersions.set(message.payload.uri, message.payload.version);
       }
-      return;
+      return true;
     case "restart-service":
-      await options.handlers?.restartService?.({
+      if (!options.handlers?.restartService) return false;
+      await options.handlers.restartService({
         serviceId: message.payload.serviceId,
         ...(message.payload.reason === undefined ? {} : { reason: message.payload.reason })
       });
-      return;
+      return true;
     case "set-active-document":
       options.store.setActiveDocument(message.payload.uri);
       await options.handlers?.setActiveDocument?.({
         uri: message.payload.uri,
         ...(message.payload.languageId === undefined ? {} : { languageId: message.payload.languageId })
       });
-      return;
+      return true;
   }
+}
+
+async function dispatchEditorMessage(
+  options: EditorPlatformCustomEditorHostOptions,
+  endpoint: EditorPlatformEndpoint<EditorToHostMessage, HostToEditorMessage>,
+  message: EditorToHostMessage,
+  documentVersions: Map<string, number>,
+  isDisposed: () => boolean
+): Promise<void> {
+  const command = editorCommandRequest(message);
+  try {
+    const handled = await handleEditorMessage(options, message, documentVersions);
+    if (command && !isDisposed()) {
+      endpoint.postMessage(platformMessage("command-result", {
+        command: command.type,
+        handled,
+        ok: true,
+        requestId: command.requestId
+      } satisfies EditorCommandResult));
+    }
+  } catch (error) {
+    if (command && !isDisposed()) {
+      endpoint.postMessage(platformMessage("command-result", {
+        command: command.type,
+        message: error instanceof Error ? error.message : String(error),
+        ok: false,
+        requestId: command.requestId
+      } satisfies EditorCommandResult));
+    }
+    throw error;
+  }
+}
+
+function editorCommandRequest(
+  message: EditorToHostMessage
+): { requestId: EditorCommandRequestId; type: EditorCommandType } | undefined {
+  if (message.type === "ready" || message.payload.requestId === undefined) {
+    return undefined;
+  }
+  return {
+    requestId: message.payload.requestId,
+    type: message.type
+  };
 }
 
 function editorMessageQueueKey(message: EditorToHostMessage): string | undefined {

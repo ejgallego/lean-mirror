@@ -16,6 +16,7 @@ These APIs are already inside the package and are good examples of the intended 
 - a compact status-panel DOM renderer over the shell view model
 - a structural workspace-shell DOM renderer with editor, status, info, and secondary slots
 - typed host/editor protocol envelopes and structural message adapters
+- correlated command acknowledgements for VS Code-style webview hosts
 
 These APIs should remain pure TypeScript and avoid direct dependencies on CodeMirror, ProseMirror, VS Code, Lean process management, or Verso CST internals. The DOM-facing renderers must stay limited to structural element interfaces, with concrete styling and editor-specific content owned by host apps.
 
@@ -23,7 +24,6 @@ These APIs should remain pure TypeScript and avoid direct dependencies on CodeMi
 
 These are plausible extraction candidates, but should require two real consumers and a clear customization story first:
 
-- VS Code webview host helpers for message wiring, state publication, and test harnesses
 - common document/session test utilities for editor shell demos
 - retry/reconnect policy helpers, if Lean, Rust, and Verso bridge runtimes converge on the same behavior
 
@@ -55,8 +55,5 @@ Before adding a new shared API:
 
 ## Near-Term Backlog
 
-1. VS Code webview wiring:
-   Share typed message/state publication helpers before sharing any VS Code extension classes.
-
-2. Test harness utilities:
+1. Test harness utilities:
    Share document/session fixture helpers once both demos exercise the same host protocol shape.

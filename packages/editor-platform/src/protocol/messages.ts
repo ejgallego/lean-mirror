@@ -13,19 +13,41 @@ export interface PlatformProtocolEnvelope<TType extends string, TPayload extends
   payload: TPayload;
 }
 
+export type EditorCommandRequestId = string | number;
+export type EditorCommandType =
+  | "open-document"
+  | "document-changed"
+  | "restart-service"
+  | "set-active-document";
+
+export type EditorCommandResult =
+  | {
+      command: EditorCommandType;
+      handled: boolean;
+      ok: true;
+      requestId: EditorCommandRequestId;
+    }
+  | {
+      command: EditorCommandType;
+      message: string;
+      ok: false;
+      requestId: EditorCommandRequestId;
+    };
+
 export type HostToEditorMessage =
   | PlatformProtocolEnvelope<"platform-snapshot", { snapshot: EditorPlatformSnapshot }>
   | PlatformProtocolEnvelope<"service-event", { event: ServiceEvent }>
   | PlatformProtocolEnvelope<"document-opened", { document: DocumentSnapshot; text?: string }>
   | PlatformProtocolEnvelope<"diagnostics", { uri: DocumentUri; diagnostics: readonly EditorDiagnostic[] }>
-  | PlatformProtocolEnvelope<"log", { event: LogEvent }>;
+  | PlatformProtocolEnvelope<"log", { event: LogEvent }>
+  | PlatformProtocolEnvelope<"command-result", EditorCommandResult>;
 
 export type EditorToHostMessage =
   | PlatformProtocolEnvelope<"ready">
-  | PlatformProtocolEnvelope<"open-document", { uri: DocumentUri }>
-  | PlatformProtocolEnvelope<"document-changed", { uri: DocumentUri; text: string; version?: number }>
-  | PlatformProtocolEnvelope<"restart-service", { serviceId: string; reason?: string }>
-  | PlatformProtocolEnvelope<"set-active-document", { uri: DocumentUri; languageId?: LanguageId }>;
+  | PlatformProtocolEnvelope<"open-document", { requestId?: EditorCommandRequestId; uri: DocumentUri }>
+  | PlatformProtocolEnvelope<"document-changed", { requestId?: EditorCommandRequestId; uri: DocumentUri; text: string; version?: number }>
+  | PlatformProtocolEnvelope<"restart-service", { requestId?: EditorCommandRequestId; serviceId: string; reason?: string }>
+  | PlatformProtocolEnvelope<"set-active-document", { requestId?: EditorCommandRequestId; uri: DocumentUri; languageId?: LanguageId }>;
 
 export type EditorPlatformMessage = HostToEditorMessage | EditorToHostMessage;
 
@@ -34,7 +56,8 @@ const hostToEditorMessageTypes = [
   "service-event",
   "document-opened",
   "diagnostics",
-  "log"
+  "log",
+  "command-result"
 ] as const;
 
 const editorToHostMessageTypes = [
@@ -57,6 +80,12 @@ const diagnosticSeverities = new Set(["error", "warning", "info", "hint"]);
 const serviceStates = new Set(["stopped", "starting", "initializing", "ready", "stale", "stopping", "failed"]);
 const serviceEventTypes = new Set(["starting", "initializing", "ready", "stale", "failed", "stopped"]);
 const logLevels = new Set(["debug", "info", "warn", "error"]);
+const editorCommandTypes = new Set<EditorCommandType>([
+  "open-document",
+  "document-changed",
+  "restart-service",
+  "set-active-document"
+]);
 
 function isRecord(value: unknown): value is UnknownRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -76,6 +105,29 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isNonNegativeInteger(value: unknown): value is number {
   return Number.isInteger(value) && isFiniteNumber(value) && value >= 0;
+}
+
+function isCommandRequestId(value: unknown): value is EditorCommandRequestId {
+  return isString(value) || isFiniteNumber(value);
+}
+
+function hasValidOptionalRequestId(payload: UnknownRecord): boolean {
+  return payload.requestId === undefined || isCommandRequestId(payload.requestId);
+}
+
+function isEditorCommandResult(value: unknown): value is EditorCommandResult {
+  if (
+    !isRecord(value) ||
+    !isString(value.command) ||
+    !editorCommandTypes.has(value.command as EditorCommandType) ||
+    !isCommandRequestId(value.requestId) ||
+    typeof value.ok !== "boolean"
+  ) {
+    return false;
+  }
+  return value.ok
+    ? typeof value.handled === "boolean" && value.message === undefined
+    : isString(value.message) && value.handled === undefined;
 }
 
 function isDocumentIdentity(value: unknown): boolean {
@@ -218,20 +270,23 @@ function hasValidPayload(type: string, payload: unknown): boolean {
       );
     case "log":
       return isLogEvent(payload.event);
+    case "command-result":
+      return isEditorCommandResult(payload);
     case "ready":
       return Object.keys(payload).length === 0;
     case "open-document":
-      return isString(payload.uri);
+      return isString(payload.uri) && hasValidOptionalRequestId(payload);
     case "document-changed":
       return (
         isString(payload.uri) &&
         isString(payload.text) &&
+        hasValidOptionalRequestId(payload) &&
         (payload.version === undefined || isNonNegativeInteger(payload.version))
       );
     case "restart-service":
-      return isString(payload.serviceId) && isOptionalString(payload.reason);
+      return isString(payload.serviceId) && isOptionalString(payload.reason) && hasValidOptionalRequestId(payload);
     case "set-active-document":
-      return isString(payload.uri) && isOptionalString(payload.languageId);
+      return isString(payload.uri) && isOptionalString(payload.languageId) && hasValidOptionalRequestId(payload);
     default:
       return false;
   }

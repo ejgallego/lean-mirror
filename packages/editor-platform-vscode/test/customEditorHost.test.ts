@@ -122,6 +122,131 @@ describe("custom editor host", () => {
     expect(invalid).toHaveLength(1);
   });
 
+  test("acknowledges correlated editor commands", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    const host = createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        openDocument: () => undefined
+      }
+    });
+
+    webview.receive(platformMessage("open-document", {
+      requestId: "open-1",
+      uri: "file:///Main.lean"
+    }));
+    await waitFor(() => webview.posted.some((message) => message.type === "command-result"));
+
+    expect(webview.posted.at(-1)).toEqual(platformMessage("command-result", {
+      command: "open-document",
+      handled: true,
+      ok: true,
+      requestId: "open-1"
+    }));
+    host.dispose();
+  });
+
+  test("reports correlated command failures to the editor", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    const errors: unknown[] = [];
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        restartService() {
+          throw new Error("restart refused");
+        }
+      },
+      onHandlerError(error) {
+        errors.push(error);
+      }
+    });
+
+    webview.receive(platformMessage("restart-service", {
+      requestId: 9,
+      serviceId: "lean"
+    }));
+    await waitFor(() => webview.posted.some((message) => message.type === "command-result"));
+
+    expect(webview.posted.at(-1)).toEqual(platformMessage("command-result", {
+      command: "restart-service",
+      message: "restart refused",
+      ok: false,
+      requestId: 9
+    }));
+    expect(errors).toHaveLength(1);
+  });
+
+  test("does not acknowledge an in-flight command after disposal", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    let release!: () => void;
+    const canFinish = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const host = createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        async openDocument() {
+          await canFinish;
+        }
+      }
+    });
+
+    webview.receive(platformMessage("open-document", {
+      requestId: "open-after-dispose",
+      uri: "file:///Main.lean"
+    }));
+    host.dispose();
+    release();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(webview.posted.some((message) => message.type === "command-result")).toBe(false);
+  });
+
+  test("acknowledges stale document versions as unhandled", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        documentChanged: () => undefined
+      }
+    });
+
+    webview.receive(platformMessage("document-changed", {
+      requestId: "change-2",
+      text: "new",
+      uri: "file:///Main.lean",
+      version: 2
+    }));
+    await waitFor(() => webview.posted.some(
+      (message) => message.type === "command-result" && message.payload.requestId === "change-2"
+    ));
+    webview.receive(platformMessage("document-changed", {
+      requestId: "change-1",
+      text: "old",
+      uri: "file:///Main.lean",
+      version: 1
+    }));
+    await waitFor(() => webview.posted.some(
+      (message) => message.type === "command-result" && message.payload.requestId === "change-1"
+    ));
+
+    expect(webview.posted.at(-1)).toEqual(platformMessage("command-result", {
+      command: "document-changed",
+      handled: false,
+      ok: true,
+      requestId: "change-1"
+    }));
+  });
+
   test("serializes document changes and ignores stale versions", async () => {
     const store = new EditorPlatformStore();
     const webview = new FakeWebview();

@@ -17,6 +17,9 @@ The goal is to keep extension projects thin while leaving editor-specific UI and
 - `documentOpenedMessage`: creates a shared `document-opened` protocol message from a VS Code-shaped custom document
 - `vscodeUriToString`: normalizes a VS Code-shaped URI for editor-platform messages
 
+Editor commands may include a `requestId`. The host then sends a typed `command-result` response
+that distinguishes successful handling, ignored or missing handlers, and thrown failures.
+
 Example:
 
 ```ts
