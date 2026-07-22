@@ -75,7 +75,7 @@ const smokeTest = leanAvailable ? it : it.skip;
 
 describe("real Lean server", () => {
   smokeTest(
-    "opens a Lean file, receives diagnostics, and answers hover requests",
+    "opens a Lean file, receives diagnostics and semantic tokens, and answers hover requests",
     async () => {
       const workspace = await mkdtemp(join(tmpdir(), "cm-lean4-"));
       const filePath = join(workspace, "Smoke.lean");
@@ -85,12 +85,20 @@ describe("real Lean server", () => {
       const uri = pathToFileURL(filePath).toString();
       const rootUri = pathToFileURL(workspace).toString();
       const transport = new StdioTransport("lean", ["--server"]);
-      const client = createLeanLspClient({ rootUri });
+      const client = createLeanLspClient({
+        features: { semanticTokens: { debounceMs: 0 } },
+        rootUri,
+      });
       client.connect(transport);
 
       const view = createTestView(source, lean4({ client, uri }));
       await client.initializing;
       await waitFor(() => diagnosticCount(view.state) > 0, 15_000, 50);
+      await waitFor(
+        () => view.dom.querySelector("[data-lean-semantic-token]") !== null,
+        15_000,
+        50,
+      );
 
       const plugin = LSPPlugin.get(view);
       expect(plugin).not.toBeNull();

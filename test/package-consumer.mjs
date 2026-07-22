@@ -8,12 +8,20 @@ import { pathToFileURL } from "node:url";
 import {
   createLeanEditorSession,
   createLeanWorkspace,
+  decodeLeanSemanticTokens,
   leanEditorSessionBinding,
   leanFileProgress,
   leanFileProgressMethod,
+  leanSemanticTokens,
+  leanSemanticTokensFullMethod,
+  leanSemanticTokensRefreshMethod,
 } from "codemirror-lean4-lsp";
 
 assert.equal(typeof leanEditorSessionBinding, "function");
+assert.equal(typeof decodeLeanSemanticTokens, "function");
+assert.equal(typeof leanSemanticTokens, "function");
+assert.equal(leanSemanticTokensFullMethod, "textDocument/semanticTokens/full");
+assert.equal(leanSemanticTokensRefreshMethod, "workspace/semanticTokens/refresh");
 
 class ConsumerTransport {
   subscribers = new Set();
@@ -64,6 +72,7 @@ const NO_EDITOR_FEATURES = {
   hover: false,
   referencesKeymap: false,
   renameKeymap: false,
+  semanticTokens: false,
   signatureHelp: false,
 };
 

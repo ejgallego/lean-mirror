@@ -10,6 +10,7 @@ This package stays intentionally thin:
 - Explicit client-generation lifecycle via `createLeanEditorSession()`
 - Session-aware CodeMirror rebinding via `leanEditorSessionBinding()`
 - Lean-aware `LSPClient` factory via `createLeanLspClient()`
+- Opt-in Lean semantic-token rendering via `features.semanticTokens` or `leanSemanticTokens()`
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
 - Standard editor utilities via `leanUtilities()`
@@ -38,6 +39,9 @@ import {
 const socket = new WebSocket("ws://localhost:8080");
 const session = createLeanEditorSession({
   client: {
+    features: {
+      semanticTokens: true,
+    },
     rootUri: "file:///workspace",
   },
 });
@@ -62,6 +66,28 @@ const state = EditorState.create({
 new EditorView({
   state,
   parent: document.querySelector("#editor")!,
+});
+```
+
+Semantic tokens are opt-in because they add a request after document changes and
+whenever Lean asks the client to refresh. The renderer discovers the server's
+legend, decodes LSP positions as UTF-16 offsets, and rejects results for older
+document versions or client generations. It maps token types to the active
+CodeMirror `HighlightStyle` and also adds stable classes such as
+`cm-lean-semantic-function` plus a `data-lean-semantic-token` attribute.
+
+Hosts can add their own classes without replacing the protocol or rendering
+layer:
+
+```ts
+const client = createLeanLspClient({
+  features: {
+    semanticTokens: {
+      className(token) {
+        return token.modifiers.includes("deprecated") ? "my-deprecated-token" : null;
+      },
+    },
+  },
 });
 ```
 

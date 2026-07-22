@@ -764,6 +764,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   leanSessionOwner = createLeanEditorSession({
     client: {
       extensions: [leanProgress],
+      features: {
+        semanticTokens: true,
+      },
       notificationHandlers: {
         "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
           leanInfoview?.forwardServerNotification("textDocument/publishDiagnostics", params);

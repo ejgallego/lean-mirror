@@ -15,6 +15,10 @@ Import these from `codemirror-lean4-lsp`:
 - `leanFallbackLanguageSupport`
 - `leanFallbackHighlightStyle`
 - `leanUtilities`
+- `leanSemanticTokens`
+- `decodeLeanSemanticTokens`
+- `leanSemanticTokensFullMethod`
+- `leanSemanticTokensRefreshMethod`
 - `leanFileProgress`
 - `leanFileProgressMethod`
 - `LeanFileProgressKind`
@@ -64,6 +68,28 @@ provides lightweight comments, literals, identifiers, commands, and punctuation 
 but it is not a complete Lean parser. Language support does not install an opinionated color
 theme; pass `{ highlightStyle: leanFallbackHighlightStyle }` or install a host-selected
 CodeMirror style.
+
+### Lean semantic tokens
+
+Enable semantic rendering with
+`createLeanLspClient({ features: { semanticTokens: true } })`, pass options in
+place of `true`, or compose `leanSemanticTokens(options)` explicitly in the
+client's `extensions`. It advertises relative semantic-token support, discovers
+the server legend, requests `textDocument/semanticTokens/full`, and responds to
+Lean's server-initiated `workspace/semanticTokens/refresh` requests.
+
+Decoded offsets use JavaScript and CodeMirror's UTF-16 indexing. Results are
+discarded when the document, synchronized workspace version, client generation,
+or request serial has changed. In-flight superseded requests are also cancelled.
+`decodeLeanSemanticTokens()` exposes the validated decoder for hosts that need
+the typed token stream without the built-in renderer.
+
+Rendering maps token kinds and modifiers to the active CodeMirror
+`HighlightStyle`. Every mark also receives `cm-lean-semantic-token`, a stable
+kind class such as `cm-lean-semantic-function`, modifier classes, and a
+`data-lean-semantic-token` attribute. `className(token)` can add host-selected
+classes; `onError(error, context)` can replace CodeMirror's default exception
+logging. `debounceMs` defaults to 100 milliseconds.
 
 ### Lean file progress
 

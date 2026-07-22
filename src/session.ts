@@ -1,10 +1,13 @@
 import {
   type LSPClient,
-  type LSPClientExtension,
   type Transport,
 } from "@codemirror/lsp-client";
 
-import { createLeanLspClient, type LeanLspClientConfig } from "./client.js";
+import {
+  createLeanLspClient,
+  type LeanLspClientConfig,
+  type LeanLspClientExtension,
+} from "./client.js";
 
 export type LeanEditorSessionPhase =
   | "idle"
@@ -33,7 +36,7 @@ export interface LeanEditorSessionSubscriptionOptions {
  * The session invokes this hook before disconnecting a client generation.
  * Direct users of `createLeanLspClient` own this cleanup themselves.
  */
-export interface LeanEditorSessionExtension extends LSPClientExtension {
+export interface LeanEditorSessionExtension extends LeanLspClientExtension {
   onSessionDisconnect?(client: LSPClient): void;
 }
 

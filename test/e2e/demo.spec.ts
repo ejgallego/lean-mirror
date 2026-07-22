@@ -152,6 +152,9 @@ test("demo reconnects Lean without remounting the active editor", async ({ page 
   await page.goto("/");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocumentContaining(page, "Main.lean", "#check Nat.succ");
+  await expect(page.locator("#editor [data-lean-semantic-token]").first()).toBeVisible({
+    timeout: 15_000,
+  });
 
   expect(
     await page.evaluate(() =>
@@ -172,6 +175,9 @@ test("demo reconnects Lean without remounting the active editor", async ({ page 
     "data-reconnect-probe",
     "preserved",
   );
+  await expect(page.locator("#editor [data-lean-semantic-token]").first()).toBeVisible({
+    timeout: 15_000,
+  });
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
     .toContain("#check Nat.pred");

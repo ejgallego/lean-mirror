@@ -119,6 +119,15 @@ code {
   overscroll-behavior: contain;
 }
 
+.editor-host .cm-lean-semantic-lean-sorry-like {
+  text-decoration: underline wavy #b33a3a;
+  text-decoration-thickness: 1px;
+}
+
+.editor-host .cm-lean-semantic-deprecated {
+  text-decoration: line-through;
+}
+
 .status-card {
   padding: 8px 10px;
   border-radius: 8px;

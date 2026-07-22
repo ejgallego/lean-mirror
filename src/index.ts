@@ -1,4 +1,10 @@
-export { createLeanLspClient, leanLspExtensions, type LeanLspClientConfig, type LeanLspFeatureOptions } from "./client.js";
+export {
+  createLeanLspClient,
+  leanLspExtensions,
+  type LeanLspClientConfig,
+  type LeanLspClientExtension,
+  type LeanLspFeatureOptions,
+} from "./client.js";
 export {
   lean4,
   leanEditorSessionBinding,
@@ -24,6 +30,16 @@ export {
   type LeanFileProgressTrackerOptions,
   type LeanFileProgressUpdate,
 } from "./progress.js";
+export {
+  decodeLeanSemanticTokens,
+  leanSemanticTokens,
+  leanSemanticTokensFullMethod,
+  leanSemanticTokensRefreshMethod,
+  type LeanSemanticToken,
+  type LeanSemanticTokensErrorContext,
+  type LeanSemanticTokensExtension,
+  type LeanSemanticTokensOptions,
+} from "./semanticTokens.js";
 export {
   LeanEditorSession,
   LeanEditorSessionDisconnectedError,

@@ -12,6 +12,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
+- Opt-in Lean semantic-token decoding and CodeMirror rendering with capability negotiation, refresh handling, stale-result rejection, and host-controlled classes.
 - Internal WorkDoneProgress handling for demo rust-analyzer progress without conflating it with Lean file-processing ranges.
 - Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, session failure recovery, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.

@@ -12,11 +12,20 @@ import {
   signatureHelp,
   type LSPClientConfig,
   type LSPClientExtension,
+  type Transport,
 } from "@codemirror/lsp-client";
 import type { Language } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 
 import { leanFallbackLanguage } from "./language.js";
+import {
+  leanSemanticTokens,
+  type LeanSemanticTokensOptions,
+} from "./semanticTokens.js";
+
+export interface LeanLspClientExtension extends LSPClientExtension {
+  wrapTransport?(transport: Transport, client: LSPClient): Transport;
+}
 
 export interface LeanLspFeatureOptions {
   completion?: boolean | Parameters<typeof serverCompletion>[0];
@@ -27,10 +36,11 @@ export interface LeanLspFeatureOptions {
   renameKeymap?: boolean;
   definitionKeymap?: boolean;
   referencesKeymap?: boolean;
+  semanticTokens?: boolean | LeanSemanticTokensOptions;
 }
 
 export interface LeanLspClientConfig extends Omit<LSPClientConfig, "extensions" | "highlightLanguage"> {
-  extensions?: readonly (Extension | LSPClientExtension)[];
+  extensions?: readonly (Extension | LeanLspClientExtension)[];
   features?: LeanLspFeatureOptions;
   highlightLanguage?: LSPClientConfig["highlightLanguage"];
 }
@@ -43,12 +53,12 @@ function optionEnabled<T extends object>(
 
 export function leanLspExtensions(
   options: LeanLspFeatureOptions = {},
-): readonly (Extension | LSPClientExtension)[] {
+): readonly (Extension | LeanLspClientExtension)[] {
   if (Object.keys(options).length === 0) {
     return languageServerExtensions();
   }
 
-  const extensions: (Extension | LSPClientExtension)[] = [];
+  const extensions: (Extension | LeanLspClientExtension)[] = [];
 
   if (options.diagnostics !== false) {
     extensions.push(serverDiagnostics());
@@ -74,8 +84,44 @@ export function leanLspExtensions(
   if (options.referencesKeymap !== false) {
     extensions.push(keymap.of(findReferencesKeymap));
   }
+  if (options.semanticTokens) {
+    extensions.push(
+      leanSemanticTokens(
+        optionEnabled(options.semanticTokens) ? options.semanticTokens : undefined,
+      ),
+    );
+  }
 
   return extensions;
+}
+
+function hasTransportWrapper(
+  extension: Extension | LeanLspClientExtension,
+): extension is LeanLspClientExtension & Required<Pick<LeanLspClientExtension, "wrapTransport">> {
+  return (
+    !!extension &&
+    typeof extension === "object" &&
+    !Array.isArray(extension) &&
+    typeof (extension as LeanLspClientExtension).wrapTransport === "function"
+  );
+}
+
+class TransportWrappingLspClient extends LSPClient {
+  constructor(
+    config: LSPClientConfig,
+    private readonly transportExtensions: readonly LeanLspClientExtension[],
+  ) {
+    super(config);
+  }
+
+  override connect(transport: Transport): this {
+    let wrapped = transport;
+    for (const extension of this.transportExtensions) {
+      wrapped = extension.wrapTransport?.(wrapped, this) ?? wrapped;
+    }
+    super.connect(wrapped);
+    return this;
+  }
 }
 
 function defaultHighlightLanguage(
@@ -98,9 +144,10 @@ export function createLeanLspClient(config: LeanLspClientConfig = {}): LSPClient
   const { extensions = [], features, highlightLanguage, ...rest } = config;
   const highlight = defaultHighlightLanguage(highlightLanguage);
   const configuredExtensions = [...extensions, ...leanLspExtensions(features)];
-  return new LSPClient({
+  const transportExtensions = configuredExtensions.filter(hasTransportWrapper);
+  return new TransportWrappingLspClient({
     ...rest,
     extensions: configuredExtensions,
     highlightLanguage: highlight,
-  });
+  }, transportExtensions);
 }

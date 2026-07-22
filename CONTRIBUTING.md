@@ -10,6 +10,7 @@ The top-level package export is the current Lean-specific experimentation surfac
 - `leanLspExtensions`
 - `lean4`
 - `leanFallbackLanguageSupport`
+- `leanSemanticTokens`
 - `leanUtilities`
 - `createLeanWorkspace`
 - transport helpers and Lean-specific types
