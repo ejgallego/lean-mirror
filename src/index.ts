@@ -1,5 +1,10 @@
 export { createLeanLspClient, leanLspExtensions, type LeanLspClientConfig, type LeanLspFeatureOptions } from "./client.js";
-export { lean4, type Lean4Config } from "./editor.js";
+export {
+  lean4,
+  leanEditorSessionBinding,
+  type Lean4Config,
+  type LeanEditorSessionBindingOptions,
+} from "./editor.js";
 export {
   leanFallbackHighlightStyle,
   leanFallbackLanguage,
@@ -29,6 +34,8 @@ export {
   type LeanEditorSessionOptions,
   type LeanEditorSessionPhase,
   type LeanEditorSessionState,
+  type LeanEditorSessionStateListener,
+  type LeanEditorSessionSubscriptionOptions,
 } from "./session.js";
 export {
   createMessagePortTransport,

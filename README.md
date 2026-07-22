@@ -8,12 +8,13 @@ This package stays intentionally thin:
 
 - Lightweight fallback Lean syntax tokenization via `leanFallbackLanguageSupport()`
 - Explicit client-generation lifecycle via `createLeanEditorSession()`
+- Session-aware CodeMirror rebinding via `leanEditorSessionBinding()`
 - Lean-aware `LSPClient` factory via `createLeanLspClient()`
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
 - Standard editor utilities via `leanUtilities()`
 - Browser transport helpers for `WebSocket` and `MessagePort`
-- A small `lean4(...)` helper that composes language support with `client.plugin(...)`
+- A small `lean4(...)` helper that composes language support with a direct or session-managed LSP plugin
 
 ## Install
 
@@ -42,7 +43,7 @@ const session = createLeanEditorSession({
 });
 
 await waitForWebSocketOpen(socket);
-const { client, initialized } = session.connect(createWebSocketTransport(socket), {
+const { initialized } = session.connect(createWebSocketTransport(socket), {
   disposeTransport() {
     socket.close();
   },
@@ -52,7 +53,7 @@ await initialized;
 const state = EditorState.create({
   doc: "#check Nat.succ\n",
   extensions: lean4({
-    client,
+    session,
     highlightStyle: leanFallbackHighlightStyle,
     uri: "file:///workspace/Main.lean",
   }),
@@ -84,10 +85,11 @@ const session = createLeanEditorSession({
 });
 ```
 
-`session.reconnect(transport)` creates a fresh client generation. Destroy or
-remount editor views with the returned client; a view must not retain a client
-from an older generation. Use `createLeanLspClient()` directly only when the host
-already owns equivalent connection and extension cleanup.
+`session.reconnect(transport)` creates a fresh client generation. Editor views
+configured through `lean4({ session, uri })` keep their CodeMirror state and
+replace only the LSP plugin after the new generation is ready. Use
+`createLeanLspClient()` directly only when the host already owns equivalent
+connection, editor rebinding, and extension cleanup.
 
 If you want standard editor ergonomics such as undo/history, search, folding, and line numbers, enable utilities explicitly:
 
@@ -141,6 +143,10 @@ The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository a
 demo workspace pin Lean 4.33.0-rc1; an elan installation selects and installs that
 toolchain automatically. `rust-analyzer` can be installed with
 `rustup component add rust-analyzer rust-src`.
+
+If the Lean WebSocket closes, the demo starts a fresh client/server generation
+without remounting the active CodeMirror editor. A complete runtime restart is
+retained as the fallback when generation recovery itself fails.
 
 Run `npm run demo` and open `http://127.0.0.1:5173`.
 

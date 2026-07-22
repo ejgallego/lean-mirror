@@ -146,6 +146,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustClient: LSPClient | null = null;
   let socket: WebSocket | null = null;
   let rustSocket: WebSocket | null = null;
+  let detachLeanSocketListeners: (() => void) | null = null;
+  let leanReconnectPromise: Promise<void> | null = null;
   let restoreLeanNotificationForwarding: (() => void) | null = null;
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
@@ -227,6 +229,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     },
     redo() {
       return currentView ? redo(currentView) : false;
+    },
+    restartLean() {
+      return reconnectLean("Demo bridge requested a Lean restart.");
     },
     undo() {
       return currentView ? undo(currentView) : false;
@@ -677,8 +682,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             }),
           ]
         : lean4({
-            client,
             highlightStyle: leanFallbackHighlightStyle,
+            session: leanSessionOwner,
             uri,
             utilities: {
               lineWrapping: true,
@@ -756,8 +761,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   options.ui.setStatus("Connecting to Lean");
   leanRuntime.connecting();
-  socket = await options.sessionApi.connectWebSocket(session.websocketUrl);
-  leanRuntime.initializing();
   leanSessionOwner = createLeanEditorSession({
     client: {
       extensions: [leanProgress],
@@ -797,22 +800,135 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       }),
     },
   });
-  const leanConnection = leanSessionOwner.connect(
-    observeInitializeResult(createWebSocketTransport(socket), (result) => {
-      leanInitializeResult = result;
-    }),
-    {
-      disposeTransport() {
-        socket?.close();
+
+  function attachLeanSocketListeners(activeSocket: WebSocket): void {
+    const reconnectAfterClose = () => {
+      if (disposed || socket !== activeSocket) {
+        return;
+      }
+      void reconnectLean("Lean server connection closed.").catch(() => undefined);
+    };
+    const reconnectAfterError = () => {
+      if (disposed || socket !== activeSocket) {
+        return;
+      }
+      void reconnectLean("Lean WebSocket transport was interrupted.").catch(() => undefined);
+    };
+    activeSocket.addEventListener("close", reconnectAfterClose);
+    activeSocket.addEventListener("error", reconnectAfterError);
+    detachLeanSocketListeners = () => {
+      activeSocket.removeEventListener("close", reconnectAfterClose);
+      activeSocket.removeEventListener("error", reconnectAfterError);
+    };
+  }
+
+  async function connectLeanGeneration(reconnect: boolean): Promise<void> {
+    const owner = leanSessionOwner;
+    if (!owner) {
+      throw new Error("Lean editor session is unavailable.");
+    }
+    const nextSocket = await options.sessionApi.connectWebSocket(session.websocketUrl);
+    if (disposed) {
+      nextSocket.close();
+      throw new Error("Demo runtime was disposed while connecting to Lean.");
+    }
+
+    leanInitializeResult = null;
+    leanRuntime.initializing();
+    const transport = observeInitializeResult(
+      createWebSocketTransport(nextSocket),
+      (result) => {
+        leanInitializeResult = result;
       },
-    },
-  );
-  client = leanConnection.client;
-  await leanConnection.initialized;
+    );
+    const connectOptions = {
+      disposeTransport() {
+        nextSocket.close();
+      },
+    };
+    const connection = reconnect
+      ? owner.reconnect(transport, connectOptions)
+      : owner.connect(transport, connectOptions);
+    socket = nextSocket;
+    client = connection.client;
+    workspace = connection.client.workspace as LeanWorkspace;
+    await connection.initialized;
+    attachLeanSocketListeners(nextSocket);
+  }
+
+  async function activateLeanInfoviewGeneration(): Promise<void> {
+    const activeClient = client;
+    const activeWorkspace = workspace;
+    if (!activeClient || !activeWorkspace || !leanInfoview) {
+      return;
+    }
+    restoreLeanNotificationForwarding?.();
+    restoreLeanNotificationForwarding = forwardLeanClientNotifications(
+      activeClient,
+      leanInfoview,
+    );
+    leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
+    if (session.embeddedLeanDocumentUri) {
+      const embeddedFile = await activeWorkspace.openServerDocument(
+        session.embeddedLeanDocumentUri,
+      );
+      embeddedLeanDiagnosticGate.recordSync(embeddedFile?.version);
+    }
+    leanInfoview.updateCursorLocation();
+  }
+
+  async function reconnectLean(reason: string): Promise<void> {
+    if (disposed) {
+      throw new Error("Cannot reconnect a disposed demo runtime.");
+    }
+    if (leanReconnectPromise) {
+      return leanReconnectPromise;
+    }
+
+    const reconnecting = (async () => {
+      options.ui.setStatus("Reconnecting");
+      leanRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
+      options.ui.logEvent(reason);
+      detachLeanSocketListeners?.();
+      detachLeanSocketListeners = null;
+      restoreLeanNotificationForwarding?.();
+      restoreLeanNotificationForwarding = null;
+      leanInfoview?.serverStopped({
+        message: "Lean server stopped.",
+        reason,
+      });
+
+      try {
+        await connectLeanGeneration(true);
+        await activateLeanInfoviewGeneration();
+        leanRuntime.ready();
+        options.ui.setStatus("Ready");
+        options.ui.logEvent("Lean server reconnected without remounting the editor.");
+      } catch (error) {
+        if (!disposed) {
+          const message = error instanceof Error ? error.message : String(error);
+          options.ui.logEvent(`Lean generation reconnect failed: ${message}`);
+          options.requestRestart(`Lean generation reconnect failed: ${message}`);
+        }
+        throw error;
+      }
+    })();
+    leanReconnectPromise = reconnecting;
+    try {
+      await reconnecting;
+    } finally {
+      if (leanReconnectPromise === reconnecting) {
+        leanReconnectPromise = null;
+      }
+    }
+  }
+
+  await connectLeanGeneration(false);
   leanRuntime.ready();
-  workspace = client.workspace as LeanWorkspace;
   leanInfoview = createLeanInfoviewHost({
-    client,
+    client() {
+      return client;
+    },
     container: options.ui.infoviewHost,
     currentLanguageId() {
       return currentLanguageId;
@@ -827,18 +943,13 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       options.ui.logEvent(message);
     },
     requestRestart(reason) {
-      options.requestRestart(reason);
+      void reconnectLean(reason).catch(() => undefined);
     },
     workspace() {
       return workspace;
     },
   });
-  restoreLeanNotificationForwarding = forwardLeanClientNotifications(client, leanInfoview);
-  leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
-  if (session.embeddedLeanDocumentUri) {
-    const embeddedFile = await workspace.openServerDocument(session.embeddedLeanDocumentUri);
-    embeddedLeanDiagnosticGate.recordSync(embeddedFile?.version);
-  }
+  await activateLeanInfoviewGeneration();
 
   if (session.rustMainWebsocketUrl) {
     rustRuntime.connecting();
@@ -881,30 +992,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   await mountDocument(session.documentUri, session.initialDoc);
   leanInfoview.updateCursorLocation();
 
-  const handleSocketClose = () => {
-    if (disposed) {
-      return;
-    }
-    options.ui.setStatus("Reconnecting");
-    leanRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
-    options.ui.logEvent("Lean server connection closed. Waiting for restart.");
-    options.requestRestart("Lean server connection closed.");
-  };
-  const handleSocketError = () => {
-    if (disposed) {
-      return;
-    }
-    options.ui.setStatus("Reconnecting");
-    leanRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
-    options.ui.logEvent("WebSocket transport interrupted. Retrying.");
-    options.requestRestart("WebSocket transport interrupted.");
-  };
   const handleBeforeUnload = () => {
     runtime.dispose();
   };
 
-  socket.addEventListener("close", handleSocketClose);
-  socket.addEventListener("error", handleSocketError);
   window.addEventListener("beforeunload", handleBeforeUnload);
 
   options.ui.setStatus("Ready");
@@ -933,8 +1024,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         embeddedLeanDiagnosticTimer = null;
       }
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      socket?.removeEventListener("close", handleSocketClose);
-      socket?.removeEventListener("error", handleSocketError);
+      detachLeanSocketListeners?.();
+      detachLeanSocketListeners = null;
       embeddedEditors.close();
       currentView?.destroy();
       currentView = null;

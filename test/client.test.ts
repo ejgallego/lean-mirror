@@ -9,7 +9,12 @@ import {
   LSPPlugin,
   renameSymbol,
 } from "../src/codemirror.js";
-import { createLeanLspClient, lean4, leanLspExtensions } from "../src/index.js";
+import {
+  createLeanEditorSession,
+  createLeanLspClient,
+  lean4,
+  leanLspExtensions,
+} from "../src/index.js";
 import { createTestView, waitFor } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
 
@@ -42,6 +47,14 @@ describe("leanLspExtensions", () => {
 });
 
 describe("lean4", () => {
+  it("rejects ambiguous direct-client and session ownership", () => {
+    expect(() => lean4({
+      client: createLeanLspClient(),
+      session: createLeanEditorSession(),
+      uri: URI,
+    })).toThrow(/either a client or a session/);
+  });
+
   it("opens, syncs, and closes a document through the official LSP plugin", async () => {
     const transport = new MockTransport();
     const client = createInitializedClient(transport);

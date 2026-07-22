@@ -14,6 +14,7 @@ declare global {
       setCursor(query: string): boolean;
       undo(): boolean;
       redo(): boolean;
+      restartLean(): Promise<void>;
       openDocument(uri: string): Promise<void>;
     };
   }
@@ -23,6 +24,7 @@ export interface DemoBridgeOptions {
   currentUri(): string | null;
   currentView(): EditorView | null;
   redo(): boolean;
+  restartLean(): Promise<void>;
   undo(): boolean;
 }
 
@@ -75,6 +77,9 @@ export function createDemoBridge(options: DemoBridgeOptions): DemoBridge {
         },
         redo() {
           return options.redo();
+        },
+        restartLean() {
+          return options.restartLean();
         },
         openDocument,
       };

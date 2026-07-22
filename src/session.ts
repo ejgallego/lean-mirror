@@ -19,6 +19,14 @@ export interface LeanEditorSessionState {
   readonly phase: LeanEditorSessionPhase;
 }
 
+export type LeanEditorSessionStateListener = (
+  state: LeanEditorSessionState,
+) => void;
+
+export interface LeanEditorSessionSubscriptionOptions {
+  emitCurrent?: boolean;
+}
+
 /**
  * An LSP client extension that owns state tied to one server connection.
  *
@@ -31,7 +39,7 @@ export interface LeanEditorSessionExtension extends LSPClientExtension {
 
 export interface LeanEditorSessionOptions {
   client?: LeanLspClientConfig;
-  onStateChange?: (state: LeanEditorSessionState) => void;
+  onStateChange?: LeanEditorSessionStateListener;
 }
 
 export interface LeanEditorSessionConnectOptions {
@@ -74,12 +82,13 @@ function hasSessionLifecycle(
 /**
  * Owns client generations and their connection-scoped cleanup.
  *
- * Reconnection deliberately creates a fresh `LSPClient`. Hosts with mounted
- * editors must remount them with the new connection's client.
+ * Reconnection deliberately creates a fresh `LSPClient`. Mounted editors can
+ * follow new client generations through `leanEditorSessionBinding()`.
  */
 export class LeanEditorSession {
   private active: ActiveConnection | null = null;
   private generation = 0;
+  private readonly stateListeners = new Set<LeanEditorSessionStateListener>();
   private sessionState: LeanEditorSessionState = {
     generation: 0,
     phase: "idle",
@@ -97,6 +106,19 @@ export class LeanEditorSession {
 
   get state(): LeanEditorSessionState {
     return this.sessionState;
+  }
+
+  subscribe(
+    listener: LeanEditorSessionStateListener,
+    options: LeanEditorSessionSubscriptionOptions = {},
+  ): () => void {
+    this.stateListeners.add(listener);
+    if (options.emitCurrent) {
+      listener(this.sessionState);
+    }
+    return () => {
+      this.stateListeners.delete(listener);
+    };
   }
 
   connect(
@@ -186,10 +208,14 @@ export class LeanEditorSession {
     if (this.sessionState.phase === "disposed") {
       return;
     }
-    if (this.active) {
-      this.disconnectConnection(this.active, "disposed");
-    } else {
-      this.setState({ generation: this.generation, phase: "disposed" });
+    try {
+      if (this.active) {
+        this.disconnectConnection(this.active, "disposed");
+      } else {
+        this.setState({ generation: this.generation, phase: "disposed" });
+      }
+    } finally {
+      this.stateListeners.clear();
     }
   }
 
@@ -206,6 +232,16 @@ export class LeanEditorSession {
     );
 
     let firstError: unknown;
+    try {
+      // Session-aware editor bindings detach here, while the old client can
+      // still send its final didClose notifications through the transport.
+      this.setState({
+        generation: active.connection.generation,
+        phase: nextPhase,
+      });
+    } catch (error) {
+      firstError ??= error;
+    }
     for (const extension of active.lifecycleExtensions) {
       try {
         extension.onSessionDisconnect?.(active.connection.client);
@@ -224,10 +260,6 @@ export class LeanEditorSession {
       firstError ??= error;
     }
 
-    this.setState({
-      generation: active.connection.generation,
-      phase: nextPhase,
-    });
     if (firstError !== undefined) {
       throw firstError;
     }
@@ -236,6 +268,9 @@ export class LeanEditorSession {
   private setState(state: LeanEditorSessionState): void {
     this.sessionState = state;
     this.options.onStateChange?.(state);
+    for (const listener of [...this.stateListeners]) {
+      listener(state);
+    }
   }
 }
 

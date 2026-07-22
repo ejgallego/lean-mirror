@@ -6,6 +6,7 @@ Import these from `codemirror-lean4-lsp`:
 
 - `createLeanLspClient`
 - `createLeanEditorSession`
+- `leanEditorSessionBinding`
 - `LeanEditorSession`
 - `LeanEditorSessionDisconnectedError`
 - `leanLspExtensions`
@@ -42,10 +43,17 @@ connection-scoped extension and transport cleanup, while `dispose()` permanently
 closes the owner.
 
 `reconnect()` always creates a fresh `LSPClient` because the upstream client does
-not provide a complete reusable connection lifecycle. Hosts must destroy or
-remount editor views with the newly returned client. Session state moves through
-`idle`, `initializing`, `ready`, `failed`, and `disposed`; the generation number
-lets asynchronous host code reject stale results.
+not provide a complete reusable connection lifecycle. Editor views configured
+with `lean4({ session, uri })` retain their CodeMirror state while
+`leanEditorSessionBinding()` removes the old LSP plugin and installs the new one
+only after initialization succeeds. Views configured with a direct `client`
+remain owned by their host. Session state moves through `idle`, `initializing`,
+`ready`, `failed`, and `disposed`; the generation number lets asynchronous host
+code reject stale results.
+
+`session.subscribe(listener, { emitCurrent })` supports multiple lifecycle
+observers and returns an unsubscribe function. The constructor-level
+`onStateChange` callback remains available for a single primary observer.
 
 Extensions with `onSessionDisconnect(client)` participate in owned teardown.
 `leanFileProgress()` implements this hook. Hosts using `createLeanLspClient()`

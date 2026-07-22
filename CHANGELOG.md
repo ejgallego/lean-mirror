@@ -16,6 +16,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, session failure recovery, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
 - First-class `LeanEditorSession` ownership for initialization state, teardown, and fresh-client reconnection.
+- Session-aware `leanEditorSessionBinding()` and state subscriptions for swapping ready LSP client generations without remounting CodeMirror views.
 - A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including references, rename, semantic tokens, and versioned diagnostic recovery.
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
@@ -26,6 +27,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 ### Changed
 
 - Root validation and the demo workspace now share the Lean 4.33.0-rc1 toolchain pin.
+- The demo now reconnects Lean client/server generations while preserving the active editor document, selection, and undo history.
+- Refreshed the compatible CodeMirror dependency family, including `@codemirror/lsp-client` 6.2.5.
 - `leanFileProgress()` cleanup is driven by `LeanEditorSession`; direct `createLeanLspClient()` users own extension cleanup.
 - The demo now owns its Lean client, progress state, and WebSocket through `LeanEditorSession`, including unload/reload coverage.
 - Embedded fenced-block parsing now preserves correct UTF-16 offsets on CRLF input and gives duplicate labels stable generated keys.

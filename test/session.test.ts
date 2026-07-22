@@ -1,12 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { history, undo } from "@codemirror/commands";
+import { LSPPlugin } from "@codemirror/lsp-client";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   LeanEditorSessionDisconnectedError,
   createLeanEditorSession,
+  lean4,
   leanFileProgress,
   leanFileProgressMethod,
 } from "../src/index.js";
+import { createTestView, waitFor } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
+
+const URI = "file:///Main.lean";
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
 
 function initializedTransport(): MockTransport {
   const transport = new MockTransport();
@@ -146,6 +156,89 @@ describe("LeanEditorSession", () => {
     session.connect(new MockTransport());
 
     expect(() => session.connect(new MockTransport())).toThrow(/reconnect/);
+    session.dispose();
+  });
+
+  it("swaps ready client generations without remounting editor state", async () => {
+    const session = createLeanEditorSession();
+    const firstTransport = initializedTransport();
+    const first = session.connect(firstTransport);
+    const view = createTestView(
+      "def answer := 42\n",
+      lean4({ extraExtensions: [history()], session, uri: URI }),
+    );
+
+    expect(LSPPlugin.get(view)).toBeNull();
+    await first.initialized;
+    await waitFor(() => LSPPlugin.get(view)?.client === first.client);
+    expect(firstTransport.notifications("textDocument/didOpen")).toHaveLength(1);
+
+    view.dispatch({
+      changes: { from: view.state.doc.length, insert: "#check answer\n" },
+      selection: { anchor: view.state.doc.length + "#check answer\n".length },
+    });
+    const editedDocument = view.state.doc.toString();
+    const editedSelection = view.state.selection.main.head;
+
+    const secondTransport = initializedTransport();
+    const second = session.reconnect(secondTransport);
+
+    expect(LSPPlugin.get(view)).toBeNull();
+    await waitFor(
+      () => firstTransport.notifications("textDocument/didClose").length === 1,
+    );
+    await second.initialized;
+    await waitFor(() => LSPPlugin.get(view)?.client === second.client);
+
+    expect(view.state.doc.toString()).toBe(editedDocument);
+    expect(view.state.selection.main.head).toBe(editedSelection);
+    expect(secondTransport.notifications("textDocument/didOpen")).toHaveLength(1);
+    expect(secondTransport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
+      textDocument: {
+        text: editedDocument,
+        uri: URI,
+      },
+    });
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("def answer := 42\n");
+
+    session.dispose();
+    expect(LSPPlugin.get(view)).toBeNull();
+    await waitFor(
+      () => secondTransport.notifications("textDocument/didClose").length === 1,
+    );
+    view.destroy();
+  });
+
+  it("supports independent state subscribers", async () => {
+    const session = createLeanEditorSession();
+    const states: string[] = [];
+    const unsubscribe = session.subscribe(
+      (state) => states.push(`${state.generation}:${state.phase}`),
+      { emitCurrent: true },
+    );
+
+    const connection = session.connect(initializedTransport());
+    await connection.initialized;
+    unsubscribe();
+    session.disconnect();
+
+    expect(states).toEqual(["0:idle", "1:initializing", "1:ready"]);
+    session.dispose();
+  });
+
+  it("binds extensions created before their view reaches a ready session", async () => {
+    const session = createLeanEditorSession();
+    const extensions = lean4({ session, uri: URI });
+    const transport = initializedTransport();
+    const connection = session.connect(transport);
+    await connection.initialized;
+
+    const view = createTestView("#check Nat.succ\n", extensions);
+    await waitFor(() => LSPPlugin.get(view)?.client === connection.client);
+    expect(transport.notifications("textDocument/didOpen")).toHaveLength(1);
+
+    view.destroy();
     session.dispose();
   });
 });

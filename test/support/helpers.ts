@@ -1,6 +1,10 @@
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
+if (typeof Range !== "undefined" && typeof Range.prototype.getClientRects !== "function") {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+}
+
 export function createTestView(doc: string, extensions: Extension | readonly Extension[]): EditorView {
   const parent = document.createElement("div");
   document.body.appendChild(parent);

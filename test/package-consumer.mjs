@@ -8,9 +8,12 @@ import { pathToFileURL } from "node:url";
 import {
   createLeanEditorSession,
   createLeanWorkspace,
+  leanEditorSessionBinding,
   leanFileProgress,
   leanFileProgressMethod,
 } from "codemirror-lean4-lsp";
+
+assert.equal(typeof leanEditorSessionBinding, "function");
 
 class ConsumerTransport {
   subscribers = new Set();

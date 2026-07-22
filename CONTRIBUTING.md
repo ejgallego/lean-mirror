@@ -6,6 +6,7 @@ The top-level package export is the current Lean-specific experimentation surfac
 
 - `createLeanLspClient`
 - `createLeanEditorSession`
+- `leanEditorSessionBinding`
 - `leanLspExtensions`
 - `lean4`
 - `leanFallbackLanguageSupport`

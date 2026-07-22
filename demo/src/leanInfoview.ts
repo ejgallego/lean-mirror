@@ -30,7 +30,7 @@ export interface LeanInfoviewHost {
 }
 
 export interface LeanInfoviewHostOptions {
-  client: LSPClient;
+  client(): LSPClient | null;
   container: HTMLElement;
   currentLanguageId(): string | null;
   currentUri(): string | null;
@@ -48,6 +48,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   let initialized = false;
   let disposed = false;
   let infoviewApi: InfoviewApi;
+
+  function currentClient(): LSPClient {
+    const client = options.client();
+    if (!client) {
+      throw new Error("Lean infoview requires an active client generation.");
+    }
+    return client;
+  }
 
   function incrementSubscription(subscriptions: Map<string, number>, method: string): void {
     subscriptions.set(method, (subscriptions.get(method) ?? 0) + 1);
@@ -76,11 +84,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     }
     const view = options.currentView();
     const uri = options.currentUri();
-    if (!view || !uri) {
+    const client = options.client();
+    if (!client || !view || !uri) {
       return undefined;
     }
     const plugin = LSPPlugin.get(view);
-    if (!plugin || plugin.client !== options.client) {
+    if (!plugin || plugin.client !== client) {
       return undefined;
     }
     const selection = view.state.selection.main;
@@ -203,14 +212,15 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function createRpcSession(uri: string): Promise<string> {
-    options.client.sync();
-    const connected = await options.client.request<{ uri: string }, { sessionId: string | number }>(
+    const client = currentClient();
+    client.sync();
+    const connected = await client.request<{ uri: string }, { sessionId: string | number }>(
       "$/lean/rpc/connect",
       { uri },
     );
     const sessionId = String(connected.sessionId);
     const timer = window.setInterval(() => {
-      options.client.notification("$/lean/rpc/keepAlive", { sessionId, uri });
+      options.client()?.notification("$/lean/rpc/keepAlive", { sessionId, uri });
     }, keepAlivePeriodMs);
     rpcKeepAliveTimers.set(sessionId, timer);
     return sessionId;
@@ -221,6 +231,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     if (timer !== undefined) {
       window.clearInterval(timer);
       rpcKeepAliveTimers.delete(sessionId);
+    }
+  }
+
+  function closeRpcSessions(): void {
+    for (const sessionId of [...rpcKeepAliveTimers.keys()]) {
+      closeRpcSession(sessionId);
     }
   }
 
@@ -236,10 +252,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       await infoviewApi.changedInfoviewConfig(config);
     },
     async sendClientRequest(_uri, method, params, requestOptions) {
-      options.client.sync();
-      const request = options.client.request(method, params);
+      const client = currentClient();
+      client.sync();
+      const request = client.request(method, params);
       const abort = () => {
-        options.client.cancelRequest(params);
+        client.cancelRequest(params);
       };
       requestOptions?.abortSignal?.addEventListener("abort", abort, { once: true });
       try {
@@ -249,7 +266,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       }
     },
     async sendClientNotification(_uri, method, params) {
-      options.client.notification(method, params);
+      currentClient().notification(method, params);
     },
     async subscribeServerNotifications(method) {
       incrementSubscription(serverNotificationSubscriptions, method);
@@ -298,9 +315,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   return {
     dispose() {
       disposed = true;
-      for (const sessionId of [...rpcKeepAliveTimers.keys()]) {
-        closeRpcSession(sessionId);
-      }
+      closeRpcSessions();
       options.container.replaceChildren();
     },
     editorExtension() {
@@ -311,9 +326,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       });
     },
     serverRestarted(initializeResult) {
+      closeRpcSessions();
+      const client = options.client();
       const result: lsp.InitializeResult<LeanServerCapabilities> = {
         ...initializeResult,
-        capabilities: initializeResult?.capabilities ?? options.client.serverCapabilities ?? {},
+        capabilities: initializeResult?.capabilities ?? client?.serverCapabilities ?? {},
         serverInfo: initializeResult?.serverInfo ?? {
           name: "Lean",
           version: "0.0.0",
@@ -323,6 +340,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       void infoviewApi.serverRestarted(result);
     },
     serverStopped(reason) {
+      closeRpcSessions();
       void infoviewApi.serverStopped(reason);
     },
     forwardClientNotification(method, params) {

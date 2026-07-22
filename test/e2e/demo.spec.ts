@@ -148,6 +148,39 @@ test("demo recreates its Lean session after a page reload", async ({ page }) => 
   expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
 });
 
+test("demo reconnects Lean without remounting the active editor", async ({ page }) => {
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await openDocumentContaining(page, "Main.lean", "#check Nat.succ");
+
+  expect(
+    await page.evaluate(() =>
+      window.__leanDemo?.replaceCurrentText("#check Nat.succ", "#check Nat.pred"),
+    ),
+  ).toBe(true);
+  await page.locator("#editor > .cm-editor").evaluate((editor) => {
+    (editor as HTMLElement).dataset.reconnectProbe = "preserved";
+  });
+
+  await page.evaluate(() => window.__leanDemo?.restartLean());
+
+  await expect(statusValue(page, "status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#events")).toContainText(
+    "Lean server reconnected without remounting the editor.",
+  );
+  await expect(page.locator("#editor > .cm-editor")).toHaveAttribute(
+    "data-reconnect-probe",
+    "preserved",
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
+    .toContain("#check Nat.pred");
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
+    .toContain("#check Nat.succ");
+});
+
 test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
   await page.goto("/");
 
