@@ -33,7 +33,11 @@ async function createFixture(): Promise<{ demoDir: string; workspace: DemoWorksp
     ].join("\n"),
     "utf8",
   );
-  await writeFile(join(workspaceDir, "lean-toolchain"), "leanprover/lean4:v4.29.0\n", "utf8");
+  await writeFile(
+    join(workspaceDir, "lean-toolchain"),
+    await readFile(join(process.cwd(), "demo", "workspace", "lean-toolchain"), "utf8"),
+    "utf8",
+  );
   return { demoDir, workspace: createDemoWorkspace(demoDir) };
 }
 

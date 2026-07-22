@@ -266,6 +266,10 @@ async function runRealLeanConsumerExperiment() {
       },
     });
     await connection.initialized;
+    assert(
+      !connection.client.serverCapabilities?.documentFormattingProvider,
+      "Lean 4.33.0-rc1 unexpectedly advertises document formatting; revisit formatter integration",
+    );
     const file = await connection.client.workspace.openServerDocument(uri);
     assert(file, "the real Lean experiment should open its document");
     await Promise.resolve();

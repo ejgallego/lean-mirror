@@ -137,8 +137,9 @@ state between those views or provide its own `Workspace` implementation.
 
 ## Demo
 
-The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. A Lean install
-through elan provides `lean` and `lake`; `rust-analyzer` can be installed with
+The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
+demo workspace pin Lean 4.33.0-rc1; an elan installation selects and installs that
+toolchain automatically. `rust-analyzer` can be installed with
 `rustup component add rust-analyzer rust-src`.
 
 Run `npm run demo` and open `http://127.0.0.1:5173`.
