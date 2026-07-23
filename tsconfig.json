@@ -28,5 +28,8 @@
     "demo/**/*.ts",
     "playwright.config.ts",
     "vitest.config.ts"
+  ],
+  "exclude": [
+    "test/packed-consumer"
   ]
 }

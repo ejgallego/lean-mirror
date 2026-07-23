@@ -28,6 +28,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Correlated `command-result` acknowledgements for typed VS Code webview commands.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
 - Optional `codemirror-lean4-lsp/infoview` and `infoview.css` subpaths for the official Lean infoview bridge, RPC lifecycle, notifications, navigation, editing, and outer-shell mounting.
+- An isolated packed-tarball consumer gate covering core-only and optional-infoview dependency installation, public types, runtime imports, and infoview assets.
 
 ### Changed
 
