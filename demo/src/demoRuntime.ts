@@ -39,7 +39,7 @@ import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embedded
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
 import {
   createLeanInfoviewHost,
-  forwardLeanClientNotifications,
+  leanInfoviewClientNotifications,
   type LeanInfoviewHost,
 } from "./leanInfoview.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
@@ -150,7 +150,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustSocket: WebSocket | null = null;
   let detachLeanSocketListeners: (() => void) | null = null;
   let leanReconnectPromise: Promise<void> | null = null;
-  let restoreLeanNotificationForwarding: (() => void) | null = null;
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
@@ -765,7 +764,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   leanRuntime.connecting();
   leanSessionOwner = createLeanEditorSession({
     client: {
-      extensions: [leanProgress],
+      extensions: [
+        leanProgress,
+        leanInfoviewClientNotifications(() => leanInfoview),
+      ],
       features: {
         semanticTokens: true,
       },
@@ -867,11 +869,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     if (!activeClient || !activeWorkspace || !leanInfoview) {
       return;
     }
-    restoreLeanNotificationForwarding?.();
-    restoreLeanNotificationForwarding = forwardLeanClientNotifications(
-      activeClient,
-      leanInfoview,
-    );
     leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
     if (session.embeddedLeanDocumentUri) {
       embeddedLeanServerLease?.release();
@@ -897,8 +894,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       options.ui.logEvent(reason);
       detachLeanSocketListeners?.();
       detachLeanSocketListeners = null;
-      restoreLeanNotificationForwarding?.();
-      restoreLeanNotificationForwarding = null;
       leanInfoview?.serverStopped({
         message: "Lean server stopped.",
         reason,
@@ -1038,8 +1033,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       currentView?.destroy();
       currentView = null;
       demoBridge.clear();
-      restoreLeanNotificationForwarding?.();
-      restoreLeanNotificationForwarding = null;
       embeddedLeanServerLease?.release();
       embeddedLeanServerLease = null;
       leanInfoview?.serverStopped({ message: "Lean server stopped.", reason: "Demo runtime disposed." });

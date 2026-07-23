@@ -16,6 +16,7 @@ import type * as lsp from "vscode-languageserver-protocol";
 
 import {
   applyLeanWorkspaceEdit,
+  type LeanEditorSessionExtension,
   type LeanWorkspace,
 } from "../../src/index.js";
 
@@ -333,15 +334,42 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   };
 }
 
-export function forwardLeanClientNotifications(client: LSPClient, host: LeanInfoviewHost): () => void {
-  const original = client.notification.bind(client) as LSPClient["notification"];
-
-  client.notification = ((method: string, params: unknown) => {
-    original(method, params);
-    host.forwardClientNotification(method, params);
-  }) as LSPClient["notification"];
-
-  return () => {
-    client.notification = original;
+export function leanInfoviewClientNotifications(
+  host: () => LeanInfoviewHost | null,
+): LeanEditorSessionExtension {
+  const activeClients = new WeakSet<LSPClient>();
+  return {
+    onSessionDisconnect(client) {
+      activeClients.delete(client);
+    },
+    wrapTransport(transport, client) {
+      activeClients.add(client);
+      return {
+        send(message) {
+          transport.send(message);
+          if (!activeClients.has(client)) {
+            return;
+          }
+          try {
+            const parsed = JSON.parse(message) as {
+              id?: unknown;
+              method?: unknown;
+              params?: unknown;
+            };
+            if (!("id" in parsed) && typeof parsed.method === "string") {
+              host()?.forwardClientNotification(parsed.method, parsed.params);
+            }
+          } catch {
+            // Transport payload validation remains the transport's responsibility.
+          }
+        },
+        subscribe(handler) {
+          transport.subscribe(handler);
+        },
+        unsubscribe(handler) {
+          transport.unsubscribe(handler);
+        },
+      };
+    },
   };
 }

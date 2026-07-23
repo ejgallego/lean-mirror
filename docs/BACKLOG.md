@@ -9,7 +9,6 @@
 ## Lean infoview
 
 - Move the reusable Lean RPC, navigation, editing, and cursor bridge out of the demo into an optional module that keeps the core React-free.
-- Replace client notification interception with a lifecycle-aware extension boundary.
 
 ## Server-to-client requests
 

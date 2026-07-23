@@ -7,7 +7,11 @@ import {
   lean4,
   type LeanWorkspace,
 } from "../src/index.js";
-import { createLeanInfoviewHost } from "../demo/src/leanInfoview.js";
+import {
+  createLeanInfoviewHost,
+  leanInfoviewClientNotifications,
+  type LeanInfoviewHost,
+} from "../demo/src/leanInfoview.js";
 import { createTestView, waitFor } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
 
@@ -15,6 +19,7 @@ const MAIN_URI = "file:///Main.lean";
 const HELPER_URI = "file:///Helper.lean";
 
 const infoviewMock = vi.hoisted(() => ({
+  clientNotifications: [] as Array<{ method: string; params: unknown }>,
   editorApi: null as unknown,
 }));
 
@@ -33,7 +38,9 @@ vi.mock("@leanprover/infoview", () => {
         initialize: complete,
         requestedAction: complete,
         runTestScript: complete,
-        sentClientNotification: complete,
+        async sentClientNotification(method: string, params: unknown) {
+          infoviewMock.clientNotifications.push({ method, params });
+        },
         serverRestarted: complete,
         serverStopped: complete,
       };
@@ -42,6 +49,7 @@ vi.mock("@leanprover/infoview", () => {
 });
 
 afterEach(() => {
+  infoviewMock.clientNotifications.length = 0;
   infoviewMock.editorApi = null;
   document.body.innerHTML = "";
 });
@@ -54,7 +62,10 @@ async function createHarness() {
       textDocumentSync: 2,
     },
   }));
+  let host: LeanInfoviewHost | null = null;
+  const notificationExtension = leanInfoviewClientNotifications(() => host);
   const client = createLeanLspClient({
+    extensions: [notificationExtension],
     features: {
       completion: false,
       definitionKeymap: false,
@@ -82,7 +93,7 @@ async function createHarness() {
   );
   const container = document.createElement("div");
   document.body.appendChild(container);
-  const host = createLeanInfoviewHost({
+  host = createLeanInfoviewHost({
     client: () => client,
     container,
     currentLanguageId: () => "lean4",
@@ -99,6 +110,7 @@ async function createHarness() {
     client,
     editorApi: infoviewMock.editorApi as EditorApi,
     host,
+    notificationExtension,
     persisted,
     transport,
     view,
@@ -174,6 +186,34 @@ describe("Lean infoview workspace edits", () => {
     ).rejects.toThrow(/Unsupported workspace resource operation/);
     expect(harness.view.state.doc.toString()).toBe(before);
     expect(harness.transport.notifications("textDocument/didChange")).toHaveLength(0);
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
+  it("forwards subscribed client notifications through the generation extension", async () => {
+    const harness = await createHarness();
+    const originalNotification = harness.client.notification;
+    await harness.editorApi.subscribeClientNotifications("$/lean/subscribed");
+
+    harness.client.notification("$/lean/ignored", { value: 0 });
+    harness.client.notification("$/lean/subscribed", { value: 1 });
+    await waitFor(() => infoviewMock.clientNotifications.length === 1);
+
+    expect(infoviewMock.clientNotifications).toEqual([
+      {
+        method: "$/lean/subscribed",
+        params: { value: 1 },
+      },
+    ]);
+    expect(harness.client.notification).toBe(originalNotification);
+
+    harness.notificationExtension.onSessionDisconnect?.(harness.client);
+    harness.client.notification("$/lean/subscribed", { value: 2 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(infoviewMock.clientNotifications).toHaveLength(1);
 
     harness.host.dispose();
     harness.view.destroy();
