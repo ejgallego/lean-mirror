@@ -30,6 +30,15 @@ for (const dependency of demoOnlyDependencies) {
   }
 }
 
+for (const dependency of ["@leanprover/infoview", "react", "react-dom"]) {
+  if (
+    !packageJson.peerDependencies?.[dependency] ||
+    packageJson.peerDependenciesMeta?.[dependency]?.optional !== true
+  ) {
+    fail(`Optional infoview dependency ${dependency} must be declared as an optional peer`);
+  }
+}
+
 const pack =
   process.platform === "win32"
     ? spawnSync(npmCommand, ["pack", "--json", "--dry-run", "--cache", npmCache], {
@@ -105,10 +114,15 @@ const requiredFiles = new Set([
   "README.md",
   "LICENSE",
   "CHANGELOG.md",
+  "THIRD_PARTY_NOTICES.md",
   "dist/index.js",
   "dist/index.d.ts",
   "dist/codemirror.js",
   "dist/codemirror.d.ts",
+  "dist/infoview.js",
+  "dist/infoview.d.ts",
+  "dist/infoview.css",
+  "dist/codicon.ttf",
 ]);
 
 for (const file of requiredFiles) {

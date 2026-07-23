@@ -5,10 +5,6 @@
 - Expand real Lean-server coverage beyond the current single-file and multi-file workspace experiments when a concrete host workflow exposes a new risk. Current real-server paths cover hover, references, rename, rendered semantic tokens, file progress, versioned diagnostic recovery, and cross-file close/unload/reopen behavior.
 - Prefer real workspace-style scenarios over demo-only transport tests where possible.
 
-## Lean infoview
-
-- Move the reusable Lean RPC, navigation, editing, and cursor bridge out of the demo into an optional module that keeps the core React-free.
-
 ## Server-to-client requests
 
 - Defer a generic `workspace/applyEdit` request router until Lean or another supported server emits it in a concrete host workflow; the infoview now calls the core edit helper directly.

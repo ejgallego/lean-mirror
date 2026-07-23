@@ -1,4 +1,5 @@
 import type { EditorApi } from "@leanprover/infoview";
+import { renderEditorPlatformWorkspaceShell } from "@leanprover/editor-platform";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -11,7 +12,7 @@ import {
   createLeanInfoviewHost,
   leanInfoviewClientNotifications,
   type LeanInfoviewHost,
-} from "../demo/src/leanInfoview.js";
+} from "codemirror-lean4-lsp/infoview";
 import { createTestView, waitFor } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
 
@@ -21,20 +22,26 @@ const HELPER_URI = "file:///Helper.lean";
 const infoviewMock = vi.hoisted(() => ({
   clientNotifications: [] as Array<{ method: string; params: unknown }>,
   editorApi: null as unknown,
+  serverNotifications: [] as Array<{ method: string; params: unknown }>,
 }));
 
 vi.mock("@leanprover/infoview", () => {
   const complete = async (): Promise<void> => {};
   return {
     defaultInfoviewConfig: {},
-    renderInfoview(editorApi: unknown) {
+    renderInfoview(editorApi: unknown, container: HTMLElement) {
       infoviewMock.editorApi = editorApi;
+      const mounted = document.createElement("div");
+      mounted.dataset.leanInfoview = "mounted";
+      container.replaceChildren(mounted);
       return {
         changedCursorLocation: complete,
         changedInfoviewConfig: complete,
         clickedContextMenu: complete,
         getInfoviewHtml: async () => "",
-        gotServerNotification: complete,
+        async gotServerNotification(method: string, params: unknown) {
+          infoviewMock.serverNotifications.push({ method, params });
+        },
         initialize: complete,
         requestedAction: complete,
         runTestScript: complete,
@@ -49,12 +56,15 @@ vi.mock("@leanprover/infoview", () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   infoviewMock.clientNotifications.length = 0;
   infoviewMock.editorApi = null;
+  infoviewMock.serverNotifications.length = 0;
   document.body.innerHTML = "";
 });
 
-async function createHarness() {
+async function createHarness(container: HTMLElement = document.createElement("div")) {
+  const displayedViews = new Map<string, ReturnType<typeof createTestView>>();
   const persisted: string[] = [];
   const transport = new MockTransport();
   transport.onRequest("initialize", () => ({
@@ -64,7 +74,8 @@ async function createHarness() {
   }));
   let host: LeanInfoviewHost | null = null;
   const notificationExtension = leanInfoviewClientNotifications(() => host);
-  const client = createLeanLspClient({
+  let client!: ReturnType<typeof createLeanLspClient>;
+  client = createLeanLspClient({
     extensions: [notificationExtension],
     features: {
       completion: false,
@@ -78,6 +89,18 @@ async function createHarness() {
       signatureHelp: false,
     },
     workspace: createLeanWorkspace({
+      displayDocument(uri, workspace) {
+        const file = workspace.getFile(uri);
+        if (!file) {
+          return null;
+        }
+        const opened = createTestView(
+          file.doc.toString(),
+          lean4({ client, uri }),
+        );
+        displayedViews.set(uri, opened);
+        return opened;
+      },
       loadDocument(uri) {
         return uri === HELPER_URI ? "def helperValue : Nat := 41\n" : null;
       },
@@ -91,15 +114,15 @@ async function createHarness() {
     "def answer : Nat := helperValue + 1\n",
     lean4({ client, uri: MAIN_URI }),
   );
-  const container = document.createElement("div");
-  document.body.appendChild(container);
+  if (!container.isConnected) {
+    document.body.appendChild(container);
+  }
   host = createLeanInfoviewHost({
     client: () => client,
     container,
     currentLanguageId: () => "lean4",
     currentUri: () => MAIN_URI,
     currentView: () => view,
-    log() {},
     requestRestart() {},
     workspace: () => client.workspace as LeanWorkspace,
   });
@@ -108,6 +131,8 @@ async function createHarness() {
   await waitFor(() => infoviewMock.editorApi !== null);
   return {
     client,
+    container,
+    displayedViews,
     editorApi: infoviewMock.editorApi as EditorApi,
     host,
     notificationExtension,
@@ -118,7 +143,7 @@ async function createHarness() {
   };
 }
 
-describe("Lean infoview workspace edits", () => {
+describe("Lean infoview host", () => {
   it("uses the core edit boundary for displayed and hidden documents", async () => {
     const harness = await createHarness();
 
@@ -192,6 +217,33 @@ describe("Lean infoview workspace edits", () => {
     harness.client.disconnect();
   });
 
+  it("opens cross-file locations through the host workspace", async () => {
+    const harness = await createHarness();
+
+    await harness.editorApi.showDocument({
+      external: false,
+      selection: {
+        start: { line: 0, character: 4 },
+        end: { line: 0, character: 15 },
+      },
+      takeFocus: true,
+      uri: HELPER_URI,
+    });
+
+    const helper = harness.displayedViews.get(HELPER_URI);
+    expect(helper?.state.doc.toString()).toBe("def helperValue : Nat := 41\n");
+    expect(helper?.state.sliceDoc(
+      helper.state.selection.main.from,
+      helper.state.selection.main.to,
+    )).toBe("helperValue");
+    expect(helper?.hasFocus).toBe(true);
+
+    harness.host.dispose();
+    helper?.destroy();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
   it("forwards subscribed client notifications through the generation extension", async () => {
     const harness = await createHarness();
     const originalNotification = harness.client.notification;
@@ -216,6 +268,95 @@ describe("Lean infoview workspace edits", () => {
     expect(infoviewMock.clientNotifications).toHaveLength(1);
 
     harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
+  it("forwards only subscribed server notifications", async () => {
+    const harness = await createHarness();
+    await harness.editorApi.subscribeServerNotifications("$/lean/subscribed");
+
+    harness.host.forwardServerNotification("$/lean/ignored", { value: 0 });
+    harness.host.forwardServerNotification("$/lean/subscribed", { value: 1 });
+    await waitFor(() => infoviewMock.serverNotifications.length === 1);
+
+    expect(infoviewMock.serverNotifications).toEqual([
+      {
+        method: "$/lean/subscribed",
+        params: { value: 1 },
+      },
+    ]);
+
+    await harness.editorApi.unsubscribeServerNotifications("$/lean/subscribed");
+    harness.host.forwardServerNotification("$/lean/subscribed", { value: 2 });
+    await Promise.resolve();
+    expect(infoviewMock.serverNotifications).toHaveLength(1);
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
+  it("owns Lean RPC keep-alive timers until close or host teardown", async () => {
+    const harness = await createHarness();
+    const setInterval = vi.spyOn(window, "setInterval");
+    const clearInterval = vi.spyOn(window, "clearInterval");
+    harness.transport.onRequest("$/lean/rpc/connect", () => ({
+      sessionId: "rpc-session",
+    }));
+
+    const sessionId = await harness.editorApi.createRpcSession(MAIN_URI);
+    expect(sessionId).toBe("rpc-session");
+    expect(harness.transport.requests("$/lean/rpc/connect")[0]?.params).toEqual({
+      uri: MAIN_URI,
+    });
+
+    const keepAlive = setInterval.mock.calls[0]?.[0];
+    expect(typeof keepAlive).toBe("function");
+    if (typeof keepAlive === "function") {
+      keepAlive();
+    }
+    await waitFor(
+      () => harness.transport.notifications("$/lean/rpc/keepAlive").length === 1,
+    );
+    expect(harness.transport.notifications("$/lean/rpc/keepAlive")[0]?.params).toEqual({
+      sessionId,
+      uri: MAIN_URI,
+    });
+
+    const timer = setInterval.mock.results[0]?.value;
+    await harness.editorApi.closeRpcSession(sessionId);
+    expect(clearInterval).toHaveBeenCalledWith(timer);
+
+    await harness.editorApi.createRpcSession(MAIN_URI);
+    const secondTimer = setInterval.mock.results[1]?.value;
+    harness.host.serverStopped({
+      message: "Lean stopped.",
+      reason: "test",
+    });
+    expect(clearInterval).toHaveBeenCalledWith(secondTimer);
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
+  it("mounts into the outer shell information slot", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const shell = renderEditorPlatformWorkspaceShell(root, {
+      labels: {
+        infoTitle: "Lean InfoView",
+      },
+    });
+    const harness = await createHarness(shell.infoHost as HTMLElement);
+
+    expect(
+      (shell.infoHost as HTMLElement).querySelector("[data-lean-infoview='mounted']"),
+    ).not.toBeNull();
+
+    harness.host.dispose();
+    expect((shell.infoHost as HTMLElement).children).toHaveLength(0);
     harness.view.destroy();
     harness.client.disconnect();
   });

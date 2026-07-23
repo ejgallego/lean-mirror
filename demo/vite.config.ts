@@ -18,6 +18,11 @@ export default defineConfig({
         __dirname,
         "../node_modules/@leanprover/infoview/dist/index.production.min.js",
       ),
+      "codemirror-lean4-lsp/infoview": resolve(__dirname, "../src/infoview.ts"),
+      "codemirror-lean4-lsp/infoview.css": resolve(
+        __dirname,
+        "../node_modules/@leanprover/infoview/dist/index.css",
+      ),
       "react/jsx-runtime": resolve(
         __dirname,
         "../node_modules/@leanprover/infoview/dist/react-jsx-runtime.production.min.js",

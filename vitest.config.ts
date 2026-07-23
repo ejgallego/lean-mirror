@@ -11,6 +11,7 @@ export default defineConfig({
         rootDir,
         "node_modules/@leanprover/infoview/dist/index.production.min.js",
       ),
+      "codemirror-lean4-lsp/infoview": resolve(rootDir, "src/infoview.ts"),
     },
   },
   test: {

@@ -14,6 +14,7 @@ This package stays intentionally thin:
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
 - LocationLink-aware cross-file navigation and atomic workspace edits
+- Optional official Lean infoview bridge via the `/infoview` subpath
 - Standard editor utilities via `leanUtilities()`
 - Browser transport helpers for `WebSocket` and `MessagePort`
 - A small `lean4(...)` helper that composes language support with a direct or session-managed LSP plugin
@@ -117,6 +118,61 @@ configured through `lean4({ session, uri })` keep their CodeMirror state and
 replace only the LSP plugin after the new generation is ready. Use
 `createLeanLspClient()` directly only when the host already owns equivalent
 connection, editor rebinding, and extension cleanup.
+
+## Optional Lean infoview
+
+The official Lean infoview bridge is available from an optional browser-only
+subpath. Install the renderer peer and import its stylesheet explicitly:
+
+```bash
+npm install codemirror-lean4-lsp @leanprover/infoview react react-dom
+```
+
+```ts
+import type { EditorView } from "@codemirror/view";
+import {
+  createLeanEditorSession,
+  createLeanWorkspace,
+  type LeanWorkspace,
+} from "codemirror-lean4-lsp";
+import {
+  createLeanInfoviewHost,
+  leanInfoviewClientNotifications,
+  type LeanInfoviewHost,
+} from "codemirror-lean4-lsp/infoview";
+import "codemirror-lean4-lsp/infoview.css";
+
+declare const activeUri: string | null;
+declare const activeView: EditorView | null;
+declare const reconnectLean: (reason: string) => void;
+
+let infoview: LeanInfoviewHost | null = null;
+const workspace = createLeanWorkspace();
+const session = createLeanEditorSession({
+  client: {
+    extensions: [
+      leanInfoviewClientNotifications(() => infoview),
+    ],
+    workspace,
+  },
+});
+
+infoview = createLeanInfoviewHost({
+  client: () => session.client,
+  container: document.querySelector("#infoview")!,
+  currentLanguageId: () => "lean4",
+  currentUri: () => activeUri,
+  currentView: () => activeView,
+  requestRestart: reconnectLean,
+  workspace: () => (session.client?.workspace as LeanWorkspace | undefined) ?? null,
+});
+```
+
+The host owns Lean RPC sessions, notification subscriptions, cursor updates,
+cross-file edits, and renderer lifecycle. Add `infoview.editorExtension()` to
+each Lean editor and call `serverRestarted()`, `serverStopped()`, and
+`updateCursorLocation()` from the corresponding host lifecycle events. The main
+package entry does not import the infoview renderer.
 
 If you want standard editor ergonomics such as undo/history, search, folding, and line numbers, enable utilities explicitly:
 

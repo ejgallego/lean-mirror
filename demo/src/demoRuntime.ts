@@ -7,6 +7,11 @@ import { setDiagnostics } from "@codemirror/lint";
 import { LSPClient, LSPPlugin, languageServerExtensions } from "@codemirror/lsp-client";
 import type * as lsp from "vscode-languageserver-protocol";
 import { EditorServiceRuntime, type EditorDiagnostic, type EditorServiceDescriptor } from "@leanprover/editor-platform";
+import {
+  createLeanInfoviewHost,
+  leanInfoviewClientNotifications,
+  type LeanInfoviewHost,
+} from "codemirror-lean4-lsp/infoview";
 import { Marked } from "marked";
 
 import {
@@ -37,11 +42,6 @@ import {
 } from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
 import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
-import {
-  createLeanInfoviewHost,
-  leanInfoviewClientNotifications,
-  type LeanInfoviewHost,
-} from "./leanInfoview.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
 
 const leanService: EditorServiceDescriptor = {
@@ -941,9 +941,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     },
     currentView() {
       return currentView;
-    },
-    log(message) {
-      options.ui.logEvent(message);
     },
     requestRestart(reason) {
       void reconnectLean(reason).catch(() => undefined);

@@ -14,11 +14,9 @@ import {
 } from "@leanprover/infoview";
 import type * as lsp from "vscode-languageserver-protocol";
 
-import {
-  applyLeanWorkspaceEdit,
-  type LeanEditorSessionExtension,
-  type LeanWorkspace,
-} from "../../src/index.js";
+import { applyLeanWorkspaceEdit } from "./workspaceEdit.js";
+import type { LeanEditorSessionExtension } from "./session.js";
+import type { LeanWorkspace } from "./workspace.js";
 
 const keepAlivePeriodMs = 10_000;
 
@@ -39,7 +37,6 @@ export interface LeanInfoviewHostOptions {
   currentLanguageId(): string | null;
   currentUri(): string | null;
   currentView(): EditorView | null;
-  log(message: string): void;
   requestRestart(reason: string): void;
   workspace(): LeanWorkspace | null;
 }

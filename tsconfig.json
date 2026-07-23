@@ -17,7 +17,8 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@leanprover/editor-platform": ["packages/editor-platform/src/index.ts"]
+      "@leanprover/editor-platform": ["packages/editor-platform/src/index.ts"],
+      "codemirror-lean4-lsp/infoview": ["src/infoview.ts"]
     },
     "types": ["node", "vitest/globals"]
   },

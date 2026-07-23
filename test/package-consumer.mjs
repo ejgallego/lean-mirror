@@ -187,6 +187,62 @@ assert.deepEqual(states, [
 
 console.log("deterministic public package consumer experiment passed");
 
+async function verifyInfoviewSubpath() {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body></body>", {
+    url: "http://localhost",
+  });
+  const browserGlobals = [
+    "window",
+    "document",
+    "navigator",
+    "Node",
+    "Element",
+    "HTMLElement",
+    "Document",
+    "MutationObserver",
+    "DOMParser",
+    "customElements",
+    "CSSStyleSheet",
+    "ShadowRoot",
+  ];
+  const previous = new Map(
+    [...browserGlobals, "getComputedStyle"].map((name) => [
+      name,
+      Object.getOwnPropertyDescriptor(globalThis, name),
+    ]),
+  );
+  try {
+    for (const name of browserGlobals) {
+      if (name in dom.window) {
+        Object.defineProperty(globalThis, name, {
+          configurable: true,
+          value: dom.window[name],
+        });
+      }
+    }
+    Object.defineProperty(globalThis, "getComputedStyle", {
+      configurable: true,
+      value: dom.window.getComputedStyle.bind(dom.window),
+    });
+    const infoview = await import("codemirror-lean4-lsp/infoview");
+    assert.equal(typeof infoview.createLeanInfoviewHost, "function");
+    assert.equal(typeof infoview.leanInfoviewClientNotifications, "function");
+  } finally {
+    for (const [name, descriptor] of previous) {
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor);
+      } else {
+        delete globalThis[name];
+      }
+    }
+    dom.window.close();
+  }
+}
+
+await verifyInfoviewSubpath();
+console.log("optional infoview package subpath experiment passed");
+
 class StdioTransport {
   subscribers = new Set();
   buffer = Buffer.alloc(0);

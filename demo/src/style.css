@@ -1,4 +1,4 @@
-@import "../../node_modules/@leanprover/infoview/dist/index.css";
+@import "codemirror-lean4-lsp/infoview.css";
 
 :root {
   color-scheme: light;

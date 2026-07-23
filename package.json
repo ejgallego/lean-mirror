@@ -36,7 +36,8 @@
   },
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -50,12 +51,20 @@
       "types": "./dist/codemirror.d.ts",
       "import": "./dist/codemirror.js"
     },
+    "./infoview": {
+      "types": "./dist/infoview.d.ts",
+      "import": "./dist/infoview.js"
+    },
+    "./infoview.css": "./dist/infoview.css",
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "codemirror": [
         "./dist/codemirror.d.ts"
+      ],
+      "infoview": [
+        "./dist/infoview.d.ts"
       ]
     }
   },
@@ -90,6 +99,22 @@
     "@codemirror/view": "^6.43.6",
     "@lezer/highlight": "^1.2.3",
     "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "peerDependencies": {
+    "@leanprover/infoview": "^0.13.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@leanprover/infoview": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@codemirror/lang-rust": "^6.0.2",

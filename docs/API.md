@@ -189,6 +189,37 @@ Stale progress notifications are ignored by default when the workspace already
 has a newer document version. Pass `{ acceptStaleVersions: true }` if a host
 application deliberately wants to observe older server updates.
 
+## Optional Lean infoview
+
+Import these from `codemirror-lean4-lsp/infoview`:
+
+- `createLeanInfoviewHost`
+- `leanInfoviewClientNotifications`
+- `LeanInfoviewHost`
+- `LeanInfoviewHostOptions`
+
+Install `@leanprover/infoview`, `react`, and `react-dom` alongside this package
+and import `codemirror-lean4-lsp/infoview.css`. The renderer dependencies are
+optional peers, and the top-level package entry remains free of infoview and
+React runtime imports.
+
+`createLeanInfoviewHost()` adapts the official infoview `EditorApi` to the
+active `LSPClient`, `LeanWorkspace`, and CodeMirror view. It owns RPC keep-alive
+timers, counted notification subscriptions, cursor synchronization, text
+insertion, document display, restart requests, clipboard access, and atomic
+workspace edits. `dispose()`, `serverStopped()`, and `serverRestarted()` clear
+active RPC timers.
+
+Add `leanInfoviewClientNotifications(() => host)` to the session client
+extensions. It observes client-to-server notifications at the transport
+boundary without mutating `LSPClient.notification`, and deactivates the old
+client generation during session teardown. Hosts should forward subscribed
+server notifications through `host.forwardServerNotification()`.
+
+The host's `editorExtension()` only tracks cursor, focus, and document changes;
+it can be mounted into any DOM container, including the generic information
+slot returned by `renderEditorPlatformWorkspaceShell()`.
+
 ## Official CodeMirror passthrough
 
 Import these from `codemirror-lean4-lsp/codemirror` when you want direct access to official `@codemirror/lsp-client` APIs such as:

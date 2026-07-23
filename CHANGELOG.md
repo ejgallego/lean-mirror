@@ -27,6 +27,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Shared `EditorServiceRuntime.trackRequest()` telemetry for LSP and custom bridge requests.
 - Correlated `command-result` acknowledgements for typed VS Code webview commands.
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
+- Optional `codemirror-lean4-lsp/infoview` and `infoview.css` subpaths for the official Lean infoview bridge, RPC lifecycle, notifications, navigation, editing, and outer-shell mounting.
 
 ### Changed
 
@@ -43,7 +44,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Embedded fenced-block parsing now preserves correct UTF-16 offsets on CRLF input and gives duplicate labels stable generated keys.
 - Lean fallback language support leaves syntax colors to the host unless a `highlightStyle` is supplied.
 - `LeanWorkspace` explicitly supports one editor view per URI and rejects divergent duplicate views.
-- Demo-only React, infoview, lint, and Markdown packages are development dependencies rather than published runtime dependencies.
+- React and the infoview renderer remain outside the main runtime dependency graph; the extracted infoview subpath declares `@leanprover/infoview` as an optional peer.
 - Updated the demo/test toolchain to patched `ws`, Vite, Vitest, and jsdom releases.
 
 ### Fixed
