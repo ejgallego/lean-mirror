@@ -14,7 +14,10 @@ import {
 } from "@leanprover/infoview";
 import type * as lsp from "vscode-languageserver-protocol";
 
-import type { LeanWorkspace } from "../../src/index.js";
+import {
+  applyLeanWorkspaceEdit,
+  type LeanWorkspace,
+} from "../../src/index.js";
 
 const keepAlivePeriodMs = 10_000;
 
@@ -108,14 +111,6 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     return Math.max(line.from, Math.min(line.to, line.from + position.character));
   }
 
-  function rangeChange(doc: Text, edit: lsp.TextEdit): { from: number; insert: string; to: number } {
-    return {
-      from: offsetFromPosition(doc, edit.range.start),
-      insert: edit.newText,
-      to: offsetFromPosition(doc, edit.range.end),
-    };
-  }
-
   async function displayView(uri: string): Promise<EditorView | null> {
     const workspace = options.workspace();
     if (!workspace) {
@@ -123,22 +118,6 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     }
     const opened = await workspace.displayFile(uri);
     return opened ?? workspace.getFile(uri)?.getView() ?? null;
-  }
-
-  async function applyTextEdits(uri: string, edits: readonly lsp.TextEdit[]): Promise<void> {
-    const workspace = options.workspace();
-    if (!workspace || edits.length === 0) {
-      return;
-    }
-    const file = await workspace.requestFile(uri);
-    if (!file) {
-      return;
-    }
-    const doc = file.getView()?.state.doc ?? file.doc;
-    const changes = edits
-      .map((edit) => rangeChange(doc, edit))
-      .sort((left, right) => left.from - right.from || left.to - right.to);
-    workspace.updateFile(uri, { changes });
   }
 
   async function insertText(
@@ -183,17 +162,13 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function applyWorkspaceEdit(edit: lsp.WorkspaceEdit): Promise<void> {
-    if (edit.changes) {
-      for (const [uri, edits] of Object.entries(edit.changes)) {
-        await applyTextEdits(uri, edits);
-      }
-    }
-    if (edit.documentChanges) {
-      for (const documentChange of edit.documentChanges) {
-        if ("textDocument" in documentChange && "edits" in documentChange) {
-          await applyTextEdits(documentChange.textDocument.uri, documentChange.edits);
-        }
-      }
+    const result = await applyLeanWorkspaceEdit(currentClient(), edit, {
+      userEvent: "lean.infoview",
+    });
+    if (!result.applied) {
+      throw new Error(
+        result.failureReason ?? "The Lean infoview workspace edit was rejected.",
+      );
     }
   }
 

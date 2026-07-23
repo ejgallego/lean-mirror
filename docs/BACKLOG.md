@@ -11,6 +11,11 @@
 - Move the reusable Lean RPC, navigation, editing, and cursor bridge out of the demo into an optional module that keeps the core React-free.
 - Replace client notification interception with a lifecycle-aware extension boundary.
 
+## Server-to-client requests
+
+- Defer a generic `workspace/applyEdit` request router until Lean or another supported server emits it in a concrete host workflow; the infoview now calls the core edit helper directly.
+- Revisit `client/registerCapability` when a host can honor Lean's requested `.lean` and `.ilean` filesystem watchers. The demo already emits targeted `workspace/didChangeWatchedFiles` notifications for artifacts it regenerates itself.
+
 ## Shared editor platform
 
 - Keep the current boundary fixed until both `lean-mirror` and `verso-mirror` demonstrate another identical requirement.
