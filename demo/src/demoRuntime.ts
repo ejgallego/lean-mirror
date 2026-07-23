@@ -19,6 +19,7 @@ import {
   leanUtilities,
   type Transport,
   type LeanEditorSession,
+  type LeanServerDocumentLease,
   type LeanWorkspace,
 } from "../../src/index.js";
 import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
@@ -142,6 +143,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let workspace: LeanWorkspace | null = null;
   let client: LSPClient | null = null;
   let leanSessionOwner: LeanEditorSession | null = null;
+  let embeddedLeanServerLease: LeanServerDocumentLease | null = null;
   let leanInfoview: LeanInfoviewHost | null = null;
   let rustClient: LSPClient | null = null;
   let socket: WebSocket | null = null;
@@ -872,10 +874,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     );
     leanInfoview.serverRestarted(leanInitializeResult ?? undefined);
     if (session.embeddedLeanDocumentUri) {
-      const embeddedFile = await activeWorkspace.openServerDocument(
+      embeddedLeanServerLease?.release();
+      embeddedLeanServerLease = await activeWorkspace.acquireServerDocument(
         session.embeddedLeanDocumentUri,
       );
-      embeddedLeanDiagnosticGate.recordSync(embeddedFile?.version);
+      embeddedLeanDiagnosticGate.recordSync(embeddedLeanServerLease?.file.version);
     }
     leanInfoview.updateCursorLocation();
   }
@@ -900,6 +903,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         message: "Lean server stopped.",
         reason,
       });
+      embeddedLeanServerLease?.release();
+      embeddedLeanServerLease = null;
 
       try {
         await connectLeanGeneration(true);
@@ -1035,6 +1040,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       demoBridge.clear();
       restoreLeanNotificationForwarding?.();
       restoreLeanNotificationForwarding = null;
+      embeddedLeanServerLease?.release();
+      embeddedLeanServerLease = null;
       leanInfoview?.serverStopped({ message: "Lean server stopped.", reason: "Demo runtime disposed." });
       leanInfoview?.dispose();
       leanInfoview = null;

@@ -68,6 +68,8 @@ export {
   LeanWorkspace,
   LeanWorkspaceFile,
   createLeanWorkspace,
+  type LeanServerDocumentLease,
   type LeanWorkspaceLoadResult,
   type LeanWorkspaceOptions,
+  type LeanWorkspaceUnloadResult,
 } from "./workspace.js";

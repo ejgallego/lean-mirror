@@ -13,6 +13,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
 - Opt-in Lean semantic-token decoding and CodeMirror rendering with capability negotiation, refresh handling, stale-result rejection, and host-controlled classes.
+- Independent `LeanServerDocumentLease` ownership and explicit cached-document unloading through `LeanWorkspace.unloadDocument()`.
 - Internal WorkDoneProgress handling for demo rust-analyzer progress without conflating it with Lean file-processing ranges.
 - Additional mocked LSP and embedded editing regression coverage for hover, formatting, rename, references, progress, session failure recovery, CRLF fenced blocks, duplicate labels, round trips, and diagnostic remapping.
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
@@ -29,6 +30,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - Root validation and the demo workspace now share the Lean 4.33.0-rc1 toolchain pin.
 - The demo now reconnects Lean client/server generations while preserving the active editor document, selection, and undo history.
+- Server-owned workspace documents now use `acquireServerDocument()` leases; the former unowned `openServerDocument()` operation was removed during the unstable `0.x` series.
 - Refreshed the compatible CodeMirror dependency family, including `@codemirror/lsp-client` 6.2.5.
 - `leanFileProgress()` cleanup is driven by `LeanEditorSession`; direct `createLeanLspClient()` users own extension cleanup.
 - The demo now owns its Lean client, progress state, and WebSocket through `LeanEditorSession`, including unload/reload coverage.
@@ -42,6 +44,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - WebSocket transport sends now report connecting sockets instead of silently dropping JSON-RPC messages, while terminal teardown sends remain harmless.
 - Hidden workspace edits coalesce into one immutable, correctly versioned LSP update; no-op edits no longer advance versions.
+- Cached-but-closed files no longer emit `didChange` without `didOpen`; pending edits are flushed before close and preserved across direct-client reconnection.
 - VS Code document commands are serialized per URI and stale versioned changes are ignored.
 - Hostless editor-platform shells report `Ready` when all services are ready.
 - Rust and generated-Lean diagnostic results are rejected when they belong to an older edit generation.

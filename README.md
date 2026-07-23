@@ -134,7 +134,11 @@ const extensions = lean4({
 For multi-file hosts, provide a custom workspace built on CodeMirror's official `Workspace` API:
 
 ```ts
-import { createLeanLspClient, createLeanWorkspace } from "codemirror-lean4-lsp";
+import {
+  createLeanLspClient,
+  createLeanWorkspace,
+  type LeanWorkspace,
+} from "codemirror-lean4-lsp";
 
 const client = createLeanLspClient({
   rootUri: "file:///workspace",
@@ -147,11 +151,30 @@ const client = createLeanLspClient({
     },
   }),
 });
+
+const workspace = client.workspace as LeanWorkspace;
+const lease = await workspace.acquireServerDocument(
+  "file:///workspace/Generated.lean",
+);
+try {
+  // The document stays open in Lean even without an editor view.
+  client.sync();
+} finally {
+  lease?.release();
+}
+await workspace.unloadDocument("file:///workspace/Generated.lean");
 ```
 
-`LeanWorkspace` keeps hidden documents available for server-initiated edits, but intentionally
-allows only one editor view per URI. A host that needs split views should share one CodeMirror
-state between those views or provide its own `Workspace` implementation.
+`requestFile()` loads a document into the workspace cache without opening it in
+Lean. `acquireServerDocument()` returns an independent lease that keeps it open
+in Lean without an editor; releasing the last owner flushes pending edits before
+`didClose`. `unloadDocument()` removes an unowned cached document and reports
+`"unloaded"`, `"in-use"`, or `"not-loaded"` after in-flight loading and host
+change callbacks have settled.
+
+`LeanWorkspace` intentionally allows only one editor view per URI. A host that
+needs split views should share one CodeMirror state between those views or
+provide its own `Workspace` implementation.
 
 ## Notes
 

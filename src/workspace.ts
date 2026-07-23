@@ -9,6 +9,22 @@ export interface LeanWorkspaceLoadResult {
   version?: number;
 }
 
+export type LeanWorkspaceUnloadResult =
+  | "in-use"
+  | "not-loaded"
+  | "unloaded";
+
+export interface LeanServerDocumentLease {
+  readonly file: LeanWorkspaceFile;
+  readonly released: boolean;
+  /**
+   * Release this owner's reason for keeping the document open in Lean.
+   *
+   * Returns false when the lease had already been released.
+   */
+  release(): boolean;
+}
+
 export interface LeanWorkspaceOptions {
   loadDocument?: (
     uri: string,
@@ -44,7 +60,6 @@ function normalizeLoadedDocument(
 }
 
 export class LeanWorkspaceFile implements WorkspaceFile {
-  serverOpen = false;
   view: EditorView | null = null;
 
   constructor(
@@ -64,11 +79,50 @@ export class LeanWorkspaceFile implements WorkspaceFile {
   hasOpenView(): boolean {
     return this.view !== null;
   }
+
+  /** Whether one or more non-editor owners keep this document open in Lean. */
+  get serverOpen(): boolean {
+    return (serverDocumentOwners.get(this)?.size ?? 0) > 0;
+  }
+}
+
+const serverDocumentOwners = new WeakMap<LeanWorkspaceFile, Set<object>>();
+
+function ownersFor(file: LeanWorkspaceFile): Set<object> {
+  let owners = serverDocumentOwners.get(file);
+  if (!owners) {
+    owners = new Set();
+    serverDocumentOwners.set(file, owners);
+  }
+  return owners;
+}
+
+class LeanServerDocumentLeaseImpl implements LeanServerDocumentLease {
+  released = false;
+
+  constructor(
+    readonly file: LeanWorkspaceFile,
+    private releaseLease: ((owner: object) => void) | null,
+  ) {}
+
+  release(): boolean {
+    const releaseLease = this.releaseLease;
+    if (!releaseLease) {
+      return false;
+    }
+    this.released = true;
+    this.releaseLease = null;
+    releaseLease(this);
+    return true;
+  }
 }
 
 export class LeanWorkspace extends Workspace {
+  /** Loaded documents, including cached files that are not currently open in Lean. */
   readonly files: LeanWorkspaceFile[] = [];
+  private connectionActive = false;
   private readonly fileVersions = new Map<string, number>();
+  private readonly pendingDocumentChanges = new Map<string, Set<Promise<void>>>();
   private readonly pendingUpdates = new Map<string, {
     file: LeanWorkspaceFile;
     prevDoc: Text;
@@ -112,6 +166,34 @@ export class LeanWorkspace extends Workspace {
     return (super.getFile(uri) as LeanWorkspaceFile | null) ?? null;
   }
 
+  private isOpen(file: LeanWorkspaceFile): boolean {
+    return file.hasOpenView() || file.serverOpen;
+  }
+
+  private absorbUnsynchronizedChanges(): void {
+    const changedFiles = new Set<LeanWorkspaceFile>();
+    for (const pending of this.pendingUpdates.values()) {
+      changedFiles.add(pending.file);
+    }
+    this.pendingUpdates.clear();
+
+    for (const file of this.files) {
+      const view = file.getView();
+      if (!view) {
+        continue;
+      }
+      const plugin = LSPPlugin.get(view);
+      if (plugin && !plugin.unsyncedChanges.empty) {
+        file.doc = view.state.doc;
+        plugin.clear();
+        changedFiles.add(file);
+      }
+    }
+    for (const file of changedFiles) {
+      file.version = this.nextFileVersion(file.uri);
+    }
+  }
+
   private async ensureLoadedFile(uri: string): Promise<LeanWorkspaceFile | null> {
     const existing = this.getFile(uri);
     if (existing) {
@@ -147,17 +229,33 @@ export class LeanWorkspace extends Workspace {
   }
 
   override connected(): void {
+    this.connectionActive = true;
     for (const file of this.files) {
-      if (file.serverOpen || file.hasOpenView()) {
+      if (this.isOpen(file)) {
         this.pendingUpdates.delete(file.uri);
         this.client.didOpen(file);
       }
     }
   }
 
+  override disconnected(): void {
+    this.connectionActive = false;
+    this.absorbUnsynchronizedChanges();
+  }
+
   override syncFiles() {
+    if (!this.connectionActive) {
+      this.absorbUnsynchronizedChanges();
+      return [];
+    }
     const updates = new Map(this.pendingUpdates);
     this.pendingUpdates.clear();
+
+    for (const [uri, pending] of updates) {
+      if (!this.isOpen(pending.file)) {
+        updates.delete(uri);
+      }
+    }
 
     for (const file of this.files) {
       const view = file.getView();
@@ -192,19 +290,82 @@ export class LeanWorkspace extends Workspace {
     return this.ensureLoadedFile(uri);
   }
 
-  async openServerDocument(uri: string): Promise<LeanWorkspaceFile | null> {
+  /**
+   * Acquire independent ownership that keeps a loaded document open in Lean.
+   *
+   * The caller must release the returned lease when it no longer needs the
+   * server to process this document.
+   */
+  async acquireServerDocument(uri: string): Promise<LeanServerDocumentLease | null> {
     const file = await this.ensureLoadedFile(uri);
-    if (!file || file.serverOpen) {
-      return file;
+    if (!file) {
+      return null;
     }
-    file.serverOpen = true;
+    const wasOpen = this.isOpen(file);
+    const lease = new LeanServerDocumentLeaseImpl(
+      file,
+      (owner) => this.releaseServerDocument(file, owner),
+    );
+    ownersFor(file).add(lease);
+    if (!wasOpen) {
+      this.pendingUpdates.delete(uri);
+      if (this.connectionActive) {
+        this.client.didOpen(file);
+      }
+    }
+    return lease;
+  }
+
+  private releaseServerDocument(file: LeanWorkspaceFile, owner: object): void {
+    const owners = ownersFor(file);
+    if (!owners.has(owner)) {
+      return;
+    }
+    const willClose = owners.size === 1 && !file.hasOpenView();
+    if (willClose && this.connectionActive) {
+      this.client.sync();
+    }
+    owners.delete(owner);
+    if (willClose && this.connectionActive) {
+      this.client.didClose(file.uri);
+    }
+  }
+
+  /**
+   * Remove an unowned document from the workspace cache.
+   *
+   * In-flight loading and host change callbacks finish before an otherwise
+   * unloadable document is removed.
+   */
+  async unloadDocument(uri: string): Promise<LeanWorkspaceUnloadResult> {
+    await this.pendingLoads.get(uri);
+    const file = this.getFile(uri);
+    if (!file) {
+      return "not-loaded";
+    }
+    if (this.isOpen(file)) {
+      return "in-use";
+    }
+    while (this.pendingDocumentChanges.get(uri)?.size) {
+      await Promise.all(this.pendingDocumentChanges.get(uri)!);
+    }
+    if (this.getFile(uri) !== file) {
+      return "not-loaded";
+    }
+    if (this.isOpen(file)) {
+      return "in-use";
+    }
     this.pendingUpdates.delete(uri);
-    this.client.didOpen(file);
-    return file;
+    const index = this.files.indexOf(file);
+    if (index >= 0) {
+      this.files.splice(index, 1);
+    }
+    return "unloaded";
   }
 
   override openFile(uri: string, languageId: string, view: EditorView): void {
     let file = this.getFile(uri);
+    const wasOpen = file ? this.isOpen(file) : false;
 
     if (!file) {
       file = this.addFile(
@@ -226,9 +387,11 @@ export class LeanWorkspace extends Workspace {
     }
 
     file.view = view;
-    if (!file.serverOpen) {
+    if (!wasOpen) {
       this.pendingUpdates.delete(uri);
-      this.client.didOpen(file);
+      if (this.connectionActive) {
+        this.client.didOpen(file);
+      }
     }
   }
 
@@ -240,8 +403,19 @@ export class LeanWorkspace extends Workspace {
     if (file.view !== view) {
       return;
     }
+    const willClose = !file.serverOpen;
+    if (this.connectionActive) {
+      this.client.sync();
+    } else {
+      const plugin = LSPPlugin.get(view);
+      if (plugin && !plugin.unsyncedChanges.empty) {
+        file.doc = view.state.doc;
+        file.version = this.nextFileVersion(uri);
+        plugin.clear();
+      }
+    }
     file.view = null;
-    if (!file.hasOpenView() && !file.serverOpen) {
+    if (willClose && this.connectionActive) {
       this.client.didClose(uri);
     }
   }
@@ -263,19 +437,44 @@ export class LeanWorkspace extends Workspace {
     }
     const prevDoc = file.doc;
     file.doc = transaction.state.doc;
-    const pending = this.pendingUpdates.get(uri);
-    if (pending) {
-      pending.changes = pending.changes.compose(transaction.changes);
+    if (this.isOpen(file)) {
+      const pending = this.pendingUpdates.get(uri);
+      if (pending) {
+        pending.changes = pending.changes.compose(transaction.changes);
+      } else {
+        this.pendingUpdates.set(uri, {
+          changes: transaction.changes,
+          file,
+          prevDoc,
+        });
+      }
     } else {
-      this.pendingUpdates.set(uri, {
-        changes: transaction.changes,
-        file,
-        prevDoc,
-      });
+      file.version = this.nextFileVersion(uri);
     }
-    void Promise.resolve(this.options.onDocumentChange?.(uri, file, update)).catch((error) => {
-      console.error(`[lean-workspace] Failed to apply document change for ${uri}`, error);
-    });
+    const onDocumentChange = this.options.onDocumentChange;
+    if (onDocumentChange) {
+      let result: Promise<void> | void;
+      try {
+        result = onDocumentChange(uri, file, update);
+      } catch (error) {
+        console.error(`[lean-workspace] Failed to apply document change for ${uri}`, error);
+        return;
+      }
+      const changes = this.pendingDocumentChanges.get(uri) ?? new Set<Promise<void>>();
+      this.pendingDocumentChanges.set(uri, changes);
+      let pending!: Promise<void>;
+      pending = Promise.resolve(result)
+        .catch((error: unknown) => {
+          console.error(`[lean-workspace] Failed to apply document change for ${uri}`, error);
+        })
+        .finally(() => {
+          changes.delete(pending);
+          if (changes.size === 0) {
+            this.pendingDocumentChanges.delete(uri);
+          }
+        });
+      changes.add(pending);
+    }
   }
 
   override async displayFile(uri: string): Promise<EditorView | null> {

@@ -26,6 +26,8 @@ Import these from `codemirror-lean4-lsp`:
 - `createLeanWorkspace`
 - `LeanWorkspace`
 - `LeanWorkspaceFile`
+- `LeanServerDocumentLease`
+- `LeanWorkspaceUnloadResult`
 - `createWebSocketTransport`
 - `waitForWebSocketOpen`
 - `createMessagePortTransport`
@@ -38,6 +40,33 @@ experiments that need reproducibility.
 ignores terminal sends during teardown. Await `waitForWebSocketOpen()` before connecting an
 `LSPClient`. `LeanWorkspace` supports multiple documents but deliberately enforces one editor
 view per URI.
+
+### Workspace document lifecycle
+
+`LeanWorkspace` distinguishes three kinds of state:
+
+- A document returned by `requestFile(uri)` is loaded in the local cache but is
+  not open in the LSP connection.
+- An editor view owns an LSP-open document until its plugin is destroyed.
+- `acquireServerDocument(uri)` creates an independent
+  `LeanServerDocumentLease` for a host subsystem that needs Lean to process a
+  document without displaying it.
+
+The first owner sends `textDocument/didOpen`. Releasing the last server lease
+sends `textDocument/didClose` only when no editor still owns the document.
+Pending changes are synchronized before the close; leases are idempotent and
+one owner cannot close another owner's document.
+
+`unloadDocument(uri)` waits for an in-flight load and outstanding
+`onDocumentChange` callbacks, then returns `"unloaded"`, `"in-use"`, or
+`"not-loaded"`. It never destroys an active editor or server lease. Closing a
+document does not implicitly unload its cached text, so hosts can navigate back
+without fetching it again and can choose their own cache policy.
+
+Edits to cached-but-closed files update the workspace and invoke
+`onDocumentChange`, but do not emit an invalid `didChange` without a preceding
+`didOpen`. Direct-client disconnects absorb unsynchronized editor and hidden
+document changes so a later reconnect reopens their latest full text.
 
 ### Session lifecycle
 

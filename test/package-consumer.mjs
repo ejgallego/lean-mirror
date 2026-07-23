@@ -117,8 +117,9 @@ await first.initialized;
 assert.equal(session.state.phase, "ready");
 
 const workspace = first.client.workspace;
-const file = await workspace.openServerDocument(URI);
-assert(file, "the public workspace should load a hidden Lean document");
+const fileLease = await workspace.acquireServerDocument(URI);
+assert(fileLease, "the public workspace should load a hidden Lean document");
+const file = fileLease.file;
 workspace.updateFile(URI, {
   changes: { from: file.doc.length, insert: "#check answer\n" },
 });
@@ -145,6 +146,13 @@ firstTransport.emit({
   },
 });
 assert.equal(progress.store.entries().length, 1);
+assert.equal(fileLease.release(), true);
+await waitFor(
+  () => firstTransport.notifications("textDocument/didClose").length === 1,
+  "the released public server-document lease should send didClose",
+);
+assert.equal(await workspace.unloadDocument(URI), "unloaded");
+assert.equal(workspace.getFile(URI), null);
 
 const secondTransport = new ConsumerTransport();
 const second = session.reconnect(secondTransport, {
@@ -282,8 +290,9 @@ async function runRealLeanConsumerExperiment() {
       !connection.client.serverCapabilities?.documentFormattingProvider,
       "Lean 4.33.0-rc1 unexpectedly advertises document formatting; revisit formatter integration",
     );
-    const file = await connection.client.workspace.openServerDocument(uri);
-    assert(file, "the real Lean experiment should open its document");
+    const fileLease = await connection.client.workspace.acquireServerDocument(uri);
+    assert(fileLease, "the real Lean experiment should open its document");
+    const file = fileLease.file;
     await Promise.resolve();
 
     const brokenSource = `${source}#check MissingLeanName\n`;
@@ -375,6 +384,38 @@ async function runRealLeanConsumerExperiment() {
       0,
       "LSP semantic token data should contain five integers per token",
     );
+
+    assert.equal(fileLease.release(), true);
+    await waitFor(
+      () => transport.sent.find(
+        (message) =>
+          message.method === "textDocument/didClose" &&
+          message.params?.textDocument?.uri === uri,
+      ),
+      "the real Lean experiment did not close its server document",
+    );
+    assert.equal(
+      await connection.client.workspace.unloadDocument(uri),
+      "unloaded",
+    );
+    assert.equal(connection.client.workspace.getFile(uri), null);
+
+    const reopenedLease = await connection.client.workspace.acquireServerDocument(uri);
+    assert(reopenedLease, "the real Lean experiment should reopen an unloaded document");
+    await waitFor(
+      () => transport.sent.filter(
+        (message) =>
+          message.method === "textDocument/didOpen" &&
+          message.params?.textDocument?.uri === uri,
+      ).length === 2,
+      "the real Lean experiment did not reopen its document",
+    );
+    const reopenedHover = await connection.client.request("textDocument/hover", {
+      position: { line: 0, character: 5 },
+      textDocument: { uri },
+    });
+    assert(reopenedHover, "Lean should answer requests after close, unload, and reopen");
+    reopenedLease.release();
 
     leanSession.dispose();
     const exit = await transport.close();

@@ -2,7 +2,6 @@
 
 ## CodeMirror integration
 
-- Add explicit close/unload ownership for hidden and server-open workspace documents.
 - Exercise real cross-file definition, rename, workspace-edit, synchronization, and closure behavior.
 
 ## Real Lean server coverage

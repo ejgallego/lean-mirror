@@ -90,6 +90,40 @@ describe("LeanWorkspace", () => {
     client.disconnect();
   });
 
+  it("does not synchronize cached files until an owner opens them in Lean", async () => {
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+      }),
+    );
+    await client.initializing;
+
+    const workspace = client.workspace as LeanWorkspace;
+    const helper = await workspace.requestFile(HELPER_URI);
+    workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "d" } });
+    client.sync();
+    await Promise.resolve();
+
+    expect(helper?.doc.toString()).toBe("abcd");
+    expect(transport.notifications("textDocument/didOpen")).toHaveLength(0);
+    expect(transport.notifications("textDocument/didChange")).toHaveLength(0);
+
+    const lease = await workspace.acquireServerDocument(HELPER_URI);
+    await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
+    expect(transport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
+      textDocument: {
+        text: "abcd",
+        uri: HELPER_URI,
+      },
+    });
+    expect(lease?.file.version).toBe(helper?.version);
+
+    lease?.release();
+    client.disconnect();
+  });
+
   it("can keep a hidden loaded file open and synchronized with the server", async () => {
     const { client, transport } = createInitializedClient(
       createLeanWorkspace({
@@ -105,7 +139,8 @@ describe("LeanWorkspace", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    const helper = helperLease?.file;
 
     expect(helper?.serverOpen).toBe(true);
     expect(
@@ -128,6 +163,149 @@ describe("LeanWorkspace", () => {
         return params.textDocument?.uri === HELPER_URI;
       }));
 
+    helperLease?.release();
+    client.disconnect();
+  });
+
+  it("uses independent leases and flushes the final change before didClose", async () => {
+    let loads = 0;
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          if (uri !== HELPER_URI) {
+            return null;
+          }
+          loads += 1;
+          return "abc";
+        },
+      }),
+    );
+    await client.initializing;
+
+    const workspace = client.workspace as LeanWorkspace;
+    const first = await workspace.acquireServerDocument(HELPER_URI);
+    const second = await workspace.acquireServerDocument(HELPER_URI);
+    expect(first?.file).toBe(second?.file);
+    expect(first?.file.serverOpen).toBe(true);
+    expect(transport.notifications("textDocument/didOpen")).toHaveLength(1);
+
+    workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "d" } });
+    expect(first?.release()).toBe(true);
+    expect(first?.release()).toBe(false);
+    expect(second?.file.serverOpen).toBe(true);
+    expect(transport.notifications("textDocument/didChange")).toHaveLength(0);
+    expect(transport.notifications("textDocument/didClose")).toHaveLength(0);
+
+    expect(second?.release()).toBe(true);
+    await waitFor(() => transport.notifications("textDocument/didClose").length === 1);
+    const change = transport.notifications("textDocument/didChange")[0]!;
+    const close = transport.notifications("textDocument/didClose")[0]!;
+    expect(transport.sent.indexOf(change)).toBeLessThan(transport.sent.indexOf(close));
+    expect(change.params).toMatchObject({
+      contentChanges: [{ text: "abcd" }],
+      textDocument: { uri: HELPER_URI, version: 1 },
+    });
+    expect(first?.file.serverOpen).toBe(false);
+
+    expect(await workspace.unloadDocument(HELPER_URI)).toBe("unloaded");
+    expect(workspace.getFile(HELPER_URI)).toBeNull();
+    expect(await workspace.unloadDocument(HELPER_URI)).toBe("not-loaded");
+
+    const reopened = await workspace.acquireServerDocument(HELPER_URI);
+    await waitFor(() => transport.notifications("textDocument/didOpen").length === 2);
+    expect(loads).toBe(2);
+    expect(reopened?.file.version).toBe(2);
+    reopened?.release();
+    client.disconnect();
+  });
+
+  it("refuses to unload documents while a server lease or editor owns them", async () => {
+    const { client } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    const lease = await workspace.acquireServerDocument(HELPER_URI);
+    expect(await workspace.unloadDocument(HELPER_URI)).toBe("in-use");
+    lease?.release();
+    expect(await workspace.unloadDocument(HELPER_URI)).toBe("unloaded");
+
+    const view = createTestView("def main := 1\n", lean4({ client, uri: MAIN_URI }));
+    expect(await workspace.unloadDocument(MAIN_URI)).toBe("in-use");
+    view.destroy();
+    expect(await workspace.unloadDocument(MAIN_URI)).toBe("unloaded");
+
+    client.disconnect();
+  });
+
+  it("waits for an in-flight load before unloading its result", async () => {
+    let resolveLoad!: (doc: string) => void;
+    const { client } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          if (uri !== HELPER_URI) {
+            return null;
+          }
+          return new Promise<string>((resolve) => {
+            resolveLoad = resolve;
+          });
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    const loading = workspace.requestFile(HELPER_URI);
+    const unloading = workspace.unloadDocument(HELPER_URI);
+    resolveLoad("abc");
+
+    expect((await loading)?.doc.toString()).toBe("abc");
+    expect(await unloading).toBe("unloaded");
+    expect(workspace.getFile(HELPER_URI)).toBeNull();
+
+    client.disconnect();
+  });
+
+  it("waits for host persistence before unloading changed cached text", async () => {
+    let finishPersistence!: () => void;
+    const { client } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "abc" : null;
+        },
+        onDocumentChange() {
+          return new Promise<void>((resolve) => {
+            finishPersistence = resolve;
+          });
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+    await workspace.requestFile(HELPER_URI);
+    workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "d" } });
+
+    let unloadResult: string | null = null;
+    const unloading = workspace.unloadDocument(HELPER_URI).then((result) => {
+      unloadResult = result;
+      return result;
+    });
+    const concurrentUnload = workspace.unloadDocument(HELPER_URI);
+    await Promise.resolve();
+    expect(unloadResult).toBeNull();
+
+    finishPersistence();
+    expect((await Promise.all([unloading, concurrentUnload])).sort()).toEqual([
+      "not-loaded",
+      "unloaded",
+    ]);
+    expect(workspace.getFile(HELPER_URI)).toBeNull();
+
     client.disconnect();
   });
 
@@ -142,7 +320,8 @@ describe("LeanWorkspace", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    const helper = helperLease?.file;
     expect(helper?.version).toBe(0);
 
     workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "1" } });
@@ -161,6 +340,7 @@ describe("LeanWorkspace", () => {
     });
     expect(helper?.version).toBe(1);
 
+    helperLease?.release();
     client.disconnect();
   });
 
@@ -175,7 +355,8 @@ describe("LeanWorkspace", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    const helper = helperLease?.file;
     workspace.updateFile(HELPER_URI, { changes: { from: 3, insert: "d" } });
     client.sync();
     await waitFor(() => transport.notifications("textDocument/didChange").length === 1);
@@ -193,6 +374,7 @@ describe("LeanWorkspace", () => {
     });
     expect(helper?.version).toBe(2);
 
+    helperLease?.release();
     client.disconnect();
   });
 
@@ -211,7 +393,8 @@ describe("LeanWorkspace", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    const helper = helperLease?.file;
     const version = helper!.version;
     workspace.updateFile(HELPER_URI, { changes: { from: 1, to: 1, insert: "" } });
     client.sync();
@@ -220,6 +403,7 @@ describe("LeanWorkspace", () => {
     expect(changes).toBe(0);
     expect(transport.notifications("textDocument/didChange")).toHaveLength(0);
 
+    helperLease?.release();
     client.disconnect();
   });
 
@@ -263,13 +447,85 @@ describe("LeanWorkspace", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
     const opensBefore = transport.notifications("textDocument/didOpen").length;
     await workspace.displayFile(HELPER_URI);
 
     expect(transport.notifications("textDocument/didOpen")).toHaveLength(opensBefore);
 
     helperView?.destroy();
+    helperLease?.release();
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("flushes a closing editor while a server lease keeps the document open", async () => {
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI ? "def helperValue := 1\n" : null;
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+    const lease = await workspace.acquireServerDocument(HELPER_URI);
+    const view = createTestView(
+      "def helperValue := 1\n",
+      lean4({ client, uri: HELPER_URI }),
+    );
+
+    view.dispatch({
+      changes: { from: "def helperValue := ".length, to: "def helperValue := 1".length, insert: "2" },
+    });
+    view.destroy();
+    await waitFor(() => transport.notifications("textDocument/didChange").length === 1);
+
+    expect(lease?.file.doc.toString()).toBe("def helperValue := 2\n");
+    expect(transport.notifications("textDocument/didClose")).toHaveLength(0);
+
+    lease?.release();
+    await waitFor(() => transport.notifications("textDocument/didClose").length === 1);
+    client.disconnect();
+  });
+
+  it("reopens unsynchronized editor text after a direct client reconnect", async () => {
+    const initialized = createInitializedClient(createLeanWorkspace());
+    const { client } = initialized;
+    const view = createTestView("def value := 1\n", lean4({ client, uri: MAIN_URI }));
+    await client.initializing;
+
+    view.dispatch({
+      changes: { from: "def value := ".length, to: "def value := 1".length, insert: "2" },
+    });
+    client.disconnect();
+
+    const workspace = client.workspace as LeanWorkspace;
+    expect(workspace.getFile(MAIN_URI)?.doc.toString()).toBe("def value := 2\n");
+    view.dispatch({
+      changes: { from: "def value := ".length, to: "def value := 2".length, insert: "3" },
+    });
+    client.sync();
+    await Promise.resolve();
+    expect(initialized.transport.notifications("textDocument/didChange")).toHaveLength(0);
+    expect(workspace.getFile(MAIN_URI)?.doc.toString()).toBe("def value := 3\n");
+
+    const nextTransport = new MockTransport();
+    nextTransport.onRequest("initialize", () => ({
+      capabilities: { textDocumentSync: 2 },
+    }));
+    client.connect(nextTransport);
+    await client.initializing;
+    await waitFor(() => nextTransport.notifications("textDocument/didOpen").length === 1);
+
+    expect(nextTransport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
+      textDocument: {
+        text: "def value := 3\n",
+        uri: MAIN_URI,
+        version: 2,
+      },
+    });
+
     view.destroy();
     client.disconnect();
   });

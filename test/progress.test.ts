@@ -107,15 +107,19 @@ describe("Lean file progress", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
-    expect(helper).not.toBeNull();
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    expect(helperLease).not.toBeNull();
     await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
 
-    transport.emitNotification(leanFileProgressMethod, progressParams(HELPER_URI, helper!.version));
+    transport.emitNotification(
+      leanFileProgressMethod,
+      progressParams(HELPER_URI, helperLease!.file.version),
+    );
 
     await waitFor(() => progress.store.get(HELPER_URI)?.processing.length === 1);
     expect(progress.store.get(HELPER_URI)?.uri).toBe(HELPER_URI);
 
+    helperLease?.release();
     client.disconnect();
   });
 
@@ -157,19 +161,24 @@ describe("Lean file progress", () => {
     await client.initializing;
 
     const workspace = client.workspace as LeanWorkspace;
-    const helper = await workspace.openServerDocument(HELPER_URI);
+    const helperLease = await workspace.acquireServerDocument(HELPER_URI);
+    const helper = helperLease!.file;
     workspace.updateFile(HELPER_URI, {
       changes: {
-        from: helper!.doc.length,
+        from: helper.doc.length,
         insert: "#check helperValue\n",
       },
     });
 
-    transport.emitNotification(leanFileProgressMethod, progressParams(HELPER_URI, helper!.version - 1));
+    transport.emitNotification(
+      leanFileProgressMethod,
+      progressParams(HELPER_URI, helper.version - 1),
+    );
 
     expect(progress.store.get(HELPER_URI)).toBeNull();
     expect(updates).toEqual([]);
 
+    helperLease?.release();
     client.disconnect();
   });
 
