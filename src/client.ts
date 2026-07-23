@@ -31,6 +31,7 @@ export interface LeanLspFeatureOptions {
   diagnostics?: boolean;
   hover?: boolean | Parameters<typeof hoverTooltips>[0];
   signatureHelp?: boolean | Parameters<typeof signatureHelp>[0];
+  /** Opt in when the connected server implements textDocument/formatting. */
   formatKeymap?: boolean;
   renameKeymap?: boolean;
   definitionKeymap?: boolean;
@@ -67,7 +68,7 @@ export function leanLspExtensions(
   if (options.signatureHelp !== false) {
     extensions.push(signatureHelp(optionEnabled(options.signatureHelp) ? options.signatureHelp : undefined));
   }
-  if (options.formatKeymap !== false) {
+  if (options.formatKeymap === true) {
     extensions.push(keymap.of(formatKeymap));
   }
   if (options.renameKeymap !== false) {

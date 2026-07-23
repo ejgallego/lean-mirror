@@ -111,7 +111,7 @@ export function createDemoUi(
     },
     labels: {
       editorDescription:
-        "Try hover, completion, go-to-definition, rename, formatting, diagnostics, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
+        "Try hover, completion, go-to-definition, rename, diagnostics, Rust formatting, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
       infoAriaLabel: "Lean InfoView",
       infoTitle: "InfoView",
       secondaryTitle: "Help",

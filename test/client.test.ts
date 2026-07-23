@@ -45,8 +45,12 @@ function createInitializedClient(transport: MockTransport) {
 }
 
 describe("leanLspExtensions", () => {
-  it("composes Lean-aware navigation and rename defaults", () => {
-    expect(leanLspExtensions()).toHaveLength(8);
+  it("composes Lean-aware navigation and rename without an unsupported formatter", () => {
+    expect(leanLspExtensions()).toHaveLength(7);
+  });
+
+  it("allows custom Lean servers to opt into the formatting keymap", () => {
+    expect(leanLspExtensions({ formatKeymap: true })).toHaveLength(8);
   });
 });
 
