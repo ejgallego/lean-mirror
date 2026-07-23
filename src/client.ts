@@ -4,9 +4,6 @@ import {
   findReferencesKeymap,
   formatKeymap,
   hoverTooltips,
-  jumpToDefinitionKeymap,
-  languageServerExtensions,
-  renameKeymap,
   serverCompletion,
   serverDiagnostics,
   signatureHelp,
@@ -18,6 +15,8 @@ import type { Language } from "@codemirror/language";
 import { keymap } from "@codemirror/view";
 
 import { leanFallbackLanguage } from "./language.js";
+import { leanJumpToDefinitionKeymap } from "./navigation.js";
+import { leanRenameKeymap } from "./rename.js";
 import {
   leanSemanticTokens,
   type LeanSemanticTokensOptions,
@@ -54,10 +53,6 @@ function optionEnabled<T extends object>(
 export function leanLspExtensions(
   options: LeanLspFeatureOptions = {},
 ): readonly (Extension | LeanLspClientExtension)[] {
-  if (Object.keys(options).length === 0) {
-    return languageServerExtensions();
-  }
-
   const extensions: (Extension | LeanLspClientExtension)[] = [];
 
   if (options.diagnostics !== false) {
@@ -76,10 +71,10 @@ export function leanLspExtensions(
     extensions.push(keymap.of(formatKeymap));
   }
   if (options.renameKeymap !== false) {
-    extensions.push(keymap.of(renameKeymap));
+    extensions.push(keymap.of(leanRenameKeymap));
   }
   if (options.definitionKeymap !== false) {
-    extensions.push(keymap.of(jumpToDefinitionKeymap));
+    extensions.push(keymap.of(leanJumpToDefinitionKeymap));
   }
   if (options.referencesKeymap !== false) {
     extensions.push(keymap.of(findReferencesKeymap));

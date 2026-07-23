@@ -13,6 +13,7 @@ This package stays intentionally thin:
 - Opt-in Lean semantic-token rendering via `features.semanticTokens` or `leanSemanticTokens()`
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`
 - Optional multi-file host workspace via `createLeanWorkspace()`
+- LocationLink-aware cross-file navigation and atomic workspace edits
 - Standard editor utilities via `leanUtilities()`
 - Browser transport helpers for `WebSocket` and `MessagePort`
 - A small `lean4(...)` helper that composes language support with a direct or session-managed LSP plugin
@@ -135,10 +136,15 @@ For multi-file hosts, provide a custom workspace built on CodeMirror's official 
 
 ```ts
 import {
+  applyLeanWorkspaceEdit,
   createLeanLspClient,
   createLeanWorkspace,
   type LeanWorkspace,
 } from "codemirror-lean4-lsp";
+import type {
+  RenameParams,
+  WorkspaceEdit,
+} from "vscode-languageserver-protocol";
 
 const client = createLeanLspClient({
   rootUri: "file:///workspace",
@@ -163,6 +169,20 @@ try {
   lease?.release();
 }
 await workspace.unloadDocument("file:///workspace/Generated.lean");
+
+client.sync();
+await client.withMapping(async (mapping) => {
+  const edit = await client.request<RenameParams, WorkspaceEdit | null>(
+    "textDocument/rename",
+    renameParams,
+  );
+  if (!edit) return;
+  const result = await applyLeanWorkspaceEdit(client, edit, {
+    mapping,
+    userEvent: "rename",
+  });
+  if (!result.applied) throw new Error(result.failureReason);
+});
 ```
 
 `requestFile()` loads a document into the workspace cache without opening it in
@@ -172,13 +192,20 @@ in Lean without an editor; releasing the last owner flushes pending edits before
 `"unloaded"`, `"in-use"`, or `"not-loaded"` after in-flight loading and host
 change callbacks have settled.
 
+The default Lean keymaps use `leanJumpToDefinition` and `leanRenameSymbol`.
+They handle Lean's `LocationLink` definition responses, load cross-file targets
+through the workspace, and route rename edits through
+`applyLeanWorkspaceEdit()`. The edit helper validates every target before
+mutation and supports LSP `changes` plus text-only `documentChanges`; filesystem
+resource operations remain a host responsibility.
+
 `LeanWorkspace` intentionally allows only one editor view per URI. A host that
 needs split views should share one CodeMirror state between those views or
 provide its own `Workspace` implementation.
 
 ## Notes
 
-- The default client configuration delegates to CodeMirror's official `languageServerExtensions()` bundle.
+- The default client configuration composes official CodeMirror features with Lean-aware navigation and rename commands.
 - If you need finer control, pass `features` to `createLeanLspClient()` or import the official passthrough exports from `codemirror-lean4-lsp/codemirror`.
 - The package does not start Lean itself. The embedding app owns transport and process lifecycle.
 - LSP Markdown can contain raw HTML. Production hosts should pass a trusted `sanitizeHTML`

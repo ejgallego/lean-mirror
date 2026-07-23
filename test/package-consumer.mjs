@@ -6,22 +6,28 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  applyLeanWorkspaceEdit,
   createLeanEditorSession,
   createLeanWorkspace,
   decodeLeanSemanticTokens,
   leanEditorSessionBinding,
   leanFileProgress,
   leanFileProgressMethod,
+  leanJumpToDefinition,
+  leanRenameSymbol,
   leanSemanticTokens,
   leanSemanticTokensFullMethod,
   leanSemanticTokensRefreshMethod,
 } from "codemirror-lean4-lsp";
 
+assert.equal(typeof applyLeanWorkspaceEdit, "function");
 assert.equal(typeof leanEditorSessionBinding, "function");
 assert.equal(typeof decodeLeanSemanticTokens, "function");
 assert.equal(typeof leanSemanticTokens, "function");
 assert.equal(leanSemanticTokensFullMethod, "textDocument/semanticTokens/full");
 assert.equal(leanSemanticTokensRefreshMethod, "workspace/semanticTokens/refresh");
+assert.equal(typeof leanJumpToDefinition, "function");
+assert.equal(typeof leanRenameSymbol, "function");
 
 class ConsumerTransport {
   subscribers = new Set();

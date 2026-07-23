@@ -28,6 +28,16 @@ Import these from `codemirror-lean4-lsp`:
 - `LeanWorkspaceFile`
 - `LeanServerDocumentLease`
 - `LeanWorkspaceUnloadResult`
+- `applyLeanWorkspaceEdit`
+- `LeanWorkspaceEditOptions`
+- `LeanWorkspaceEditResult`
+- `leanRenameSymbol`
+- `leanRenameKeymap`
+- `leanJumpToDefinition`
+- `leanJumpToDeclaration`
+- `leanJumpToTypeDefinition`
+- `leanJumpToImplementation`
+- `leanJumpToDefinitionKeymap`
 - `createWebSocketTransport`
 - `waitForWebSocketOpen`
 - `createMessagePortTransport`
@@ -67,6 +77,41 @@ Edits to cached-but-closed files update the workspace and invoke
 `onDocumentChange`, but do not emit an invalid `didChange` without a preceding
 `didOpen`. Direct-client disconnects absorb unsynchronized editor and hidden
 document changes so a later reconnect reopens their latest full text.
+
+### Cross-file navigation and edits
+
+The default extensions returned by `leanLspExtensions()` use Lean-aware
+navigation and rename commands. Navigation accepts both LSP `Location` and
+`LocationLink` responses; Lean 4.33 uses the latter for cross-file definitions.
+Reference mappings also learn about files that `requestFile()` loads after the
+request starts.
+
+`applyLeanWorkspaceEdit(client, edit, options)` is the reusable mutation
+boundary. It loads every target through the host workspace, validates all
+versions and UTF-16 ranges before dispatching any transaction, applies both
+`changes` and text-only `documentChanges`, and synchronizes LSP-open targets by
+default. Pass the `WorkspaceMapping` that surrounded the originating request so
+edits remain correct if local changes occur while the server is answering:
+
+```ts
+import type { RenameParams, WorkspaceEdit } from "vscode-languageserver-protocol";
+
+client.sync();
+const result = await client.withMapping(async (mapping) => {
+  const edit = await client.request<RenameParams, WorkspaceEdit | null>(
+    "textDocument/rename",
+    renameParams,
+  );
+  return edit
+    ? applyLeanWorkspaceEdit(client, edit, { mapping, userEvent: "rename" })
+    : { applied: true, changedUris: [] };
+});
+```
+
+Filesystem create, rename, and delete operations are rejected before any text
+change is applied. Those operations require host-specific authorization and
+persistence policy. `onDocumentChange` remains the persistence hook for edits
+to cached files without a view.
 
 ### Session lifecycle
 
@@ -152,6 +197,9 @@ Import these from `codemirror-lean4-lsp/codemirror` when you want direct access 
 - `jumpToDefinition`
 
 This subpath exists so the top-level package can stay narrowly Lean-focused while still exposing the official CM6 LSP building blocks.
+Its `renameSymbol` and `jumpToDefinition` are the unmodified upstream commands;
+use the top-level Lean commands when cross-file loading or Lean `LocationLink`
+responses are required.
 
 ## Internal policy
 

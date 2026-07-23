@@ -1,4 +1,9 @@
-import { LSPPlugin, Workspace, type WorkspaceFile } from "@codemirror/lsp-client";
+import {
+  LSPPlugin,
+  Workspace,
+  type WorkspaceFile,
+  type WorkspaceMapping,
+} from "@codemirror/lsp-client";
 import { ChangeSet, EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { LSPClient } from "@codemirror/lsp-client";
@@ -57,6 +62,60 @@ function normalizeLoadedDocument(
     return { doc: value };
   }
   return value;
+}
+
+/**
+ * Add a newly loaded document to mappings that were created while an LSP
+ * request was in flight.
+ *
+ * @codemirror/lsp-client 6.2 creates reference mappings before asynchronously
+ * requesting response files, but only seeds them with files that were already
+ * in the workspace. Its mapping registries are marked internal, so keep this
+ * compatibility shim narrow and guarded.
+ */
+function addFileToActiveMappings(client: LSPClient, file: LeanWorkspaceFile): void {
+  const activeMappings = (
+    client as unknown as { activeMappings?: readonly WorkspaceMapping[] }
+  ).activeMappings;
+  if (!Array.isArray(activeMappings)) {
+    return;
+  }
+  for (const mapping of activeMappings) {
+    const internals = mapping as unknown as {
+      mappings?: Map<string, unknown>;
+      startDocs?: Map<string, Text>;
+    };
+    if (
+      !(internals.mappings instanceof Map) ||
+      !(internals.startDocs instanceof Map) ||
+      internals.mappings.has(file.uri)
+    ) {
+      continue;
+    }
+    internals.mappings.set(file.uri, ChangeSet.empty(file.doc.length));
+    internals.startDocs.set(file.uri, file.doc);
+  }
+}
+
+function addClosedFileChangesToActiveMappings(
+  client: LSPClient,
+  uri: string,
+  changes: ChangeSet,
+): void {
+  const activeMappings = (
+    client as unknown as { activeMappings?: readonly WorkspaceMapping[] }
+  ).activeMappings;
+  if (!Array.isArray(activeMappings)) {
+    return;
+  }
+  for (const mapping of activeMappings) {
+    const addChanges = (
+      mapping as unknown as {
+        addChanges?: (changedUri: string, changes: ChangeSet) => void;
+      }
+    ).addChanges;
+    addChanges?.call(mapping, uri, changes);
+  }
 }
 
 export class LeanWorkspaceFile implements WorkspaceFile {
@@ -159,6 +218,7 @@ export class LeanWorkspace extends Workspace {
     }
     this.files.push(file);
     this.trackVersion(file.uri, file.version);
+    addFileToActiveMappings(this.client, file);
     return file;
   }
 
@@ -449,6 +509,7 @@ export class LeanWorkspace extends Workspace {
         });
       }
     } else {
+      addClosedFileChangesToActiveMappings(this.client, uri, transaction.changes);
       file.version = this.nextFileVersion(uri);
     }
     const onDocumentChange = this.options.onDocumentChange;

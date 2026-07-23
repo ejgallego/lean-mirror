@@ -1,6 +1,6 @@
 import { CompletionContext } from "@codemirror/autocomplete";
 import { diagnosticCount } from "@codemirror/lint";
-import { languageServerExtensions, serverCompletionSource } from "@codemirror/lsp-client";
+import { serverCompletionSource } from "@codemirror/lsp-client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -12,8 +12,12 @@ import {
 import {
   createLeanEditorSession,
   createLeanLspClient,
+  createLeanWorkspace,
   lean4,
+  leanJumpToDefinition,
   leanLspExtensions,
+  leanRenameSymbol,
+  type LeanWorkspace,
 } from "../src/index.js";
 import { createTestView, waitFor } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
@@ -41,8 +45,8 @@ function createInitializedClient(transport: MockTransport) {
 }
 
 describe("leanLspExtensions", () => {
-  it("uses CodeMirror's official bundled extensions by default", () => {
-    expect(leanLspExtensions()).toHaveLength(languageServerExtensions().length);
+  it("composes Lean-aware navigation and rename defaults", () => {
+    expect(leanLspExtensions()).toHaveLength(8);
   });
 });
 
@@ -276,6 +280,168 @@ describe("lean4", () => {
     expect(findReferences(view)).toBe(true);
     await waitFor(() => !!view.dom.querySelector(".cm-lsp-reference-panel"));
     expect(view.dom.querySelector(".cm-lsp-reference-panel")?.textContent).toContain("foo");
+
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("shows references from files loaded after the request started", async () => {
+    const helperUri = "file:///Helper.lean";
+    const transport = new MockTransport();
+    transport.onRequest("initialize", () => ({
+      capabilities: {
+        referencesProvider: true,
+        textDocumentSync: 2,
+      },
+    }));
+    transport.onRequest("textDocument/references", () => [
+      {
+        uri: helperUri,
+        range: {
+          start: { line: 0, character: 4 },
+          end: { line: 0, character: 15 },
+        },
+      },
+    ]);
+    const client = createLeanLspClient({
+      workspace: createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === helperUri ? "def helperValue : Nat := 41\n" : null;
+        },
+      }),
+    });
+    client.connect(transport);
+    const view = createTestView(
+      "#check helperValue\n",
+      lean4({ client, uri: URI }),
+    );
+
+    await client.initializing;
+    expect(findReferences(view)).toBe(true);
+    await waitFor(() => !!view.dom.querySelector(".cm-lsp-reference-panel"));
+    expect(view.dom.querySelector(".cm-lsp-reference-panel")?.textContent).toContain(
+      "helperValue",
+    );
+
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("navigates LocationLink responses into host-loaded files", async () => {
+    const helperUri = "file:///Helper.lean";
+    const transport = new MockTransport();
+    transport.onRequest("initialize", () => ({
+      capabilities: {
+        definitionProvider: true,
+        textDocumentSync: 2,
+      },
+    }));
+    transport.onRequest("textDocument/definition", () => [
+      {
+        originSelectionRange: {
+          start: { line: 0, character: 7 },
+          end: { line: 0, character: 18 },
+        },
+        targetUri: helperUri,
+        targetRange: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 29 },
+        },
+        targetSelectionRange: {
+          start: { line: 0, character: 4 },
+          end: { line: 0, character: 15 },
+        },
+      },
+    ]);
+    let helperView: ReturnType<typeof createTestView> | null = null;
+    const client = createLeanLspClient({
+      workspace: createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === helperUri ? "def helperValue : Nat := 41\n" : null;
+        },
+        displayDocument(uri, workspace) {
+          const file = workspace.getFile(uri);
+          if (!file) {
+            return null;
+          }
+          helperView = createTestView(file.doc.toString(), lean4({ client, uri }));
+          return helperView;
+        },
+      }),
+    });
+    client.connect(transport);
+    const view = createTestView(
+      "#check helperValue\n",
+      lean4({ client, uri: URI }),
+    );
+
+    await client.initializing;
+    view.dispatch({ selection: { anchor: 9 } });
+    expect(leanJumpToDefinition(view)).toBe(true);
+    await waitFor(() => helperView !== null);
+    expect(helperView!.state.selection.main.head).toBe(4);
+
+    helperView!.destroy();
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("renames symbols in files loaded from the host workspace", async () => {
+    const helperUri = "file:///Helper.lean";
+    const transport = new MockTransport();
+    transport.onRequest("initialize", () => ({
+      capabilities: {
+        renameProvider: true,
+        textDocumentSync: 2,
+      },
+    }));
+    transport.onRequest("textDocument/rename", () => ({
+      changes: {
+        [URI]: [
+          {
+            newText: "renamedValue",
+            range: {
+              start: { line: 0, character: 7 },
+              end: { line: 0, character: 18 },
+            },
+          },
+        ],
+        [helperUri]: [
+          {
+            newText: "renamedValue",
+            range: {
+              start: { line: 0, character: 4 },
+              end: { line: 0, character: 15 },
+            },
+          },
+        ],
+      },
+    }));
+    const client = createLeanLspClient({
+      workspace: createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === helperUri ? "def helperValue : Nat := 41\n" : null;
+        },
+      }),
+    });
+    client.connect(transport);
+    const view = createTestView(
+      "#check helperValue\n",
+      lean4({ client, uri: URI }),
+    );
+
+    await client.initializing;
+    view.dispatch({ selection: { anchor: 9 } });
+    expect(leanRenameSymbol(view)).toBe(true);
+    await waitFor(() => !!view.dom.querySelector(".cm-lean-rename-panel"));
+    const form = view.dom.querySelector<HTMLFormElement>(".cm-lean-rename-panel form")!;
+    form.querySelector("input")!.value = "renamedValue";
+    form.requestSubmit();
+
+    await waitFor(() => view.state.doc.toString().includes("renamedValue"));
+    expect(
+      (client.workspace as LeanWorkspace).getFile(helperUri)?.doc.toString(),
+    ).toContain("def renamedValue");
 
     view.destroy();
     client.disconnect();

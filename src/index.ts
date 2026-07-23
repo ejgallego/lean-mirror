@@ -6,6 +6,10 @@ export {
   type LeanLspFeatureOptions,
 } from "./client.js";
 export {
+  leanRenameKeymap,
+  leanRenameSymbol,
+} from "./rename.js";
+export {
   lean4,
   leanEditorSessionBinding,
   type Lean4Config,
@@ -17,6 +21,13 @@ export {
   leanFallbackLanguageSupport,
   type LeanFallbackLanguageSupportOptions,
 } from "./language.js";
+export {
+  leanJumpToDeclaration,
+  leanJumpToDefinition,
+  leanJumpToDefinitionKeymap,
+  leanJumpToImplementation,
+  leanJumpToTypeDefinition,
+} from "./navigation.js";
 export {
   LeanFileProgressKind,
   LeanFileProgressStore,
@@ -73,3 +84,8 @@ export {
   type LeanWorkspaceOptions,
   type LeanWorkspaceUnloadResult,
 } from "./workspace.js";
+export {
+  applyLeanWorkspaceEdit,
+  type LeanWorkspaceEditOptions,
+  type LeanWorkspaceEditResult,
+} from "./workspaceEdit.js";
