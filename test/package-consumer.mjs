@@ -266,8 +266,15 @@ async function runRealLeanConsumerExperiment() {
   const rootUri = pathToFileURL(directory).toString();
   const transport = new StdioTransport("lean", ["--server"]);
   const diagnostics = [];
+  const fileProgressUpdates = [];
+  const fileProgress = leanFileProgress({
+    onUpdate(update, params) {
+      fileProgressUpdates.push({ params, update });
+    },
+  });
   const leanSession = createLeanEditorSession({
     client: {
+      extensions: [fileProgress],
       features: NO_EDITOR_FEATURES,
       notificationHandlers: {
         "textDocument/publishDiagnostics": (_client, params) => {
@@ -299,7 +306,14 @@ async function runRealLeanConsumerExperiment() {
     const fileLease = await connection.client.workspace.acquireServerDocument(uri);
     assert(fileLease, "the real Lean experiment should open its document");
     const file = fileLease.file;
-    await Promise.resolve();
+    await waitFor(
+      () => fileProgressUpdates.find(
+        ({ params }) =>
+          params.textDocument.uri === uri &&
+          params.processing.length > 0,
+      ),
+      "Lean did not publish file progress for the opened document",
+    );
 
     const brokenSource = `${source}#check MissingLeanName\n`;
     connection.client.workspace.updateFile(uri, {
@@ -323,6 +337,20 @@ async function runRealLeanConsumerExperiment() {
           typeof diagnostic.message === "string" && diagnostic.message.length > 0,
       ),
       "Lean diagnostics should contain messages",
+    );
+    await waitFor(
+      () => fileProgressUpdates.find(
+        ({ params }) =>
+          params.textDocument.uri === uri &&
+          params.textDocument.version === brokenVersion &&
+          params.processing.length === 0,
+      ),
+      `Lean did not clear file progress for broken version ${brokenVersion}`,
+    );
+    assert.equal(
+      fileProgress.store.get(uri),
+      null,
+      "completed real Lean processing should leave no active progress",
     );
 
     connection.client.workspace.updateFile(uri, {

@@ -21,7 +21,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Explicit WebSocket readiness handling through `waitForWebSocketOpen()`.
 - First-class `LeanEditorSession` ownership for initialization state, teardown, and fresh-client reconnection.
 - Session-aware `leanEditorSessionBinding()` and state subscriptions for swapping ready LSP client generations without remounting CodeMirror views.
-- A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including references, rename, semantic tokens, and versioned diagnostic recovery.
+- A built-package consumer experiment covering public exports with deterministic and real `lean --server` transports, including references, rename, semantic tokens, file progress, and versioned diagnostic recovery.
 - Explicit `leanFallbackLanguage`, `leanFallbackLanguageSupport`, and `leanFallbackHighlightStyle` exports without compatibility aliases.
 - Runtime payload validation for every editor-platform protocol message.
 - Shared `EditorServiceRuntime.trackRequest()` telemetry for LSP and custom bridge requests.

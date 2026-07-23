@@ -2,8 +2,8 @@
 
 ## Real Lean server coverage
 
-- Expand real Lean-server coverage beyond the current single-file and multi-file workspace experiments.
-- Decide whether formatting should come from a separate formatter integration; Lean 4.33.0-rc1 does not advertise document formatting, while hover, references, rename, rendered semantic tokens, and versioned diagnostic recovery now have real-server paths.
+- Expand real Lean-server coverage beyond the current single-file and multi-file workspace experiments when a concrete host workflow exposes a new risk. Current real-server paths cover hover, references, rename, rendered semantic tokens, file progress, versioned diagnostic recovery, and cross-file close/unload/reopen behavior.
+- Decide whether formatting should come from a separate formatter integration; Lean 4.33.0-rc1 does not advertise document formatting, while hover, references, rename, rendered semantic tokens, file progress, and versioned diagnostic recovery now have real-server paths.
 - Prefer real workspace-style scenarios over demo-only transport tests where possible.
 
 ## Lean infoview
