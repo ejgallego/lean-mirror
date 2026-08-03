@@ -11,6 +11,7 @@ import {
   markAnnealGenerationBuilt,
   registerAnnealGeneration,
 } from "../externalGeneration.mjs";
+import { parseLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
 
 const zerocopyPr3321Examples = [
   {
@@ -715,19 +716,6 @@ function defaultEmbeddedLeanDocument({ defaultImports = [], externalMode = false
   ].join("\n");
 }
 
-function parseCommentLine(line) {
-  const match = /^(\s*)(\/\/\/|\/\/!|\/\/)(\s?)(.*)$/u.exec(line);
-  return match ? match[4] ?? "" : null;
-}
-
-function parseLeanFenceHeader(content) {
-  const match = /^```\s*lean\b(.*)$/u.exec(content.trim());
-  if (!match) {
-    return null;
-  }
-  return (match[1] ?? "").trim().replace(/^,\s*/u, "");
-}
-
 function embeddedLeanRole(info) {
   const normalized = info.toLowerCase();
   return normalized === "editor-prelude" ||
@@ -748,42 +736,15 @@ function embeddedLeanTitle(info, ordinal) {
 }
 
 function parseEmbeddedLeanBlocks(source) {
-  const lines = source.split(/\r?\n/u);
-  const blocks = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const content = parseCommentLine(lines[index] ?? "");
-    if (content === null) {
-      continue;
-    }
-    const info = parseLeanFenceHeader(content);
-    if (info === null) {
-      continue;
-    }
-    const codeLines = [];
-    const sourceLine = index + 1;
-    let foundEnd = false;
-    for (index += 1; index < lines.length; index += 1) {
-      const innerContent = parseCommentLine(lines[index] ?? "");
-      if (innerContent === null) {
-        break;
-      }
-      if (/^```\s*$/u.test(innerContent.trim())) {
-        foundEnd = true;
-        break;
-      }
-      codeLines.push(innerContent);
-    }
-    if (foundEnd) {
-      const ordinal = blocks.length + 1;
-      blocks.push({
-        code: codeLines.join("\n"),
-        role: embeddedLeanRole(info),
-        sourceLine,
-        title: embeddedLeanTitle(info, ordinal),
-      });
-    }
-  }
-  return blocks;
+  return parseLineCommentFencedBlocks(source, {
+    kind: "lean",
+    linePrefixes: ["//!", "///", "//"],
+  }).map((block) => ({
+    code: block.code,
+    role: embeddedLeanRole(block.info ?? ""),
+    sourceLine: block.sourceLine,
+    title: embeddedLeanTitle(block.info ?? "", block.ordinal),
+  }));
 }
 
 function buildEmbeddedLeanDocumentFromSource(source, options = {}) {

@@ -1,5 +1,6 @@
 import { EditorState, RangeSetBuilder, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+import { parseLineCommentFencedBlocks as parseSharedLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
 
 export interface EmbeddedBlock {
   code: string;
@@ -199,119 +200,18 @@ export function parseVersoCommentBlocks(
   return blocks;
 }
 
-function parseLineComment(
-  line: string,
-  prefixes: readonly string[],
-): { content: string; contentOffset: number; indent: string; prefix: string } | null {
-  const ordered = [...prefixes].sort((left, right) => right.length - left.length);
-  for (const prefix of ordered) {
-    const match = new RegExp(`^(\\s*)${escapeRegExp(prefix)}(\\s?)(.*)$`).exec(line);
-    if (match) {
-      const indent = match[1] ?? "";
-      const padding = match[2] ?? "";
-      return {
-        content: match[3] ?? "",
-        contentOffset: indent.length + prefix.length + padding.length,
-        indent,
-        prefix,
-      };
-    }
-  }
-  return null;
-}
-
-function parseLineCommentFence(
-  content: string,
-  kind: string,
-): { info: string | null; label: string | null } | null {
-  if (!content.startsWith("```")) {
-    return null;
-  }
-  const rest = content.slice(3);
-  if (!rest.startsWith(kind)) {
-    return null;
-  }
-  const suffix = rest.slice(kind.length);
-  if (suffix.length > 0 && !/^[\s,]/.test(suffix)) {
-    return null;
-  }
-  const trimmed = suffix.trim();
-  if (trimmed.length === 0) {
-    return { info: null, label: null };
-  }
-  if (trimmed.startsWith(",")) {
-    const info = trimmed.slice(1).trim();
-    return {
-      info,
-      label: info.length > 0 ? info.replace(/\s*,\s*/g, " ") : null,
-    };
-  }
-  return { info: trimmed, label: trimmed };
-}
-
 export function parseLineCommentFencedBlocks<TBlock extends LineCommentEmbeddedBlock = LineCommentEmbeddedBlock>(
   source: string,
   spec: Pick<LineCommentAdapterSpec<TBlock>, "defaultTitle" | "kind" | "linePrefixes">,
 ): TBlock[] {
-  const lines = splitSourceLines(source);
-  const blocks: TBlock[] = [];
-  let ordinal = 0;
-  const seenKeys = new Map<string, number>();
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line) {
-      continue;
-    }
-    const parsed = parseLineComment(line.text, spec.linePrefixes);
-    if (!parsed) {
-      continue;
-    }
-    const header = parseLineCommentFence(parsed.content.trim(), spec.kind);
-    if (!header) {
-      continue;
-    }
-
-    const from = line.from;
-    const label = header.label;
-    const codeLines: string[] = [];
-    const codeLineStarts: number[] = [];
-
-    for (let inner = index + 1; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner];
-      if (!innerLine) {
-        break;
-      }
-      const innerParsed = parseLineComment(innerLine.text, spec.linePrefixes);
-      if (!innerParsed) {
-        break;
-      }
-      if (/^```\s*$/.test(innerParsed.content)) {
-        ordinal += 1;
-        const block = {
-          code: codeLines.join("\n"),
-          codeLineStarts,
-          from,
-          info: header.info,
-          indent: parsed.indent,
-          key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
-          label,
-          linePrefix: parsed.prefix,
-          ordinal,
-          title: "",
-          to: innerLine.end,
-        } as unknown as TBlock;
-        block.title = spec.defaultTitle(block);
-        blocks.push(block);
-        index = inner;
-        break;
-      }
-      codeLineStarts.push(innerLine.from + innerParsed.contentOffset);
-      codeLines.push(innerParsed.content);
-    }
-  }
-
-  return blocks;
+  return parseSharedLineCommentFencedBlocks(source, {
+    kind: spec.kind,
+    linePrefixes: spec.linePrefixes,
+  }).map((parsed) => {
+    const block = { ...parsed, title: "" } as unknown as TBlock;
+    block.title = spec.defaultTitle(block);
+    return block;
+  });
 }
 
 export function serializeVersoCommentBlock(

@@ -334,6 +334,18 @@ npm run demo:zerocopy-anneal -- --active namespaces
 npm run demo:zerocopy-anneal -- --no-warm
 ```
 
+Run only the external-demo browser checks with a managed demo process:
+
+```bash
+npm run test:e2e:zerocopy-anneal
+npm run test:e2e:zerocopy-anneal -- --root /path/to/zerocopy-pr3321
+```
+
+The test command waits for every prepared example before starting Playwright
+and stops the demo stack afterward. Pass `--no-warm` for the shorter active-example
+smoke path; checks that require another prepared example will then be skipped.
+Set `DEMO_EXTERNAL_E2E_READY_TIMEOUT_MS` to change the default 30-minute setup timeout.
+
 Use `--root` to reuse an existing checkout without letting the wrapper update it.
 Use `--checkout-dir` to choose where the wrapper creates and updates its
 persistent local checkout. The same port overrides still apply:

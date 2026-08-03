@@ -145,6 +145,9 @@ async function createSwitchableExternalFixture(): Promise<{ workspace: DemoWorks
   for (const example of examples) {
     const rustPath = join(checkoutRoot, example.rustFile);
     await writeFile(rustPath, `pub fn ${example.id}() {}\n`, "utf8");
+  }
+  for (const example of examples) {
+    const rustPath = join(checkoutRoot, example.rustFile);
     await registerFakeGeneration({
       annealArgs: example.annealArgs,
       rustPath,

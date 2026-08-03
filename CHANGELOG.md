@@ -30,6 +30,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Optional `codemirror-lean4-lsp/infoview` and `infoview.css` subpaths for the official Lean infoview bridge, RPC lifecycle, notifications, navigation, editing, and outer-shell mounting.
 - An isolated packed-tarball consumer gate covering core-only and optional-infoview dependency installation, public types, runtime imports, and infoview assets.
 - An opt-in external Anneal demo with generated-workspace caching, switchable Zerocopy examples, Rust-host freshness tracking, and manual or automatic regeneration.
+- A managed external-demo E2E command that waits for Zerocopy examples, runs only their browser checks, and tears the demo stack down.
 
 ### Changed
 
@@ -49,6 +50,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - React and the infoview renderer remain outside the main runtime dependency graph; the extracted infoview subpath declares `@leanprover/infoview` as an optional peer.
 - Updated the demo/test toolchain to patched `ws`, Vite, Vitest, and jsdom releases.
 - Demo source imports for public toolkit features now resolve through the package entry point so the demo exercises the supported boundary.
+- External Anneal generation keys now include generator, target-project, and optional toolchain revisions, including dirty source changes.
+- Browser extraction, backend Lean-document generation, and cache fingerprinting now share one CRLF-safe line-comment fence parser.
 
 ### Fixed
 

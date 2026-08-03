@@ -89,7 +89,8 @@
     "test:packed": "npm run build && node ./scripts/test-packed-consumer.mjs",
     "test:platform": "npm run test -w @leanprover/editor-platform",
     "test:vscode": "npm run test -w @leanprover/editor-platform-vscode",
-    "test:e2e": "node ./scripts/test-e2e.mjs"
+    "test:e2e": "node ./scripts/test-e2e.mjs",
+    "test:e2e:zerocopy-anneal": "node ./scripts/test-zerocopy-anneal-e2e.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

@@ -1,102 +1,131 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, normalize, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdir, readdir, readFile, readlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { lineCommentFencedHostFingerprint } from "./shared/embeddedLineComments.mjs";
 
-const generationSchemaVersion = 1;
+const generationSchemaVersion = 2;
 const generationMetadataFilename = ".lean-demo-generation.json";
 const generationRegistryFilename = ".lean-demo-generations.json";
-const commentPrefixes = ["//!", "///", "//"];
 
 function normalizeSlashes(value) {
   return value.replaceAll("\\", "/");
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const ignoredIdentityDirectories = new Set([
+  ".demo-cache",
+  ".git",
+  ".lake",
+  "node_modules",
+  "target",
+]);
 
-function lineEndOffset(source, lineStart, line) {
-  return lineStart + line.length + (lineStart + line.length < source.length ? 1 : 0);
-}
-
-function parseCommentLine(line) {
-  const orderedPrefixes = [...commentPrefixes].sort((left, right) => right.length - left.length);
-  for (const prefix of orderedPrefixes) {
-    const match = new RegExp(`^(\\s*)${escapeRegExp(prefix)}(\\s?)(.*)$`).exec(line);
-    if (match) {
-      return {
-        content: match[3] ?? "",
-      };
-    }
+function hashParts(parts) {
+  const hash = createHash("sha256");
+  for (const part of parts) {
+    hash.update(part);
+    hash.update("\0");
   }
-  return null;
+  return hash.digest("hex");
 }
 
-function isLeanFenceHeader(content) {
-  if (!content.startsWith("```")) {
-    return false;
-  }
-  const rest = content.slice(3);
-  if (!rest.startsWith("lean")) {
-    return false;
-  }
-  const suffix = rest.slice("lean".length);
-  return suffix.length === 0 || /^[\s,]/.test(suffix);
+function runGit(cwd, args, encoding = null) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return result.status === 0 ? result.stdout : null;
 }
 
-function parseEmbeddedLeanRanges(source) {
-  const lines = source.split("\n");
-  const ranges = [];
-  let offset = 0;
+async function gitProjectIdentity(path, excludedPaths) {
+  const directory = dirname(resolve(path));
+  const rootOutput = runGit(directory, ["rev-parse", "--show-toplevel"], "utf8");
+  if (typeof rootOutput !== "string") {
+    return null;
+  }
+  const root = rootOutput.trim();
+  const relativePath = normalizeSlashes(relative(root, resolve(path)));
+  if (runGit(root, ["ls-files", "--error-unmatch", "--", relativePath]) === null) {
+    return null;
+  }
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const nextOffset = lineEndOffset(source, offset, line);
-    const parsed = parseCommentLine(line);
-    if (!parsed || !isLeanFenceHeader(parsed.content.trim())) {
-      offset = nextOffset;
+  const excludedRelativePaths = new Set(
+    excludedPaths
+      .map((excluded) => relative(root, resolve(excluded)))
+      .filter((excluded) => !isAbsolute(excluded) && excluded !== ".." && !excluded.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+      .map(normalizeSlashes),
+  );
+
+  const trackedOutput = runGit(root, ["ls-files", "-s", "-z"]);
+  const diffArgs = ["diff", "--binary", "--no-ext-diff", "--", "."];
+  for (const excluded of excludedRelativePaths) {
+    diffArgs.push(`:(exclude)${excluded}`);
+  }
+  const diff = runGit(root, diffArgs);
+  const untrackedOutput = runGit(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  if (!trackedOutput || !diff || !untrackedOutput) {
+    return null;
+  }
+
+  const trackedEntries = trackedOutput
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean)
+    .filter((entry) => !excludedRelativePaths.has(normalizeSlashes(entry.slice(entry.indexOf("\t") + 1))))
+    .sort();
+  const untrackedPaths = untrackedOutput
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean)
+    .filter((path) => !excludedRelativePaths.has(normalizeSlashes(path)))
+    .sort();
+  const untrackedParts = [];
+  for (const relative of untrackedPaths) {
+    untrackedParts.push(relative, await readFile(join(root, relative)));
+  }
+  return hashParts(["git-project-v1", ...trackedEntries, diff, ...untrackedParts]);
+}
+
+async function directoryIdentity(root, excludedPaths, current = root, parts = []) {
+  const entries = await readdir(current, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    if (entry.isDirectory() && ignoredIdentityDirectories.has(entry.name)) {
       continue;
     }
-
-    const from = offset;
-    let endOffset = nextOffset;
-    let foundEnd = false;
-
-    for (let inner = index + 1; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner] ?? "";
-      const innerStart = endOffset;
-      endOffset = lineEndOffset(source, innerStart, innerLine);
-      const innerParsed = parseCommentLine(innerLine);
-      if (!innerParsed) {
-        break;
-      }
-      if (/^```\s*$/.test(innerParsed.content)) {
-        foundEnd = true;
-        index = inner;
-        ranges.push({ from, to: endOffset });
-        break;
-      }
+    const path = join(current, entry.name);
+    if (excludedPaths.has(resolve(path))) {
+      continue;
     }
-
-    offset = foundEnd ? endOffset : nextOffset;
+    const relative = normalizeSlashes(path.slice(root.length + 1));
+    if (entry.isDirectory()) {
+      await directoryIdentity(root, excludedPaths, path, parts);
+    } else if (entry.isSymbolicLink()) {
+      parts.push(relative, await readlink(path));
+    } else if (entry.isFile()) {
+      parts.push(relative, await readFile(path));
+    }
   }
+  return hashParts(["directory-v1", ...parts]);
+}
 
-  return ranges;
+async function projectIdentity(path, excludedPaths = []) {
+  const gitIdentity = await gitProjectIdentity(path, excludedPaths);
+  if (gitIdentity) {
+    return gitIdentity;
+  }
+  return directoryIdentity(
+    dirname(resolve(path)),
+    new Set(excludedPaths.map((excluded) => resolve(excluded))),
+  );
 }
 
 export function rustEmbeddedLeanHostFingerprint(source) {
-  const ranges = parseEmbeddedLeanRanges(source);
-  if (ranges.length === 0) {
-    return source;
-  }
-  let cursor = 0;
-  const parts = [];
-  for (const range of ranges) {
-    parts.push(source.slice(cursor, range.from));
-    cursor = range.to;
-  }
-  parts.push(source.slice(cursor));
-  return parts.join("");
+  return lineCommentFencedHostFingerprint(source, {
+    kind: "lean",
+    linePrefixes: ["//!", "///", "//"],
+  });
 }
 
 function generationTargetDir(targetManifestPath) {
@@ -244,10 +273,15 @@ export async function readAnnealGenerationMetadata(leanRoot) {
 }
 
 export async function computeAnnealGenerationInfo(options) {
-  const [rustSource, targetManifest, toolManifest] = await Promise.all([
+  const [rustSource, targetManifest, toolManifest, targetProject, toolProject, toolchainProject] = await Promise.all([
     readFile(options.rustSourcePath, "utf8"),
     readFile(options.targetManifestPath, "utf8"),
     readFile(options.toolManifestPath, "utf8"),
+    projectIdentity(options.targetManifestPath, [options.rustSourcePath]),
+    projectIdentity(options.toolManifestPath, [options.rustSourcePath]),
+    options.annealToolchainDir
+      ? projectIdentity(join(options.annealToolchainDir, "lean-toolchain"))
+      : null,
   ]);
   const rustRelativePath = normalizeSlashes(options.rustRelativePath);
   const identity = {
@@ -258,7 +292,10 @@ export async function computeAnnealGenerationInfo(options) {
     rustSource: rustEmbeddedLeanHostFingerprint(rustSource),
     schemaVersion: generationSchemaVersion,
     targetManifest,
+    targetProject,
     toolManifest,
+    toolProject,
+    toolchainProject,
     xdgCacheHome: options.xdgCacheHome ?? null,
   };
   return {

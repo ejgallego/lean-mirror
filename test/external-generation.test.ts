@@ -29,8 +29,12 @@ async function createProjectFixture() {
 
   await mkdir(join(root, "anneal-tool"), { recursive: true });
   await mkdir(join(root, "anneal", "examples"), { recursive: true });
+  await mkdir(join(root, "anneal-tool", "src"), { recursive: true });
+  await mkdir(join(root, "anneal", "src"), { recursive: true });
   await writeFile(toolManifestPath, '[package]\nname = "cargo-anneal"\nversion = "0.1.0"\n', "utf8");
   await writeFile(targetManifestPath, '[package]\nname = "anneal-target"\nversion = "0.1.0"\n', "utf8");
+  await writeFile(join(root, "anneal-tool", "src", "main.rs"), "fn main() {}\n", "utf8");
+  await writeFile(join(root, "anneal", "src", "lib.rs"), "pub fn target() {}\n", "utf8");
 
   return {
     root,
@@ -101,6 +105,27 @@ describe("external Anneal generation helpers", () => {
 
     expect(commentOnlyInfo.key).toBe(baseInfo.key);
     expect(rustEditInfo.key).not.toBe(baseInfo.key);
+  });
+
+  it("invalidates generation keys when generator or target project sources change", async () => {
+    const fixture = await createProjectFixture();
+    await writeFile(fixture.rustSourcePath, "pub fn demo() {}\n", "utf8");
+    const options = {
+      annealArgs: ["--example", "demo"],
+      rustRelativePath: "examples/demo.rs",
+      rustSourcePath: fixture.rustSourcePath,
+      targetManifestPath: fixture.targetManifestPath,
+      toolManifestPath: fixture.toolManifestPath,
+    };
+
+    const baseInfo = await computeAnnealGenerationInfo(options);
+    await writeFile(join(fixture.root, "anneal-tool", "src", "main.rs"), "fn main() { println!(\"new\"); }\n", "utf8");
+    const toolEditInfo = await computeAnnealGenerationInfo(options);
+    expect(toolEditInfo.key).not.toBe(baseInfo.key);
+
+    await writeFile(join(fixture.root, "anneal", "src", "lib.rs"), "pub fn target() { todo!() }\n", "utf8");
+    const targetEditInfo = await computeAnnealGenerationInfo(options);
+    expect(targetEditInfo.key).not.toBe(toolEditInfo.key);
   });
 
   it("reuses registered generations and persists build completion", async () => {

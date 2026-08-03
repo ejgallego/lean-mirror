@@ -1,6 +1,7 @@
 import type { Extension } from "@codemirror/state";
 
 import { lean4, leanFallbackHighlightStyle } from "codemirror-lean4-lsp";
+import { lineCommentFencedHostFingerprint } from "../shared/embeddedLineComments.mjs";
 import {
   createLineCommentAdapter,
   type EmbeddedBlock,
@@ -161,18 +162,10 @@ export function mapEmbeddedLeanDiagnostics(
 }
 
 export function embeddedLeanHostFingerprint(source: string): string {
-  const blocks = parseEmbeddedLeanBlocks(source).sort((left, right) => left.from - right.from);
-  if (blocks.length === 0) {
-    return source;
-  }
-  let cursor = 0;
-  const parts: string[] = [];
-  for (const block of blocks) {
-    parts.push(source.slice(cursor, block.from));
-    cursor = block.to;
-  }
-  parts.push(source.slice(cursor));
-  return parts.join("");
+  return lineCommentFencedHostFingerprint(source, {
+    kind: "lean",
+    linePrefixes: ["//!", "///", "//"],
+  });
 }
 
 const baseLeanAdapter = createLineCommentAdapter<EmbeddedLeanBlock>({
