@@ -367,7 +367,7 @@ toolchain placeholder URL, also set
 `ANNEAL_TOOLCHAIN_DIR=/path/to/toolchain` so the demo can rewrite that manifest
 entry before running `lake build`.
 
-The built-in `zerocopy-pr3321` presets are:
+The Zerocopy wrapper supplies these prepared examples to the generic demo backend:
 
 - `linked_list`
 - `namespaces`
@@ -403,9 +403,9 @@ Useful external-mode variables:
 - `LEAN_DEMO_ANNEAL_TOOL_MANIFEST`: `Cargo.toml` for the Anneal generator tool
 - `LEAN_DEMO_ANNEAL_ARGS`: extra generator args, either shell-style text or a JSON string array
 - `LEAN_DEMO_LEAN_ROOT`: use an already generated Lean workspace instead of invoking Anneal; this disables example switching
-- `LEAN_DEMO_EXAMPLE_SET=zerocopy-pr3321`: enable the built-in zerocopy presets
 - `LEAN_DEMO_ACTIVE_EXAMPLE`: choose the startup preset, for example `namespaces`
 - `LEAN_DEMO_EXAMPLE_PRESETS`: JSON array of custom presets with `id`, `label`, `rustFile`, optional `summary`, and optional `annealArgs`
+- `LEAN_DEMO_TITLE`, `LEAN_DEMO_PROJECT`, and `LEAN_DEMO_SUMMARY`: customize the external demo descriptor
 - `LEAN_DEMO_SKIP_LEAN_BUILD=1`: skip `lake exe cache get` and `lake build` for an external Lean workspace
 - `DEMO_WATCH_USE_POLLING=0`: opt out of the default polling Vite watcher and use native filesystem watches
 - `PLAYWRIGHT_BROWSERS_PATH`: browser cache for E2E tests; defaults to `.demo-cache/playwright-browsers`

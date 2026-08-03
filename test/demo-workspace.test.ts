@@ -73,7 +73,6 @@ async function createExternalFixture(): Promise<{
       ...process.env,
       LEAN_DEMO_ANNEAL_MANIFEST: join(annealRoot, "Cargo.toml"),
       LEAN_DEMO_EXAMPLE_PRESETS: "",
-      LEAN_DEMO_EXAMPLE_SET: "",
       LEAN_DEMO_LEAN_ROOT: leanRoot,
       LEAN_DEMO_RUST_FILE: "anneal/examples/linked_list.rs",
       LEAN_DEMO_RUST_ROOT: checkoutRoot,
@@ -163,9 +162,12 @@ async function createSwitchableExternalFixture(): Promise<{ workspace: DemoWorks
       LEAN_DEMO_ANNEAL_MANIFEST: targetManifestPath,
       LEAN_DEMO_ANNEAL_TOOL_MANIFEST: toolManifestPath,
       LEAN_DEMO_EXAMPLE_PRESETS: JSON.stringify(examples),
+      LEAN_DEMO_PROJECT: "Configured external project",
       LEAN_DEMO_RUST_FILE: "anneal/examples/first.rs",
       LEAN_DEMO_RUST_ROOT: checkoutRoot,
       LEAN_DEMO_SKIP_LEAN_BUILD: "1",
+      LEAN_DEMO_SUMMARY: "Configured external summary",
+      LEAN_DEMO_TITLE: "Configured external title",
     },
   });
   await workspace.prepare();
@@ -303,6 +305,9 @@ describe("demo workspace backend", () => {
     expect(status.phase).toBe("ready");
     expect(status.message).toBe("second.rs ready.");
     expect(session.activeExampleId).toBe("second");
+    expect(session.demoProject).toBe("Configured external project");
+    expect(session.demoSummary).toBe("Configured external summary");
+    expect(session.demoTitle).toBe("Configured external title");
     expect(session.preparationStatus?.phase).toBe("ready");
   });
 });

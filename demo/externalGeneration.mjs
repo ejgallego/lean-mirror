@@ -273,14 +273,27 @@ export async function readAnnealGenerationMetadata(leanRoot) {
 }
 
 export async function computeAnnealGenerationInfo(options) {
+  const projectIdentities = new Map();
+  const projectIdentityOnce = (path, excludedPaths = []) => {
+    const key = JSON.stringify([
+      resolve(path),
+      ...excludedPaths.map((excluded) => resolve(excluded)).sort(),
+    ]);
+    let identity = projectIdentities.get(key);
+    if (!identity) {
+      identity = projectIdentity(path, excludedPaths);
+      projectIdentities.set(key, identity);
+    }
+    return identity;
+  };
   const [rustSource, targetManifest, toolManifest, targetProject, toolProject, toolchainProject] = await Promise.all([
     readFile(options.rustSourcePath, "utf8"),
     readFile(options.targetManifestPath, "utf8"),
     readFile(options.toolManifestPath, "utf8"),
-    projectIdentity(options.targetManifestPath, [options.rustSourcePath]),
-    projectIdentity(options.toolManifestPath, [options.rustSourcePath]),
+    projectIdentityOnce(options.targetManifestPath, [options.rustSourcePath]),
+    projectIdentityOnce(options.toolManifestPath, [options.rustSourcePath]),
     options.annealToolchainDir
-      ? projectIdentity(join(options.annealToolchainDir, "lean-toolchain"))
+      ? projectIdentityOnce(join(options.annealToolchainDir, "lean-toolchain"))
       : null,
   ]);
   const rustRelativePath = normalizeSlashes(options.rustRelativePath);

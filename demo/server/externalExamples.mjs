@@ -1,34 +1,3 @@
-export const zerocopyPr3321Examples = [
-  {
-    annealArgs: ["--example", "linked_list", "--allow-sorry"],
-    id: "linked_list",
-    label: "linked_list.rs",
-    rustFile: "anneal/examples/linked_list.rs",
-    summary: "Method spec over a recursive list model with local helper definitions.",
-  },
-  {
-    annealArgs: ["--example", "namespaces", "--allow-sorry"],
-    id: "namespaces",
-    label: "namespaces.rs",
-    rustFile: "anneal/examples/namespaces.rs",
-    summary: "Nested Rust modules that become nested Lean namespaces.",
-  },
-  {
-    annealArgs: ["--example", "size_of_align_of", "--allow-sorry"],
-    id: "size_of_align_of",
-    label: "size_of_align_of.rs",
-    rustFile: "anneal/examples/size_of_align_of.rs",
-    summary: "Several Rust doc-comment specs over layout and alignment queries.",
-  },
-  {
-    annealArgs: ["--example", "abs", "--allow-sorry"],
-    id: "abs",
-    label: "abs.rs",
-    rustFile: "anneal/examples/abs.rs",
-    summary: "Single-function absolute-value example with a scalar arithmetic proof.",
-  },
-];
-
 export function parseExternalAnnealArgs(value) {
   if (!value) {
     return [];
@@ -47,7 +16,7 @@ export function parseExternalAnnealArgs(value) {
   return trimmed.split(/\s+/);
 }
 
-export function resolveExternalExamplePresets({ defaultExternalAnnealArgs, externalExampleSet, env }) {
+export function resolveExternalExamplePresets({ defaultExternalAnnealArgs, env }) {
   if (env.LEAN_DEMO_EXAMPLE_PRESETS) {
     const parsed = JSON.parse(env.LEAN_DEMO_EXAMPLE_PRESETS);
     if (!Array.isArray(parsed)) {
@@ -78,7 +47,7 @@ export function resolveExternalExamplePresets({ defaultExternalAnnealArgs, exter
       };
     });
   }
-  return externalExampleSet === "zerocopy-pr3321" ? zerocopyPr3321Examples : [];
+  return [];
 }
 
 export function resolveInitialExternalExampleId({ env, externalExamplePresets, initialExternalRustFile }) {

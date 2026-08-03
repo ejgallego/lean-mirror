@@ -4,12 +4,16 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { readDemoConfig } from "./demo-config.mjs";
+import {
+  createZerocopyAnnealDemoEnv,
+  zerocopyAnnealExamples,
+} from "./zerocopy-anneal-config.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const defaultCheckoutDir = join(rootDir, ".demo-cache", "zerocopy-pr3321");
 const defaultRepoUrl = "https://github.com/google/zerocopy.git";
 const defaultPrRef = "pull/3321/head";
-const defaultExamples = ["linked_list", "namespaces", "size_of_align_of", "abs"];
+const defaultExamples = zerocopyAnnealExamples.map((example) => example.id);
 const linkedListOldReturnSpec = [
   "    ///   Aeneas.Std.WP.spec (List.push self val) (fun ret_ =>",
   "    ///     let (_, self') := ret_",
@@ -100,14 +104,12 @@ function usage() {
     "  --active <id>      Startup example id. Defaults to linked_list.",
     "  --no-warm         Start the demo without prebuilding every prepared example.",
     "  --no-install      Do not run npm install when node_modules is missing.",
-    "  --keep            Accepted for compatibility; local checkouts are always kept.",
     "  --help            Show this help.",
     "",
     "Environment overrides:",
     "  ZEROCOPY_ROOT or LEAN_DEMO_ZEROCOPY_ROOT can replace --root.",
     "  LEAN_DEMO_ZEROCOPY_REPO and LEAN_DEMO_ZEROCOPY_REF can replace --repo/--ref.",
     "  LEAN_DEMO_ZEROCOPY_CHECKOUT_DIR can replace --checkout-dir.",
-    "  LEAN_DEMO_KEEP_ZEROCOPY_CHECKOUT=1 is accepted for compatibility.",
     "  LEAN_DEMO_SKIP_NPM_INSTALL=1 is equivalent to --no-install.",
     "  LEAN_DEMO_WARM_EXAMPLES=0 is equivalent to --no-warm.",
   ].join("\n");
@@ -128,10 +130,6 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
       options.help = true;
-      continue;
-    }
-    if (arg === "--keep") {
-      options.keep = true;
       continue;
     }
     if (arg === "--no-install") {
@@ -418,13 +416,10 @@ async function main() {
   }
 
   const env = {
-    ...process.env,
+    ...createZerocopyAnnealDemoEnv(checkoutRoot),
     DEMO_BACKEND_READY_TIMEOUT_MS: process.env.DEMO_BACKEND_READY_TIMEOUT_MS ?? "600000",
     DEMO_WATCH_USE_POLLING: process.env.DEMO_WATCH_USE_POLLING ?? "1",
     LEAN_DEMO_ACTIVE_EXAMPLE: options.active,
-    LEAN_DEMO_ANNEAL_MANIFEST: join(checkoutRoot, "anneal", "Cargo.toml"),
-    LEAN_DEMO_EXAMPLE_SET: "zerocopy-pr3321",
-    LEAN_DEMO_RUST_ROOT: checkoutRoot,
   };
   const demo = readDemoConfig(env);
   const warmTimeoutMs = Number.parseInt(env.DEMO_BACKEND_READY_TIMEOUT_MS, 10);

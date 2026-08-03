@@ -33,14 +33,12 @@ export function createDemoWorkspace(demoDir, options = {}) {
     env.LEAN_DEMO_ANNEAL_TOOL_MANIFEST ??
     (externalRustRoot ? join(resolvePath(cwd, externalRustRoot), "anneal", "Cargo.toml") : undefined);
   const defaultExternalAnnealArgs = parseExternalAnnealArgs(env.LEAN_DEMO_ANNEAL_ARGS);
-  const externalExampleSet = env.LEAN_DEMO_EXAMPLE_SET;
   const externalMode = Boolean(
     externalRustRoot || initialExternalRustFile || externalLeanRoot || externalAnnealTargetManifest,
   );
   const skipExternalLeanBuild = env.LEAN_DEMO_SKIP_LEAN_BUILD === "1";
   const externalExamplePresets = resolveExternalExamplePresets({
     defaultExternalAnnealArgs,
-    externalExampleSet,
     env,
   });
   let activeExternalExampleId = resolveInitialExternalExampleId({
@@ -94,26 +92,15 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   function demoDescriptor() {
-    if (externalExampleSet === "zerocopy-pr3321") {
-      const active = activeExternalExample();
-      return {
-        activeExampleId: active?.id,
-        activeExampleLabel: active?.label ?? "Custom example",
-        demoProject: "google/zerocopy PR 3321 / Anneal / Lean 4 / CodeMirror 6",
-        demoSummary:
-          "This demo opens Rust examples from the zerocopy PR, mirrors `lean, anneal, spec` doc comments into a hidden Lean file, and checks them against the Anneal-generated Lean workspace while rust-analyzer stays attached to the host Rust source.",
-        demoTitle: "Zerocopy Anneal Embedded Lean Demo",
-      };
-    }
     if (externalMode) {
       const active = activeExternalExample();
       return {
         activeExampleId: active?.id,
         activeExampleLabel: active?.label ?? (activeExternalRustFile()?.split("/").at(-1) ?? "External Rust file"),
-        demoProject: "External Anneal / Lean 4 / CodeMirror 6",
-        demoSummary:
+        demoProject: env.LEAN_DEMO_PROJECT ?? "External Anneal / Lean 4 / CodeMirror 6",
+        demoSummary: env.LEAN_DEMO_SUMMARY ??
           "This demo mirrors Lean doc-comment snippets embedded in Rust into a hidden Lean file and checks them against an external Anneal-generated Lean workspace.",
-        demoTitle: "External Anneal Embedded Lean Demo",
+        demoTitle: env.LEAN_DEMO_TITLE ?? "External Anneal Embedded Lean Demo",
       };
     }
     return {

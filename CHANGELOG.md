@@ -53,6 +53,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - External Anneal generation keys now include generator, target-project, and optional toolchain revisions, including dirty source changes.
 - Browser extraction, backend Lean-document generation, and cache fingerprinting now share one CRLF-safe line-comment fence parser.
 - The demo runtime and backend workspace now delegate embedded Lean LSP behavior, lifecycle helpers, document synthesis, and external example configuration to focused modules.
+- Zerocopy example presets and presentation metadata now live entirely in the experiment wrapper; the generic backend accepts only configured external examples and descriptors.
+- Generation-key calculation reuses identical project fingerprints when target and generator manifests share a project.
 
 ### Fixed
 
@@ -65,6 +67,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Hostless editor-platform shells report `Ready` when all services are ready.
 - Rust and generated-Lean diagnostic results are rejected when they belong to an older edit generation.
 - Rebased demo error responses retain origin-aware CORS headers, and clean worktrees resolve the private editor-platform test package directly from source.
+- Browser E2E runs default to Vite polling so host file-watcher quotas do not prevent the test server from starting.
 
 ### Security
 
@@ -75,3 +78,4 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - Removed the ambiguous `leanLanguage`, `leanLanguageSupport`, and `leanHighlightStyle` exports; the fallback-named API replaces them during the unstable `0.x` series.
 - Removed the unused legacy `@codemirror/stream-parser` dependency and its CodeMirror 0.19 subtree.
+- Removed the no-op Zerocopy `--keep` compatibility option and `LEAN_DEMO_KEEP_ZEROCOPY_CHECKOUT` variable during the unstable `0.x` series.
