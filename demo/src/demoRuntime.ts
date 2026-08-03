@@ -1,18 +1,17 @@
 import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, hoverTooltip, type Tooltip } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
 import { rust } from "@codemirror/lang-rust";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { setDiagnostics } from "@codemirror/lint";
 import { LSPClient, LSPPlugin, languageServerExtensions } from "@codemirror/lsp-client";
 import type * as lsp from "vscode-languageserver-protocol";
-import { EditorServiceRuntime, type EditorDiagnostic, type EditorServiceDescriptor } from "@leanprover/editor-platform";
+import { EditorServiceRuntime } from "@leanprover/editor-platform";
 import {
   createLeanInfoviewHost,
   leanInfoviewClientNotifications,
   type LeanInfoviewHost,
 } from "codemirror-lean4-lsp/infoview";
-import { Marked } from "marked";
 
 import {
   createLeanEditorSession,
@@ -22,12 +21,11 @@ import {
   leanFileProgress,
   leanFallbackHighlightStyle,
   leanUtilities,
-  type Transport,
   type LeanEditorSession,
   type LeanServerDocumentLease,
   type LeanWorkspace,
 } from "codemirror-lean4-lsp";
-import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
+import { workDoneProgress } from "../../src/progress.js";
 import { createDemoBridge } from "./demoBridge.js";
 import {
   DiagnosticGenerationGate,
@@ -42,60 +40,25 @@ import {
   type EmbeddedLeanDocument,
 } from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
-import type { AnyEmbeddedBlockEditorAdapter, EmbeddedBlockDiagnostic } from "./embeddedBlocks.js";
+import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
+import {
+  createEmbeddedLeanLspFeatures,
+  diagnosticSeverity,
+  editorDiagnosticsFromLsp,
+} from "./embeddedLeanLsp.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
+import {
+  delay,
+  leanService,
+  loadRegenerationMode,
+  observeInitializeResult,
+  rustService,
+  saveRegenerationMode,
+  workDoneProgressMessage,
+} from "./runtimeSupport.js";
 
-const leanService: EditorServiceDescriptor = {
-  id: "lean-lsp",
-  kind: "lean-lsp",
-  label: "Lean",
-};
-
-const rustService: EditorServiceDescriptor = {
-  id: "rust-lsp",
-  kind: "rust-lsp",
-  label: "Rust",
-};
-
-const regenerationModeStorageKey = "lean-demo-regeneration-mode";
 const autoRegenerationDelayMs = 1400;
 const preparationPollDelayMs = 500;
-const leanHoverMarkdown = new Marked();
-
-function loadRegenerationMode(): RegenerationMode {
-  try {
-    return window.localStorage.getItem(regenerationModeStorageKey) === "auto" ? "auto" : "manual";
-  } catch {
-    return "manual";
-  }
-}
-
-function saveRegenerationMode(mode: RegenerationMode): void {
-  try {
-    window.localStorage.setItem(regenerationModeStorageKey, mode);
-  } catch {
-    // Ignore storage failures; mode still applies to the current runtime.
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>\n]/gu, (character) => {
-    switch (character) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      default:
-        return "<br>";
-    }
-  });
-}
 
 export interface DemoRuntimeOptions {
   editorTheme: Extension;
@@ -108,52 +71,6 @@ export interface DemoRuntimeOptions {
 
 export interface DemoRuntime {
   dispose(): void;
-}
-
-function observeInitializeResult(
-  transport: Transport,
-  onInitializeResult: (result: lsp.InitializeResult) => void,
-): Transport {
-  const handlers = new Map<(message: string) => void, (message: string) => void>();
-  return {
-    send(message) {
-      transport.send(message);
-    },
-    subscribe(handler) {
-      const wrapped = (message: string) => {
-        try {
-          const payload = JSON.parse(message) as Partial<lsp.ResponseMessage>;
-          if (
-            payload &&
-            "result" in payload &&
-            payload.result &&
-            typeof payload.result === "object" &&
-            "capabilities" in payload.result
-          ) {
-            onInitializeResult(payload.result as lsp.InitializeResult);
-          }
-        } catch {
-          // The underlying LSP client will report malformed messages.
-        }
-        handler(message);
-      };
-      handlers.set(handler, wrapped);
-      transport.subscribe(wrapped);
-    },
-    unsubscribe(handler) {
-      const wrapped = handlers.get(handler);
-      if (!wrapped) {
-        return;
-      }
-      handlers.delete(handler);
-      transport.unsubscribe(wrapped);
-    },
-  };
-}
-
-function workDoneProgressMessage(state: WorkDoneProgressState): string {
-  const percentage = typeof state.percentage === "number" ? ` ${state.percentage}%` : "";
-  return state.message ? `${state.title}${percentage}: ${state.message}` : `${state.title}${percentage}`;
 }
 
 export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
@@ -225,6 +142,18 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     },
   });
 
+  const embeddedLeanLsp = createEmbeddedLeanLspFeatures({
+    client() {
+      return client;
+    },
+    document() {
+      return lastEmbeddedLeanDocument;
+    },
+    documentUri() {
+      return session.embeddedLeanDocumentUri;
+    },
+  });
+
   const embeddedEditors = createEmbeddedEditorShell({
     currentLanguageId() {
       return currentLanguageId;
@@ -236,7 +165,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       return currentView;
     },
     extraExtensions(adapter, block) {
-      return adapter.kind === "lean" ? [embeddedLeanHoverTooltips(block.key)] : [];
+      return adapter.kind === "lean" ? [embeddedLeanLsp.hoverTooltips(block.key)] : [];
     },
     setActiveEmbeddedEditor(editor) {
       setActiveEmbeddedEditor(editor);
@@ -297,24 +226,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     });
   }
 
-  function diagnosticSeverity(value?: lsp.DiagnosticSeverity): NonNullable<EmbeddedBlockDiagnostic["severity"]> {
-    return value === 1 ? "error" : value === 2 ? "warning" : value === 3 ? "info" : "hint";
-  }
-
-  function editorDiagnosticsFromLsp(
-    uri: string,
-    source: string,
-    diagnostics: readonly lsp.Diagnostic[],
-  ): EditorDiagnostic[] {
-    return diagnostics.map((diagnostic) => ({
-      uri,
-      source,
-      message: diagnostic.message,
-      severity: diagnosticSeverity(diagnostic.severity),
-      ...(diagnostic.code === undefined ? {} : { code: String(diagnostic.code) }),
-    }));
-  }
-
   function applyRustMainDiagnostics(params: lsp.PublishDiagnosticsParams): boolean {
     if (params.uri === session.rustMainDocumentUri) {
       options.ui.setDocumentDiagnostics(
@@ -368,125 +279,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     embeddedEditors.setDiagnostics("lean", byBlock);
   }
 
-  function embeddedLeanPosition(blockKey: string, view: EditorView, offset: number): lsp.Position | null {
-    if (!lastEmbeddedLeanDocument) {
-      return null;
-    }
-    const clamped = Math.max(0, Math.min(view.state.doc.length, offset));
-    const line = view.state.doc.lineAt(clamped);
-    const blockMappings = lastEmbeddedLeanDocument.mappings.filter((mapping) => mapping.blockKey === blockKey);
-    const mapping = blockMappings.find((candidate) => candidate.blockLineStart === line.from)
-      ?? blockMappings[line.number - 1];
-    if (!mapping) {
-      return null;
-    }
-    return {
-      character: Math.max(0, clamped - line.from),
-      line: mapping.generatedLine,
-    };
-  }
-
-  function embeddedLeanOffset(blockKey: string, view: EditorView, position: lsp.Position): number | null {
-    if (!lastEmbeddedLeanDocument) {
-      return null;
-    }
-    const mapping = lastEmbeddedLeanDocument.mappings.find(
-      (candidate) => candidate.blockKey === blockKey && candidate.generatedLine === position.line,
-    );
-    if (!mapping) {
-      return null;
-    }
-    return Math.max(
-      0,
-      Math.min(view.state.doc.length, mapping.blockLineStart + position.character),
-    );
-  }
-
-  function renderLeanHoverMarkdown(value: string): string {
-    const html = leanHoverMarkdown.parse(value, { async: false });
-    return typeof html === "string" ? sanitizeHtml(html) : "";
-  }
-
-  function leanHoverHtml(
-    contents: string | lsp.MarkupContent | lsp.MarkedString | lsp.MarkedString[],
-  ): string {
-    if (Array.isArray(contents)) {
-      return contents.map((item) => leanHoverHtml(item)).filter(Boolean).join("<br>");
-    }
-    if (typeof contents === "string") {
-      return renderLeanHoverMarkdown(contents);
-    }
-    if ("language" in contents) {
-      return renderLeanHoverMarkdown(`\`\`\`${contents.language}\n${contents.value}\n\`\`\``);
-    }
-    return contents.kind === "markdown" ? renderLeanHoverMarkdown(contents.value) : escapeHtml(contents.value);
-  }
-
-  function embeddedLeanHoverTooltips(blockKey: string): Extension {
-    return hoverTooltip((view, pos): Promise<Tooltip | null> => {
-      if (
-        !client ||
-        !session.embeddedLeanDocumentUri ||
-        client.serverCapabilities?.hoverProvider === false
-      ) {
-        return Promise.resolve(null);
-      }
-      const position = embeddedLeanPosition(blockKey, view, pos);
-      if (!position) {
-        return Promise.resolve(null);
-      }
-      client.sync();
-      return client
-        .request<lsp.HoverParams, lsp.Hover | null>("textDocument/hover", {
-          position,
-          textDocument: { uri: session.embeddedLeanDocumentUri },
-        })
-        .then((result) => {
-          if (!result) {
-            return null;
-          }
-          const html = leanHoverHtml(result.contents).trim();
-          if (!html) {
-            return null;
-          }
-          const start = result.range
-            ? embeddedLeanOffset(blockKey, view, result.range.start) ?? pos
-            : pos;
-          const end = result.range
-            ? embeddedLeanOffset(blockKey, view, result.range.end) ?? pos
-            : pos;
-          return {
-            above: true,
-            end,
-            pos: start,
-            create() {
-              const dom = document.createElement("div");
-              dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
-              dom.innerHTML = html;
-              return { dom };
-            },
-          };
-        })
-        .catch(() => null);
-    }, { hideOn: (transaction) => transaction.docChanged });
-  }
-
-  function embeddedLeanLocation(editor: ActiveEmbeddedEditor): lsp.Location | undefined {
-    if (editor.adapter.kind !== "lean" || !session.embeddedLeanDocumentUri) {
-      return undefined;
-    }
-    const selection = editor.view.state.selection.main;
-    const start = embeddedLeanPosition(editor.block.key, editor.view, selection.from);
-    const end = embeddedLeanPosition(editor.block.key, editor.view, selection.to);
-    if (!start || !end) {
-      return undefined;
-    }
-    return {
-      range: { end, start },
-      uri: session.embeddedLeanDocumentUri,
-    };
-  }
-
   function setActiveEmbeddedEditor(editor: ActiveEmbeddedEditor | null): void {
     if (!leanInfoview) {
       return;
@@ -495,7 +287,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       leanInfoview.updateCursorLocation();
       return;
     }
-    leanInfoview.setCursorLocation(embeddedLeanLocation(editor));
+    leanInfoview.setCursorLocation(embeddedLeanLsp.location(editor));
   }
 
   function scheduleEmbeddedLeanDiagnosticPull(

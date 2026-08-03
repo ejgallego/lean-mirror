@@ -52,6 +52,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Demo source imports for public toolkit features now resolve through the package entry point so the demo exercises the supported boundary.
 - External Anneal generation keys now include generator, target-project, and optional toolchain revisions, including dirty source changes.
 - Browser extraction, backend Lean-document generation, and cache fingerprinting now share one CRLF-safe line-comment fence parser.
+- The demo runtime and backend workspace now delegate embedded Lean LSP behavior, lifecycle helpers, document synthesis, and external example configuration to focused modules.
 
 ### Fixed
 

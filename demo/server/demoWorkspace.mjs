@@ -11,38 +11,12 @@ import {
   markAnnealGenerationBuilt,
   registerAnnealGeneration,
 } from "../externalGeneration.mjs";
-import { parseLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
-
-const zerocopyPr3321Examples = [
-  {
-    annealArgs: ["--example", "linked_list", "--allow-sorry"],
-    id: "linked_list",
-    label: "linked_list.rs",
-    rustFile: "anneal/examples/linked_list.rs",
-    summary: "Method spec over a recursive list model with local helper definitions.",
-  },
-  {
-    annealArgs: ["--example", "namespaces", "--allow-sorry"],
-    id: "namespaces",
-    label: "namespaces.rs",
-    rustFile: "anneal/examples/namespaces.rs",
-    summary: "Nested Rust modules that become nested Lean namespaces.",
-  },
-  {
-    annealArgs: ["--example", "size_of_align_of", "--allow-sorry"],
-    id: "size_of_align_of",
-    label: "size_of_align_of.rs",
-    rustFile: "anneal/examples/size_of_align_of.rs",
-    summary: "Several Rust doc-comment specs over layout and alignment queries.",
-  },
-  {
-    annealArgs: ["--example", "abs", "--allow-sorry"],
-    id: "abs",
-    label: "abs.rs",
-    rustFile: "anneal/examples/abs.rs",
-    summary: "Single-function absolute-value example with a scalar arithmetic proof.",
-  },
-];
+import { ensureEmbeddedLeanArtifacts } from "./embeddedLeanDocument.mjs";
+import {
+  parseExternalAnnealArgs,
+  resolveExternalExamplePresets,
+  resolveInitialExternalExampleId,
+} from "./externalExamples.mjs";
 
 const annealGenerateMaxBuffer = 50 * 1024 * 1024;
 
@@ -58,7 +32,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
   const externalAnnealToolManifest =
     env.LEAN_DEMO_ANNEAL_TOOL_MANIFEST ??
     (externalRustRoot ? join(resolvePath(cwd, externalRustRoot), "anneal", "Cargo.toml") : undefined);
-  const defaultExternalAnnealArgs = parseEnvArgs(env.LEAN_DEMO_ANNEAL_ARGS);
+  const defaultExternalAnnealArgs = parseExternalAnnealArgs(env.LEAN_DEMO_ANNEAL_ARGS);
   const externalExampleSet = env.LEAN_DEMO_EXAMPLE_SET;
   const externalMode = Boolean(
     externalRustRoot || initialExternalRustFile || externalLeanRoot || externalAnnealTargetManifest,
@@ -579,55 +553,6 @@ function resolveRustAnalyzerWorkspaceDir({ cwd, externalAnnealTargetManifest, fa
   return isPathInside(rustMainPath, manifestRoot) ? manifestRoot : fallbackRoot;
 }
 
-function resolveExternalExamplePresets({ defaultExternalAnnealArgs, externalExampleSet, env }) {
-  if (env.LEAN_DEMO_EXAMPLE_PRESETS) {
-    const parsed = JSON.parse(env.LEAN_DEMO_EXAMPLE_PRESETS);
-    if (!Array.isArray(parsed)) {
-      throw new Error("LEAN_DEMO_EXAMPLE_PRESETS must be a JSON array.");
-    }
-    return parsed.map((entry, index) => {
-      if (!entry || typeof entry !== "object") {
-        throw new Error(`LEAN_DEMO_EXAMPLE_PRESETS[${index}] must be an object.`);
-      }
-      if (typeof entry.id !== "string" || entry.id.length === 0) {
-        throw new Error(`LEAN_DEMO_EXAMPLE_PRESETS[${index}].id must be a non-empty string.`);
-      }
-      if (typeof entry.rustFile !== "string" || entry.rustFile.length === 0) {
-        throw new Error(`LEAN_DEMO_EXAMPLE_PRESETS[${index}].rustFile must be a non-empty string.`);
-      }
-      if (
-        entry.annealArgs !== undefined &&
-        (!Array.isArray(entry.annealArgs) || entry.annealArgs.some((item) => typeof item !== "string"))
-      ) {
-        throw new Error(`LEAN_DEMO_EXAMPLE_PRESETS[${index}].annealArgs must be a string array.`);
-      }
-      return {
-        annealArgs: entry.annealArgs ?? defaultExternalAnnealArgs,
-        id: entry.id,
-        label: typeof entry.label === "string" ? entry.label : entry.id,
-        rustFile: entry.rustFile,
-        summary: typeof entry.summary === "string" ? entry.summary : "",
-      };
-    });
-  }
-  if (externalExampleSet === "zerocopy-pr3321") {
-    return zerocopyPr3321Examples;
-  }
-  return [];
-}
-
-function resolveInitialExternalExampleId({ env, externalExamplePresets, initialExternalRustFile }) {
-  if (externalExamplePresets.length === 0) {
-    return null;
-  }
-  const explicit = env.LEAN_DEMO_ACTIVE_EXAMPLE;
-  if (explicit && externalExamplePresets.some((entry) => entry.id === explicit)) {
-    return explicit;
-  }
-  const matchingRustFile = externalExamplePresets.find((entry) => entry.rustFile === initialExternalRustFile);
-  return matchingRustFile?.id ?? externalExamplePresets[0]?.id ?? null;
-}
-
 function runCommand(command, args, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
@@ -693,87 +618,6 @@ async function ensureDemoArtifacts(workspaceDir, { externalMode }) {
   }
 }
 
-function defaultEmbeddedLeanDocument({ defaultImports = [], externalMode = false, postamble = [], preamble = [] } = {}) {
-  if (externalMode) {
-    const imports = defaultImports.map((moduleName) => `import ${moduleName}`);
-    return [
-      ...imports,
-      imports.length > 0 ? "" : null,
-      ...preamble,
-      preamble.length > 0 ? "" : null,
-      ...postamble,
-      "",
-    ].filter((line) => line !== null).join("\n");
-  }
-  return [
-    "/- prelude from Main.rs -/",
-    "import Helper",
-    "",
-    "/- demo-check from Main.rs -/",
-    "#check helperValue",
-    "#check Nat.succ",
-    "",
-  ].join("\n");
-}
-
-function embeddedLeanRole(info) {
-  const normalized = info.toLowerCase();
-  return normalized === "editor-prelude" ||
-    normalized === "prelude" ||
-    normalized.startsWith("editor-prelude,") ||
-    normalized.startsWith("editor-prelude ") ||
-    normalized.startsWith("prelude,") ||
-    normalized.startsWith("prelude ") ||
-    normalized.includes(" editor-prelude") ||
-    normalized.includes(" prelude")
-    ? "prelude"
-    : "snippet";
-}
-
-function embeddedLeanTitle(info, ordinal) {
-  const normalized = info.replaceAll(",", " ").trim().replace(/\s+/gu, " ");
-  return normalized.length > 0 ? normalized : `block ${ordinal}`;
-}
-
-function parseEmbeddedLeanBlocks(source) {
-  return parseLineCommentFencedBlocks(source, {
-    kind: "lean",
-    linePrefixes: ["//!", "///", "//"],
-  }).map((block) => ({
-    code: block.code,
-    role: embeddedLeanRole(block.info ?? ""),
-    sourceLine: block.sourceLine,
-    title: embeddedLeanTitle(block.info ?? "", block.ordinal),
-  }));
-}
-
-function buildEmbeddedLeanDocumentFromSource(source, options = {}) {
-  const blocks = parseEmbeddedLeanBlocks(source);
-  const prelude = blocks.filter((block) => block.role === "prelude");
-  const snippets = blocks.filter((block) => block.role !== "prelude");
-  const lines = [];
-  for (const moduleName of options.defaultImports ?? []) {
-    lines.push(`import ${moduleName}`);
-  }
-  if (options.defaultImports?.length > 0) {
-    lines.push("");
-  }
-  if (options.preamble?.length > 0) {
-    lines.push(...options.preamble);
-    lines.push("");
-  }
-  for (const block of [...prelude, ...snippets]) {
-    lines.push(`/- ${block.title} from ${options.sourceName ?? "Rust source"}:${block.sourceLine} -/`);
-    lines.push(...block.code.split("\n"));
-    lines.push("");
-  }
-  if (options.postamble?.length > 0) {
-    lines.push(...options.postamble);
-    lines.push("");
-  }
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
 async function readFileOrNull(path) {
   try {
     return await readFile(path, "utf8");
@@ -783,34 +627,6 @@ async function readFileOrNull(path) {
     }
     throw error;
   }
-}
-
-async function ensureEmbeddedLeanArtifacts(embeddedLeanPath, context) {
-  await mkdir(dirname(embeddedLeanPath), { recursive: true });
-  const nextDocument = context.sourcePath
-    ? buildEmbeddedLeanDocumentFromSource(await readFile(context.sourcePath, "utf8"), context)
-    : defaultEmbeddedLeanDocument(context);
-  if (await readFileOrNull(embeddedLeanPath) !== nextDocument) {
-    await writeFile(embeddedLeanPath, nextDocument, "utf8");
-  }
-}
-
-function parseEnvArgs(value) {
-  if (!value) {
-    return [];
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return [];
-  }
-  if (trimmed.startsWith("[")) {
-    const parsed = JSON.parse(trimmed);
-    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
-      throw new Error("LEAN_DEMO_ANNEAL_ARGS JSON must be a string array.");
-    }
-    return parsed;
-  }
-  return trimmed.split(/\s+/);
 }
 
 function parseGeneratedLeanRoot(output) {
