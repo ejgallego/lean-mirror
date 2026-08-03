@@ -23,6 +23,7 @@ export default defineConfig({
         __dirname,
         "../node_modules/@leanprover/infoview/dist/index.css",
       ),
+      "codemirror-lean4-lsp": resolve(__dirname, "../src/index.ts"),
       "react/jsx-runtime": resolve(
         __dirname,
         "../node_modules/@leanprover/infoview/dist/react-jsx-runtime.production.min.js",
@@ -39,7 +40,7 @@ export default defineConfig({
     },
     watch: {
       interval: Number(process.env.DEMO_WATCH_POLL_INTERVAL_MS ?? "500"),
-      usePolling: process.env.DEMO_WATCH_USE_POLLING !== "0",
+      usePolling: process.env.DEMO_WATCH_USE_POLLING === "1",
     },
   },
 });

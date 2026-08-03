@@ -1,6 +1,6 @@
 import type { Extension } from "@codemirror/state";
 
-import { lean4, leanFallbackHighlightStyle } from "../../src/index.js";
+import { lean4, leanFallbackHighlightStyle } from "codemirror-lean4-lsp";
 import {
   createLineCommentAdapter,
   type EmbeddedBlock,

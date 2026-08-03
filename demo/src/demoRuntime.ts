@@ -26,7 +26,7 @@ import {
   type LeanEditorSession,
   type LeanServerDocumentLease,
   type LeanWorkspace,
-} from "../../src/index.js";
+} from "codemirror-lean4-lsp";
 import { workDoneProgress, type WorkDoneProgressState } from "../../src/progress.js";
 import { createDemoBridge } from "./demoBridge.js";
 import {

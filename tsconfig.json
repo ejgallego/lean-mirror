@@ -18,7 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@leanprover/editor-platform": ["packages/editor-platform/src/index.ts"],
-      "codemirror-lean4-lsp/infoview": ["src/infoview.ts"]
+      "codemirror-lean4-lsp/infoview": ["src/infoview.ts"],
+      "codemirror-lean4-lsp": ["src/index.ts"]
     },
     "types": ["node", "vitest/globals"]
   },

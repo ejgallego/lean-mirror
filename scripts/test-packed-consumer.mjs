@@ -17,7 +17,7 @@ const fixture = fileURLToPath(new URL("../test/packed-consumer", import.meta.url
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const cache =
   process.env.PACKED_CONSUMER_NPM_CACHE ??
-  join(tmpdir(), "codemirror-lean4-lsp-packed-consumer-cache");
+  join(root, ".demo-cache", "packed-consumer-npm-cache");
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {

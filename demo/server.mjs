@@ -145,11 +145,11 @@ async function handleHttpRequest(req, res) {
     try {
       await demoWorkspace.switchExample(payload.id);
     } catch (error) {
-      res.writeHead(400, withCorsHeaders());
+      res.writeHead(400, withCorsHeaders(req));
       res.end(error instanceof Error ? error.message : "Failed to switch example");
       return;
     }
-    res.writeHead(204, withCorsHeaders());
+    res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
   }
@@ -241,7 +241,7 @@ async function handleHttpRequest(req, res) {
       const result = await demoWorkspace.regenerateRustMainDocument(payload, websocketUrls());
       res.writeHead(
         200,
-        withCorsHeaders({
+        withCorsHeaders(req, {
           "Content-Type": "application/json; charset=utf-8",
         }),
       );
@@ -249,7 +249,7 @@ async function handleHttpRequest(req, res) {
     } catch (error) {
       res.writeHead(
         500,
-        withCorsHeaders({
+        withCorsHeaders(req, {
           "Content-Type": "text/plain; charset=utf-8",
         }),
       );

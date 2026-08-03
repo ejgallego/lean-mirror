@@ -29,6 +29,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Demo security tests for origin, bind-address, body-size, and HTML sanitization policy.
 - Optional `codemirror-lean4-lsp/infoview` and `infoview.css` subpaths for the official Lean infoview bridge, RPC lifecycle, notifications, navigation, editing, and outer-shell mounting.
 - An isolated packed-tarball consumer gate covering core-only and optional-infoview dependency installation, public types, runtime imports, and infoview assets.
+- An opt-in external Anneal demo with generated-workspace caching, switchable Zerocopy examples, Rust-host freshness tracking, and manual or automatic regeneration.
 
 ### Changed
 
@@ -47,6 +48,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - `LeanWorkspace` explicitly supports one editor view per URI and rejects divergent duplicate views.
 - React and the infoview renderer remain outside the main runtime dependency graph; the extracted infoview subpath declares `@leanprover/infoview` as an optional peer.
 - Updated the demo/test toolchain to patched `ws`, Vite, Vitest, and jsdom releases.
+- Demo source imports for public toolkit features now resolve through the package entry point so the demo exercises the supported boundary.
 
 ### Fixed
 
@@ -58,6 +60,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - VS Code document commands are serialized per URI and stale versioned changes are ignored.
 - Hostless editor-platform shells report `Ready` when all services are ready.
 - Rust and generated-Lean diagnostic results are rejected when they belong to an older edit generation.
+- Rebased demo error responses retain origin-aware CORS headers, and clean worktrees resolve the private editor-platform test package directly from source.
 
 ### Security
 

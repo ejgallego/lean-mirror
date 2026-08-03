@@ -13,8 +13,7 @@ import {
   serverCompletion,
   signatureHelp,
 } from "@codemirror/lsp-client";
-import { createWebSocketTransport } from "../../src/index.js";
-import { leanUtilities } from "../../src/index.js";
+import { createWebSocketTransport, leanUtilities } from "codemirror-lean4-lsp";
 import { EditorView, hoverTooltip, keymap, type Tooltip } from "@codemirror/view";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type * as lsp from "vscode-languageserver-protocol";
