@@ -267,7 +267,10 @@ provide its own `Workspace` implementation.
 - LSP Markdown can contain raw HTML. Production hosts should pass a trusted `sanitizeHTML`
   function to `createLeanLspClient()` before enabling hover or signature documentation.
 - Repository, issue tracker, and release metadata point to `ejgallego/lean-mirror` on GitHub.
-- API, release policy, and backlog docs live in [docs/README.md](./docs/README.md), [CONTRIBUTING.md](./CONTRIBUTING.md), and [docs/BACKLOG.md](./docs/BACKLOG.md).
+- API, release policy, and backlog docs live in the repository's
+  [documentation index](https://github.com/ejgallego/lean-mirror/blob/main/docs/README.md),
+  [contribution guide](https://github.com/ejgallego/lean-mirror/blob/main/CONTRIBUTING.md),
+  and [backlog](https://github.com/ejgallego/lean-mirror/blob/main/docs/BACKLOG.md).
 
 ## Demo
 
@@ -279,14 +282,15 @@ The smallest browser integration needs only `lean` and `lake` on `PATH`:
 npm run example:minimal
 ```
 
-Open `http://127.0.0.1:5273`. This example displays one Lean document and
-combines `LeanEditorSession`, `LeanWorkspace`, the optional official infoview,
-and the shared editor-platform shell. Its browser code imports toolkit features
-only through package entry points, and its reconnect button preserves the
-CodeMirror document while replacing the Lean client generation.
+Open `http://127.0.0.1:5273`. This repository example displays one Lean
+document and combines the public `LeanEditorSession`, `LeanWorkspace`, and
+optional infoview entries with the currently private editor-platform shell
+prototype. Its reconnect button preserves the CodeMirror document while
+replacing the Lean client generation.
 
-See [`examples/minimal/README.md`](./examples/minimal/README.md) for its scope
-and port overrides.
+See the
+[minimal example guide](https://github.com/ejgallego/lean-mirror/blob/main/examples/minimal/README.md)
+for its repository-only infrastructure, scope, and port overrides.
 
 ### Full integration demo
 

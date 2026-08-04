@@ -58,6 +58,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Zerocopy example presets and presentation metadata now live entirely in the experiment wrapper; the generic backend accepts only configured external examples and descriptors.
 - Generation-key calculation reuses identical project fingerprints when target and generator manifests share a project.
 - GitHub CI now uses the Node 24-based v7 checkout and setup-node actions.
+- Demo browser configurations now share one source-alias manifest, Playwright launchers share guaranteed workspace cleanup, and TypeScript checks reject unused code across packages.
 
 ### Fixed
 
@@ -72,6 +73,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Rebased demo error responses retain origin-aware CORS headers, and clean worktrees resolve the private editor-platform test package directly from source.
 - Browser E2E runs default to Vite polling so host file-watcher quotas do not prevent the test server from starting.
 - Vite ignores API-managed demo workspace files so persisted editor changes do not trigger a page reload under polling.
+- The minimal example runner now reports terminal backend preparation failures immediately, its reconnect smoke verifies fresh generation-two diagnostics and infoview responses, and aborted infoview RPC calls settle without leaking a later client timeout.
 
 ### Security
 

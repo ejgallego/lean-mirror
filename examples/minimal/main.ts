@@ -161,6 +161,7 @@ async function start(): Promise<void> {
         },
       },
       rootUri: backendSession.rootUri,
+      timeout: 20_000,
       unhandledNotification(_client, method, params) {
         infoview?.forwardServerNotification(method, params);
       },
@@ -172,7 +173,9 @@ async function start(): Promise<void> {
     generation.dataset.phase = state.phase;
     switch (state.phase) {
       case "idle":
-        leanRuntime.stopped("Disconnected");
+        if (state.generation > 0) {
+          leanRuntime.stopped("Disconnected");
+        }
         break;
       case "initializing":
         leanRuntime.initializing(`Generation ${state.generation}`);

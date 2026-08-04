@@ -20,6 +20,39 @@ import type { LeanWorkspace } from "./workspace.js";
 
 const keepAlivePeriodMs = 10_000;
 
+function requestAbortedError(): Error {
+  const error = new Error("Lean infoview request aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function abortableClientRequest<Params, Result>(
+  client: LSPClient,
+  method: string,
+  params: Params,
+  abortSignal?: AbortSignal,
+): Promise<Result> {
+  if (abortSignal?.aborted) {
+    return Promise.reject(requestAbortedError());
+  }
+  const request = client.request<Params, Result>(method, params);
+  if (!abortSignal) {
+    return request;
+  }
+  let rejectAborted!: (error: Error) => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAborted = reject;
+  });
+  const abort = () => {
+    client.cancelRequest(params);
+    rejectAborted(requestAbortedError());
+  };
+  abortSignal.addEventListener("abort", abort, { once: true });
+  return Promise.race([request, aborted]).finally(() => {
+    abortSignal.removeEventListener("abort", abort);
+  });
+}
+
 export interface LeanInfoviewHost {
   dispose(): void;
   editorExtension(): Extension;
@@ -45,6 +78,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   const serverNotificationSubscriptions = new Map<string, number>();
   const clientNotificationSubscriptions = new Map<string, number>();
   const rpcKeepAliveTimers = new Map<string, number>();
+  const rpcConnectControllers = new Set<AbortController>();
   let config: InfoviewConfig = { ...defaultInfoviewConfig };
   let initialized = false;
   let disposed = false;
@@ -187,10 +221,19 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   async function createRpcSession(uri: string): Promise<string> {
     const client = currentClient();
     client.sync();
-    const connected = await client.request<{ uri: string }, { sessionId: string | number }>(
-      "$/lean/rpc/connect",
-      { uri },
-    );
+    const controller = new AbortController();
+    rpcConnectControllers.add(controller);
+    let connected: { sessionId: string | number };
+    try {
+      connected = await abortableClientRequest(
+        client,
+        "$/lean/rpc/connect",
+        { uri },
+        controller.signal,
+      );
+    } finally {
+      rpcConnectControllers.delete(controller);
+    }
     const sessionId = String(connected.sessionId);
     const timer = window.setInterval(() => {
       options.client()?.notification("$/lean/rpc/keepAlive", { sessionId, uri });
@@ -208,6 +251,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   function closeRpcSessions(): void {
+    for (const controller of rpcConnectControllers) {
+      controller.abort();
+    }
     for (const sessionId of [...rpcKeepAliveTimers.keys()]) {
       closeRpcSession(sessionId);
     }
@@ -227,16 +273,8 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     async sendClientRequest(_uri, method, params, requestOptions) {
       const client = currentClient();
       client.sync();
-      const request = client.request(method, params);
-      const abort = () => {
-        client.cancelRequest(params);
-      };
-      requestOptions?.abortSignal?.addEventListener("abort", abort, { once: true });
-      try {
-        return await request;
-      } finally {
-        requestOptions?.abortSignal?.removeEventListener("abort", abort);
-      }
+      const abortSignal = requestOptions?.abortSignal;
+      return abortableClientRequest(client, method, params, abortSignal);
     },
     async sendClientNotification(_uri, method, params) {
       currentClient().notification(method, params);

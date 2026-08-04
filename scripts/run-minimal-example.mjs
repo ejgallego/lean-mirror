@@ -16,6 +16,8 @@ const runFinished = new Promise((resolve) => {
   finishRun = resolve;
 });
 
+class BackendPreparationFailedError extends Error {}
+
 function spawnChild(command, args, env) {
   const child = spawn(command, args, {
     cwd: rootDir,
@@ -88,10 +90,15 @@ async function waitForBackend(child, timeoutMs = 120_000) {
           return;
         }
         if (status?.phase === "failed") {
-          throw new Error(status.message ?? "Minimal example backend preparation failed.");
+          throw new BackendPreparationFailedError(
+            status.message ?? "Minimal example backend preparation failed.",
+          );
         }
       }
     } catch (error) {
+      if (error instanceof BackendPreparationFailedError) {
+        throw error;
+      }
       lastError = error instanceof Error ? error.message : String(error);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));

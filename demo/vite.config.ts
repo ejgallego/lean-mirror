@@ -2,7 +2,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
+import { leanMirrorSourceAliases } from "../scripts/vite-source-aliases.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = resolve(__dirname, "..");
 const apiManagedDirectories = [
   resolve(__dirname, "rust-blocks"),
   resolve(__dirname, "workspace"),
@@ -16,31 +19,13 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "@leanprover/editor-platform": resolve(__dirname, "../packages/editor-platform/src/index.ts"),
-      "@leanprover/infoview": resolve(
-        __dirname,
-        "../node_modules/@leanprover/infoview/dist/index.production.min.js",
-      ),
-      "codemirror-lean4-lsp/infoview": resolve(__dirname, "../src/infoview.ts"),
-      "codemirror-lean4-lsp/infoview.css": resolve(
-        __dirname,
-        "../node_modules/@leanprover/infoview/dist/index.css",
-      ),
-      "codemirror-lean4-lsp": resolve(__dirname, "../src/index.ts"),
-      "react/jsx-runtime": resolve(
-        __dirname,
-        "../node_modules/@leanprover/infoview/dist/react-jsx-runtime.production.min.js",
-      ),
-      "react-dom": resolve(__dirname, "../node_modules/@leanprover/infoview/dist/react-dom.production.min.js"),
-      react: resolve(__dirname, "../node_modules/@leanprover/infoview/dist/react.production.min.js"),
-    },
+    alias: leanMirrorSourceAliases(repositoryRoot),
   },
   server: {
     host: process.env.DEMO_FRONTEND_HOST ?? "127.0.0.1",
     port: Number(process.env.DEMO_FRONTEND_PORT ?? "5173"),
     fs: {
-      allow: [resolve(__dirname, "..")],
+      allow: [repositoryRoot],
     },
     watch: {
       ignored: apiManagedDirectories,

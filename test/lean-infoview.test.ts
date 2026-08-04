@@ -297,6 +297,49 @@ describe("Lean infoview host", () => {
     harness.client.disconnect();
   });
 
+  it("settles aborted RPC requests before the disconnected client times out", async () => {
+    const harness = await createHarness();
+    const pending = new Promise<never>(() => undefined);
+    harness.transport.onRequest("$/lean/rpc/call", () => pending);
+    const abortController = new AbortController();
+    const params = { method: "Lean.Widget.getInteractiveGoals" };
+
+    const request = harness.editorApi.sendClientRequest(
+      MAIN_URI,
+      "$/lean/rpc/call",
+      params,
+      { abortSignal: abortController.signal },
+    );
+    await waitFor(() => harness.transport.requests("$/lean/rpc/call").length === 1);
+    abortController.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await waitFor(() => harness.transport.notifications("$/cancelRequest").length === 1);
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
+  it("aborts a pending RPC session connection when the server stops", async () => {
+    const harness = await createHarness();
+    harness.transport.onRequest(
+      "$/lean/rpc/connect",
+      () => new Promise<never>(() => undefined),
+    );
+
+    const session = harness.editorApi.createRpcSession(MAIN_URI);
+    await waitFor(() => harness.transport.requests("$/lean/rpc/connect").length === 1);
+    harness.host.serverStopped({ message: "Lean stopped.", reason: "test" });
+
+    await expect(session).rejects.toMatchObject({ name: "AbortError" });
+    await waitFor(() => harness.transport.notifications("$/cancelRequest").length === 1);
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
   it("owns Lean RPC keep-alive timers until close or host teardown", async () => {
     const harness = await createHarness();
     const setInterval = vi.spyOn(window, "setInterval");

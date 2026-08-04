@@ -12,10 +12,14 @@ test.skip(
 
 test("minimal example starts, diagnoses, follows the cursor, and reconnects", async ({ page }) => {
   const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") {
       consoleErrors.push(message.text());
     }
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
   });
 
   await page.goto("/");
@@ -49,6 +53,23 @@ test("minimal example starts, diagnoses, follows the cursor, and reconnects", as
   await expect(page.locator("#lean-generation")).toHaveText("Generation 2");
   await expect(statusValue("status")).toHaveText("Ready");
   await expect(content).toContainText("#check MissingLeanName");
-  await expect(page.locator("#lean-infoview")).toContainText("Helper.lean");
+
+  await content.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Control+Shift+ArrowLeft");
+  await page.keyboard.type("Nat");
+  await expect(content).toContainText("#check Nat");
+  await expect(page.locator("#minimal-editor .cm-lintRange-error")).toHaveCount(0);
+  await expect(statusValue("diagnostics")).toContainText("0 errors");
+
+  await page.keyboard.type("\ndef generationTwo : Bool := true");
+  await expect(content).toContainText("def generationTwo : Bool := true");
+  await expect(page.locator("#lean-infoview")).toContainText("Helper.lean:7:32");
+  await expect(page.locator("#lean-infoview")).toContainText("Expected type");
+  await expect(page.locator("#lean-infoview")).toContainText("Bool");
+
+  // Leave time for late errors from canceled generation-one work to surface.
+  await page.waitForTimeout(3_250);
   expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
 });
