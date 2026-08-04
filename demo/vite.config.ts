@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const apiManagedDirectories = [
+  resolve(__dirname, "rust-blocks"),
+  resolve(__dirname, "workspace"),
+];
 
 export default defineConfig({
   root: resolve(__dirname),
@@ -39,6 +43,7 @@ export default defineConfig({
       allow: [resolve(__dirname, "..")],
     },
     watch: {
+      ignored: apiManagedDirectories,
       interval: Number(process.env.DEMO_WATCH_POLL_INTERVAL_MS ?? "500"),
       usePolling: process.env.DEMO_WATCH_USE_POLLING === "1",
     },

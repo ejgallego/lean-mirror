@@ -69,6 +69,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Rust and generated-Lean diagnostic results are rejected when they belong to an older edit generation.
 - Rebased demo error responses retain origin-aware CORS headers, and clean worktrees resolve the private editor-platform test package directly from source.
 - Browser E2E runs default to Vite polling so host file-watcher quotas do not prevent the test server from starting.
+- Vite ignores API-managed demo workspace files so persisted editor changes do not trigger a page reload under polling.
 
 ### Security
 
