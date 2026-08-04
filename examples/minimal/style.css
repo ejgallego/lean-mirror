@@ -1,0 +1,227 @@
+:root {
+  color: #1f2933;
+  background: #eef2f6;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid #b7c2cf;
+  border-radius: 0.45rem;
+  color: #17324d;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+button:hover:not(:disabled) {
+  border-color: #3777b5;
+  background: #f2f8ff;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.boot-message,
+.fatal-error {
+  max-width: 52rem;
+  margin: 4rem auto;
+  padding: 1.5rem;
+  border: 1px solid #d5dde6;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.editor-platform-shell {
+  width: min(96rem, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.editor-platform-shell-header {
+  margin-bottom: 0.75rem;
+}
+
+.editor-platform-shell-eyebrow {
+  margin: 0;
+  color: #49657f;
+  font-size: 0.8rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.editor-platform-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(21rem, 1fr);
+  gap: 1rem;
+}
+
+.editor-platform-side-rail {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.editor-platform-panel,
+.editor-platform-status-card {
+  overflow: hidden;
+  border: 1px solid #d5dde6;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 0.25rem 1rem rgb(33 56 80 / 8%);
+}
+
+.editor-platform-panel-head {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #e2e8ef;
+}
+
+.editor-platform-panel-head h2,
+.editor-platform-panel-head p {
+  margin: 0;
+}
+
+.editor-platform-panel-head h2 {
+  font-size: 1rem;
+}
+
+.editor-platform-panel-head p {
+  margin-top: 0.25rem;
+  color: #657789;
+  font-size: 0.85rem;
+}
+
+.minimal-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid #e2e8ef;
+  background: #f7f9fb;
+}
+
+#lean-generation {
+  color: #526b82;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+#lean-generation[data-phase="ready"] {
+  color: #13714b;
+}
+
+.minimal-editor-mount {
+  height: min(72vh, 48rem);
+}
+
+.minimal-editor-mount .cm-editor {
+  font-size: 0.92rem;
+}
+
+.editor-platform-status-card {
+  padding: 0.7rem 0.9rem;
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #edf1f5;
+  font-size: 0.8rem;
+}
+
+.status-row:last-child {
+  border-bottom: 0;
+}
+
+.status-row > span:first-child {
+  color: #657789;
+}
+
+.status-row code {
+  overflow-wrap: anywhere;
+}
+
+.service-status {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.service-light {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #8091a2;
+}
+
+.service-status[data-state="ready"] .service-light {
+  background: #25a56a;
+}
+
+.service-status[data-state="pending"] .service-light {
+  background: #d7981e;
+}
+
+.service-status[data-state="failed"] .service-light {
+  background: #d14343;
+}
+
+.editor-platform-info-host {
+  min-height: 15rem;
+  max-height: 43vh;
+  overflow: auto;
+  padding: 0.65rem;
+}
+
+.editor-platform-secondary-host {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.65rem;
+}
+
+.event {
+  padding: 0.4rem 0.5rem;
+  border-radius: 0.35rem;
+  color: #40586e;
+  background: #f2f5f8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.event[data-level="error"] {
+  color: #8b2525;
+  background: #fff0f0;
+}
+
+@media (max-width: 900px) {
+  .editor-platform-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .minimal-editor-mount {
+    height: 58vh;
+  }
+}

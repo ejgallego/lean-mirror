@@ -27,7 +27,9 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "demo/**/*.ts",
+    "examples/**/*.ts",
     "playwright.config.ts",
+    "playwright.minimal.config.ts",
     "vitest.config.ts"
   ],
   "exclude": [

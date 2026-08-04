@@ -271,6 +271,25 @@ provide its own `Workspace` implementation.
 
 ## Demo
 
+### Minimal experiment host
+
+The smallest browser integration needs only `lean` and `lake` on `PATH`:
+
+```bash
+npm run example:minimal
+```
+
+Open `http://127.0.0.1:5273`. This example displays one Lean document and
+combines `LeanEditorSession`, `LeanWorkspace`, the optional official infoview,
+and the shared editor-platform shell. Its browser code imports toolkit features
+only through package entry points, and its reconnect button preserves the
+CodeMirror document while replacing the Lean client generation.
+
+See [`examples/minimal/README.md`](./examples/minimal/README.md) for its scope
+and port overrides.
+
+### Full integration demo
+
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
 demo workspace pin Lean 4.33.0-rc1; an elan installation selects and installs that
 toolchain automatically. `rust-analyzer` can be installed with

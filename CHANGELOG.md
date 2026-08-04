@@ -32,6 +32,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - An opt-in external Anneal demo with generated-workspace caching, switchable Zerocopy examples, Rust-host freshness tracking, and manual or automatic regeneration.
 - A managed external-demo E2E command that waits for Zerocopy examples, runs only their browser checks, and tears the demo stack down.
 - An always-on Verso consumer contract for the private editor-platform boundary, plus a workspace runner for validating the real sibling project.
+- A minimal public-entry-point browser example with one Lean document, the official infoview, the shared shell, reconnection, and focused E2E coverage.
 
 ### Changed
 
@@ -56,6 +57,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - The demo runtime and backend workspace now delegate embedded Lean LSP behavior, lifecycle helpers, document synthesis, and external example configuration to focused modules.
 - Zerocopy example presets and presentation metadata now live entirely in the experiment wrapper; the generic backend accepts only configured external examples and descriptors.
 - Generation-key calculation reuses identical project fingerprints when target and generator manifests share a project.
+- GitHub CI now uses the Node 24-based v7 checkout and setup-node actions.
 
 ### Fixed
 
