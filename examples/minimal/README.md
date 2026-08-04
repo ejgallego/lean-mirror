@@ -5,18 +5,26 @@ This example is the smallest browser host in the repository that combines:
 - one CodeMirror Lean document;
 - `LeanEditorSession` and `LeanWorkspace` lifecycle ownership;
 - the optional official Lean infoview adapter;
-- the editor-platform status, event, and workspace shell;
+- a copyable editor composition that imports only public package entries;
+- the private editor-platform status, event, and workspace shell;
 - a session-safe Lean reconnect button.
 
-The browser source imports the published toolkit through
-`codemirror-lean4-lsp` and `codemirror-lean4-lsp/infoview`. It also composes the
-currently private `@leanprover/editor-platform` workspace prototype. Shared Vite
-aliases point those package names at this checkout so both the public boundary
-and private shell experiment can be exercised from source.
+[`publicLeanEditor.ts`](./publicLeanEditor.ts) is the reusable boundary. It
+mounts CodeMirror, `LeanEditorSession`, `LeanWorkspace`, WebSocket transport,
+and the official infoview using only the published toolkit entries and their
+direct peer dependencies. [`main.ts`](./main.ts) is deliberately a separate
+repository shell adapter: it fetches the demo backend session and renders the
+currently private `@leanprover/editor-platform` prototype.
 
-This repository example is not included in the npm tarball and is not yet a
-standalone application template. External hosts should install the public
-package entries and supply their own process supervision and shell.
+Shared Vite aliases exercise the package boundary from source in this example.
+The packed-browser gate copies the exact `publicLeanEditor.ts` module into an
+isolated Vite app, installs the generated npm tarball without aliases or
+workspace packages, makes a production bundle, and runs the same real-Lean
+startup, diagnostics, infoview, editing, and reconnect scenario.
+
+This repository example is not included in the npm tarball and is not a
+versioned application template. During `0.x`, adapt the composition at an exact
+package version; its public API may change without compatibility aliases.
 
 From the repository root, run:
 
@@ -40,6 +48,34 @@ Run its focused browser lifecycle coverage with:
 ```bash
 npm run test:e2e:minimal
 ```
+
+Run the external-consumer proof with:
+
+```bash
+npm run test:packed:browser
+```
+
+## External host recipe
+
+1. Install `codemirror-lean4-lsp`, `@leanprover/infoview`, React, CodeMirror
+   state/view, and `vscode-languageserver-protocol` as direct dependencies.
+
+   ```bash
+   npm install codemirror-lean4-lsp @leanprover/infoview react react-dom \
+     @codemirror/state @codemirror/view vscode-languageserver-protocol
+   ```
+
+2. Copy or adapt `publicLeanEditor.ts`; provide editor and infoview containers,
+   the initial Lean document, workspace root URI, and a WebSocket URL.
+3. Own the backend boundary in the application shell. It must supervise
+   `lean --server`, bridge JSON-RPC over the WebSocket, and load any additional
+   workspace document requested by the editor.
+4. Wire the callbacks into the host's status, diagnostic, persistence, and
+   reconnection UI. Supply a trusted `sanitizeHTML` function in production.
+
+The isolated app in [`test/packed-consumer`](../../test/packed-consumer) is the
+executable reference for package installation and bundling. It intentionally
+uses a small local shell rather than the private editor-platform package.
 
 The bundled backend is loopback-only development infrastructure. A production
 host should also configure a trusted `sanitizeHTML` function as described in

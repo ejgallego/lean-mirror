@@ -32,6 +32,7 @@
     "examples/**/*.ts",
     "playwright.config.ts",
     "playwright.minimal.config.ts",
+    "playwright.packed.config.ts",
     "vitest.config.ts"
   ],
   "exclude": [

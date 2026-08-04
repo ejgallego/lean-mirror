@@ -288,6 +288,12 @@ optional infoview entries with the currently private editor-platform shell
 prototype. Its reconnect button preserves the CodeMirror document while
 replacing the Lean client generation.
 
+The example separates a
+[copyable public-only editor composition](https://github.com/ejgallego/lean-mirror/blob/main/examples/minimal/publicLeanEditor.ts)
+from that private shell. `npm run test:packed:browser` copies the same
+composition into an isolated app, installs the generated tarball, production
+bundles it without repository aliases, and runs the real-Lean browser scenario.
+
 See the
 [minimal example guide](https://github.com/ejgallego/lean-mirror/blob/main/examples/minimal/README.md)
 for its repository-only infrastructure, scope, and port overrides.

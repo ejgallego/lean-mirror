@@ -1,0 +1,155 @@
+:root {
+  color: #1f2933;
+  background: #eef2f6;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+main {
+  width: min(96rem, 100%);
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+header h1,
+header p,
+.info-panel h2 {
+  margin: 0;
+}
+
+.eyebrow {
+  color: #49657f;
+  font-size: 0.8rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(21rem, 1fr);
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+
+aside {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.panel,
+.status-card {
+  overflow: hidden;
+  border: 1px solid #d5dde6;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid #e2e8ef;
+  background: #f7f9fb;
+}
+
+#lean-generation {
+  color: #526b82;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+}
+
+#lean-generation[data-phase="ready"] {
+  color: #13714b;
+}
+
+button {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid #b7c2cf;
+  border-radius: 0.45rem;
+  color: #17324d;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+#minimal-editor {
+  height: min(72vh, 48rem);
+}
+
+#minimal-editor .cm-editor {
+  font-size: 0.92rem;
+}
+
+.status-card {
+  padding: 0.7rem 0.9rem;
+}
+
+.status-row {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #edf1f5;
+  font-size: 0.8rem;
+}
+
+.status-row:last-child {
+  border-bottom: 0;
+}
+
+.status-row > span:first-child {
+  color: #657789;
+}
+
+.status-row code {
+  overflow-wrap: anywhere;
+}
+
+.info-panel h2 {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #e2e8ef;
+  font-size: 1rem;
+}
+
+#lean-infoview {
+  min-height: 15rem;
+  max-height: 43vh;
+  overflow: auto;
+  padding: 0.65rem;
+}
+
+#fatal-error:empty {
+  display: none;
+}
+
+#fatal-error {
+  margin: 0;
+  padding: 0.75rem;
+  color: #8b2525;
+  white-space: pre-wrap;
+  background: #fff0f0;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}

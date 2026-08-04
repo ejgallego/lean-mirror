@@ -1,13 +1,3 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { EditorState } from "@codemirror/state";
-import {
-  drawSelection,
-  EditorView,
-  highlightActiveLine,
-  highlightActiveLineGutter,
-  keymap,
-  lineNumbers,
-} from "@codemirror/view";
 import {
   createDocumentSnapshot,
   createEditorPlatformShellView,
@@ -19,23 +9,10 @@ import {
   type DiagnosticSeverity,
   type EditorDiagnostic,
 } from "@leanprover/editor-platform";
-import {
-  createLeanEditorSession,
-  createLeanWorkspace,
-  createWebSocketTransport,
-  lean4,
-  leanFallbackHighlightStyle,
-  waitForWebSocketOpen,
-  type LeanWorkspace,
-} from "codemirror-lean4-lsp";
-import {
-  createLeanInfoviewHost,
-  leanInfoviewClientNotifications,
-  type LeanInfoviewHost,
-} from "codemirror-lean4-lsp/infoview";
-import "codemirror-lean4-lsp/infoview.css";
+import type { LeanEditorSessionState } from "codemirror-lean4-lsp";
 import type * as lsp from "vscode-languageserver-protocol";
 
+import { mountLeanEditor, type MountedLeanEditor } from "./publicLeanEditor.js";
 import "./style.css";
 
 interface BackendSession {
@@ -53,7 +30,7 @@ const leanService = {
 } as const;
 
 void start().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   const app = document.querySelector<HTMLElement>("#app");
   if (app) {
     app.innerHTML = `<section class="fatal-error"><h1>Lean editor failed to start</h1><pre></pre></section>`;
@@ -91,8 +68,6 @@ async function start(): Promise<void> {
     },
   });
   const editorHost = shell.editorHost as HTMLElement;
-  const infoviewHost = shell.infoHost as HTMLElement;
-  const eventHost = shell.secondaryHost as HTMLElement;
   const controls = document.createElement("div");
   controls.className = "minimal-controls";
   const generation = document.createElement("span");
@@ -102,9 +77,9 @@ async function start(): Promise<void> {
   restartButton.id = "restart-lean";
   restartButton.type = "button";
   restartButton.textContent = "Reconnect Lean";
-  controls.append(generation, restartButton);
   const editorMount = document.createElement("div");
   editorMount.className = "minimal-editor-mount";
+  controls.append(generation, restartButton);
   editorHost.append(controls, editorMount);
 
   const renderPlatform = () => {
@@ -113,7 +88,7 @@ async function start(): Promise<void> {
       diagnosticsScope: "active-document",
       workspaceUri: backendSession.rootUri,
     });
-    renderEditorPlatformLogPanel(eventHost, platformStore.snapshot.logs, {
+    renderEditorPlatformLogPanel(shell.secondaryHost, platformStore.snapshot.logs, {
       emptyText: "No events yet.",
       levels: ["info", "warn", "error"],
       maxEntries: 8,
@@ -129,48 +104,15 @@ async function start(): Promise<void> {
   }));
   platformStore.setActiveDocument(documentUri);
 
-  let infoview: LeanInfoviewHost | null = null;
-  let editorView: EditorView | null = null;
-  let documentVersion = 0;
-  let reconnecting: Promise<void> | null = null;
-
-  const workspaceFactory = createLeanWorkspace({
-    async displayDocument(uri) {
-      return uri === documentUri ? editorView : null;
-    },
-    async loadDocument(uri) {
-      return {
-        doc: uri === documentUri ? initialSource : await fetchDocument(uri),
-      };
-    },
-  });
-  const leanSession = createLeanEditorSession({
-    client: {
-      extensions: [leanInfoviewClientNotifications(() => infoview)],
-      features: {
-        semanticTokens: true,
-      },
-      notificationHandlers: {
-        "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
-          infoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
-          platformStore.setDocumentDiagnostics(
-            params.uri,
-            params.diagnostics.map((diagnostic) => platformDiagnostic(params.uri, diagnostic)),
-          );
-          return false;
-        },
-      },
-      rootUri: backendSession.rootUri,
-      timeout: 20_000,
-      unhandledNotification(_client, method, params) {
-        infoview?.forwardServerNotification(method, params);
-      },
-      workspace: workspaceFactory,
-    },
-  });
-  const unsubscribeSession = leanSession.subscribe((state) => {
+  let editor: MountedLeanEditor | null = null;
+  let lastSessionPhase: LeanEditorSessionState["phase"] = "idle";
+  const onSessionState = (state: LeanEditorSessionState) => {
+    lastSessionPhase = state.phase;
     generation.textContent = `Generation ${state.generation}`;
     generation.dataset.phase = state.phase;
+    const isReconnect = state.generation > 1 && state.phase === "initializing";
+    restartButton.disabled = isReconnect;
+    restartButton.textContent = isReconnect ? "Reconnecting…" : "Reconnect Lean";
     switch (state.phase) {
       case "idle":
         if (state.generation > 0) {
@@ -190,124 +132,52 @@ async function start(): Promise<void> {
         leanRuntime.stopped("Disposed");
         break;
     }
-  }, { emitCurrent: true });
+  };
 
-  async function connect(reconnect: boolean): Promise<void> {
-    const socket = new WebSocket(backendSession.websocketUrl);
-    try {
-      await waitForWebSocketOpen(socket);
-    } catch (error) {
-      socket.close();
-      throw error;
-    }
-    const connection = reconnect
-      ? leanSession.reconnect(createWebSocketTransport(socket), {
-          disposeTransport: () => socket.close(),
-        })
-      : leanSession.connect(createWebSocketTransport(socket), {
-          disposeTransport: () => socket.close(),
-        });
-    await connection.initialized;
-  }
-
-  await connect(false);
-  infoview = createLeanInfoviewHost({
-    client: () => leanSession.client,
-    container: infoviewHost,
-    currentLanguageId: () => languageId,
-    currentUri: () => documentUri,
-    currentView: () => editorView,
-    requestRestart(reason) {
-      void reconnect(reason).catch(() => undefined);
+  editor = await mountLeanEditor({
+    document: {
+      languageId,
+      source: initialSource,
+      uri: documentUri,
     },
-    workspace: () =>
-      (leanSession.client?.workspace as LeanWorkspace | undefined) ?? null,
-  });
-  infoview.serverRestarted();
-
-  editorView = new EditorView({
-    parent: editorMount,
-    state: EditorState.create({
-      doc: initialSource,
-      extensions: [
-        lineNumbers(),
-        highlightActiveLineGutter(),
-        history(),
-        drawSelection(),
-        highlightActiveLine(),
-        keymap.of([...defaultKeymap, ...historyKeymap]),
-        EditorView.updateListener.of((update) => {
-          if (!update.docChanged) {
-            return;
-          }
-          documentVersion += 1;
-          platformStore.setDocument(createDocumentSnapshot({
-            languageId,
-            openState: "open",
-            syncState: "dirty",
-            uri: documentUri,
-            version: documentVersion,
-          }));
-        }),
-        ...lean4({
-          extraExtensions: [infoview.editorExtension()],
-          highlightStyle: leanFallbackHighlightStyle,
-          session: leanSession,
-          uri: documentUri,
-          utilities: {
-            lineWrapping: true,
-          },
-        }),
-        EditorView.theme({
-          "&": { height: "100%" },
-          ".cm-scroller": { overflow: "auto" },
-        }),
-      ],
-    }),
-  });
-  infoview.updateCursorLocation();
-
-  async function reconnect(reason = "User requested reconnection"): Promise<void> {
-    if (reconnecting) {
-      return reconnecting;
-    }
-    restartButton.disabled = true;
-    restartButton.textContent = "Reconnecting…";
-    leanRuntime.stale(reason);
-    infoview?.serverStopped({ message: "Lean is reconnecting.", reason });
-    const task = connect(true).then(() => {
-      infoview?.serverRestarted();
-      infoview?.updateCursorLocation();
-    });
-    reconnecting = task;
-    try {
-      await task;
-    } catch (error) {
-      if (leanSession.state.phase !== "failed") {
+    editorContainer: editorMount,
+    infoviewContainer: shell.infoHost as HTMLElement,
+    loadDocument: fetchDocument,
+    onDiagnostics(params) {
+      platformStore.setDocumentDiagnostics(
+        params.uri,
+        params.diagnostics.map((diagnostic) => platformDiagnostic(params.uri, diagnostic)),
+      );
+    },
+    onDocumentChange(_source, version) {
+      platformStore.setDocument(createDocumentSnapshot({
+        languageId,
+        openState: "open",
+        syncState: "dirty",
+        uri: documentUri,
+        version,
+      }));
+    },
+    onError(error) {
+      if (lastSessionPhase !== "failed") {
         leanRuntime.failed(errorMessage(error), { recoverable: true });
       }
-      throw error;
-    } finally {
-      if (reconnecting === task) {
-        reconnecting = null;
-      }
-      restartButton.disabled = false;
-      restartButton.textContent = "Reconnect Lean";
-    }
-  }
-
-  restartButton.addEventListener("click", () => {
-    void reconnect().catch(() => undefined);
+    },
+    onReconnectStart(reason) {
+      leanRuntime.stale(reason);
+    },
+    onSessionState,
+    rootUri: backendSession.rootUri,
+    websocketUrl: backendSession.websocketUrl,
   });
 
-  const dispose = () => {
+  restartButton.addEventListener("click", () => {
+    void editor?.reconnect().catch(() => undefined);
+  });
+  window.addEventListener("beforeunload", () => {
     unsubscribePlatform();
-    unsubscribeSession();
-    infoview?.dispose();
-    editorView?.destroy();
-    leanSession.dispose();
-  };
-  window.addEventListener("beforeunload", dispose, { once: true });
+    editor?.dispose();
+  }, { once: true });
 }
 
 async function fetchBackendSession(): Promise<BackendSession> {

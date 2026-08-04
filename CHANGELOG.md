@@ -33,6 +33,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - A managed external-demo E2E command that waits for Zerocopy examples, runs only their browser checks, and tears the demo stack down.
 - An always-on Verso consumer contract for the private editor-platform boundary, plus a workspace runner for validating the real sibling project.
 - A minimal public-entry-point browser example with one Lean document, the official infoview, the shared shell, reconnection, and focused E2E coverage.
+- An isolated packed-browser consumer gate that production-bundles a public-only editor composition and exercises startup, diagnostics, infoview, editing, and reconnection against a real Lean server.
 
 ### Changed
 
@@ -59,6 +60,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Generation-key calculation reuses identical project fingerprints when target and generator manifests share a project.
 - GitHub CI now uses the Node 24-based v7 checkout and setup-node actions.
 - Demo browser configurations now share one source-alias manifest, Playwright launchers share guaranteed workspace cleanup, and TypeScript checks reject unused code across packages.
+- The minimal example now separates its reusable public-package editor composition from the private editor-platform shell adapter.
 
 ### Fixed
 

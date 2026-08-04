@@ -28,6 +28,14 @@ type-checks an infoview consumer, imports the browser entry, and verifies the
 packaged stylesheet and font. The temporary installation disables dependency
 install scripts.
 
+`npm run test:packed:browser` extends that gate with the optional browser peers,
+the repository's public-only editor composition, and Vite. It type-checks and
+production-bundles the isolated app without source aliases, then serves the
+built assets against a real `lean --server` backend and reuses the minimal
+startup, diagnostics, infoview, editing, and reconnect smoke. This browser form
+is included in `npm run ci`; the lighter `test:packed` remains suitable for the
+publish preflight.
+
 ## Publish
 
 Publishing is performed from `https://github.com/ejgallego/lean-mirror`. Publish only from a

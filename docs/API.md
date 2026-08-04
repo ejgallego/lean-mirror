@@ -207,8 +207,12 @@ React runtime imports.
 active `LSPClient`, `LeanWorkspace`, and CodeMirror view. It owns RPC keep-alive
 timers, counted notification subscriptions, cursor synchronization, text
 insertion, document display, restart requests, clipboard access, and atomic
-workspace edits. `dispose()`, `serverStopped()`, and `serverRestarted()` clear
-active RPC timers.
+workspace edits. Requests made through the infoview `EditorApi` honor its
+optional `AbortSignal`: aborting sends `$/cancelRequest` to the active client
+generation and settles the browser-side promise immediately with an error named
+`AbortError`, without waiting for the client's request timeout. `dispose()`,
+`serverStopped()`, and `serverRestarted()` abort pending
+`$/lean/rpc/connect` requests and clear active keep-alive timers.
 
 Add `leanInfoviewClientNotifications(() => host)` to the session client
 extensions. It observes client-to-server notifications at the transport

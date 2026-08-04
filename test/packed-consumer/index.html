@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Packed Lean Editor Consumer</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Packed-package contract</p>
+        <h1>Lean Editor</h1>
+      </header>
+      <section class="layout">
+        <article class="panel editor-panel">
+          <div class="controls">
+            <span id="lean-generation">Generation 0</span>
+            <button id="restart-lean" type="button">Reconnect Lean</button>
+          </div>
+          <div id="minimal-editor" aria-label="Lean editor"></div>
+        </article>
+        <aside>
+          <section class="status-card" aria-label="Editor status">
+            <div class="status-row">
+              <span>Service</span>
+              <span data-platform-status-part="value" data-platform-status-kind="status">Starting</span>
+            </div>
+            <div class="status-row">
+              <span>Document</span>
+              <code data-platform-status-part="value" data-platform-status-kind="document">Loading</code>
+            </div>
+            <div class="status-row">
+              <span>Diagnostics</span>
+              <span data-platform-status-part="value" data-platform-status-kind="diagnostics">0 errors · 0 warnings</span>
+            </div>
+          </section>
+          <section class="panel info-panel">
+            <h2>Lean Infoview</h2>
+            <div id="lean-infoview" aria-label="Lean infoview"></div>
+          </section>
+          <pre id="fatal-error" aria-live="assertive"></pre>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="./browser-main.ts"></script>
+  </body>
+</html>
