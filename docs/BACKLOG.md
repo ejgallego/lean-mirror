@@ -13,4 +13,4 @@
 ## Shared editor platform
 
 - Keep the current boundary fixed until both `lean-mirror` and `verso-mirror` demonstrate another identical requirement.
-- Automate the second-consumer contract check before extracting or publishing the private platform packages.
+- Keep the committed Verso contract fixture synchronized with real `verso-mirror` usage, and run the full sibling-workspace check before extracting or publishing the private platform packages.

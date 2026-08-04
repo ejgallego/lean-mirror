@@ -70,6 +70,8 @@ For now this package lives inside `lean-mirror` and `verso-mirror` consumes it t
 
 That is intentional while the shared boundary is still being validated. If the API continues to be shared cleanly, this package can later move into a parent monorepo or a dedicated package repository.
 
+The platform test suite includes a Verso-shaped consumer contract covering the exact service, document, diagnostics, status, log, and workspace-shell APIs currently composed by that project. Run it directly with `npm run test:consumer:verso` from the repository root. With a sibling Verso checkout, `npm run test:consumer:verso:workspace` runs its full check, unit tests, and build.
+
 ## Next Boundary
 
 Host/editor messaging for VS Code custom editors and browser demos now has a shared typed envelope and transport adapter. Concrete VS Code extension registration, webview HTML, and process spawning should remain outside this package until the host boundary is clearer.

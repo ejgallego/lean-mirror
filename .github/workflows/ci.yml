@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - zerocopy-anneal-demo
   pull_request:
 
 permissions:

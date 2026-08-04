@@ -37,15 +37,19 @@ npm test
 npm run build
 ```
 
-5. From `../verso-mirror`, run the consumer checks that cover the changed API:
+5. Run the committed Verso API contract, which is also part of normal CI:
 
 ```bash
-npm run check
-npm test
-npm run build
+npm run test:consumer:verso
 ```
 
-Run `npm run test:lsp` in `verso-mirror` when shared changes touch service status, document synchronization, diagnostics, or bridge-facing behavior.
+6. When a sibling `verso-mirror` checkout is available, validate the real consumer:
+
+```bash
+npm run test:consumer:verso:workspace
+```
+
+Set `VERSO_MIRROR_ROOT=/path/to/verso-mirror` when it is not next to this repository. The workspace command runs the consumer's check, unit tests, and build. Run `npm run test:lsp` in `verso-mirror` as an additional integration check when shared changes touch service status, document synchronization, diagnostics, or bridge-facing behavior.
 
 ## Why Not Split Yet?
 

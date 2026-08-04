@@ -31,6 +31,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - An isolated packed-tarball consumer gate covering core-only and optional-infoview dependency installation, public types, runtime imports, and infoview assets.
 - An opt-in external Anneal demo with generated-workspace caching, switchable Zerocopy examples, Rust-host freshness tracking, and manual or automatic regeneration.
 - A managed external-demo E2E command that waits for Zerocopy examples, runs only their browser checks, and tears the demo stack down.
+- An always-on Verso consumer contract for the private editor-platform boundary, plus a workspace runner for validating the real sibling project.
 
 ### Changed
 

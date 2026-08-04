@@ -51,7 +51,7 @@ Before adding a new shared API:
 3. Add focused package tests for the shared behavior.
 4. Wire one `lean-mirror` consumer and one `verso-mirror` consumer when possible.
 5. Run `npm run check:platform`, `npm run test:platform`, and `npm run build:platform`.
-6. Run affected consumer checks in `lean-mirror` and `verso-mirror`.
+6. Run `npm run test:consumer:verso` and, when the sibling checkout is available, `npm run test:consumer:verso:workspace`.
 
 ## Near-Term Backlog
 
