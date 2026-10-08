@@ -64,6 +64,9 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Empty string documents returned by host workspace loaders can now be cached, opened, and edited.
+- Synchronous server-to-client request handler failures now produce JSON-RPC error responses and notify the host error callback.
+
 - WebSocket transport sends now report connecting sockets instead of silently dropping JSON-RPC messages, while terminal teardown sends remain harmless.
 - Hidden workspace edits coalesce into one immutable, correctly versioned LSP update; no-op edits no longer advance versions.
 - Cached-but-closed files no longer emit `didChange` without `didOpen`; pending edits are flushed before close and preserved across direct-client reconnection.

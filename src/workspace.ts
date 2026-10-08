@@ -274,7 +274,7 @@ export class LeanWorkspace extends Workspace {
 
   private async loadFile(uri: string): Promise<LeanWorkspaceFile | null> {
     const loaded = await this.options.loadDocument?.(uri);
-    if (!loaded) {
+    if (loaded === null || loaded === undefined) {
       return null;
     }
     const normalized = normalizeLoadedDocument(loaded);
