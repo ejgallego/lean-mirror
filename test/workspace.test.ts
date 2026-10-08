@@ -30,6 +30,43 @@ function createInitializedClient(workspace: ReturnType<typeof createLeanWorkspac
 }
 
 describe("LeanWorkspace", () => {
+  it("loads, opens, and edits an empty string document", async () => {
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({ loadDocument: () => "" }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    try {
+      const file = await workspace.requestFile(HELPER_URI);
+      expect(file?.doc.toString()).toBe("");
+      expect(await workspace.requestFile(HELPER_URI)).toBe(file);
+      expect(transport.notifications("textDocument/didOpen")).toHaveLength(0);
+
+      const lease = await workspace.acquireServerDocument(HELPER_URI);
+      try {
+        expect(lease?.file).toBe(file);
+        await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
+        expect(transport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
+          textDocument: { uri: HELPER_URI, text: "", version: 0 },
+        });
+
+        workspace.updateFile(HELPER_URI, { changes: { from: 0, insert: "#check Nat\n" } });
+        client.sync();
+        await waitFor(() => transport.notifications("textDocument/didChange").length === 1);
+        expect(file?.doc.toString()).toBe("#check Nat\n");
+        expect(transport.notifications("textDocument/didChange")[0]?.params).toMatchObject({
+          textDocument: { uri: HELPER_URI, version: 1 },
+          contentChanges: [{ text: "#check Nat\n" }],
+        });
+      } finally {
+        lease?.release();
+      }
+    } finally {
+      client.disconnect();
+    }
+  });
+
   it("loads hidden files and keeps their content updated", async () => {
     const { client } = createInitializedClient(
       createLeanWorkspace({

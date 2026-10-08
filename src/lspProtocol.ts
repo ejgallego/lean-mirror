@@ -83,7 +83,15 @@ export function createClientRequestHandlingTransport(
           return;
         }
 
-        void Promise.resolve(requestHandler(parsed.params, parsed)).then(
+        // Preserve synchronous handler side effects (for example creating a
+        // progress token before the next notification) while catching throws.
+        let result: unknown;
+        try {
+          result = requestHandler(parsed.params, parsed);
+        } catch (error) {
+          result = Promise.reject(error);
+        }
+        void Promise.resolve(result).then(
           (result) => {
             respond({
               jsonrpc: "2.0",

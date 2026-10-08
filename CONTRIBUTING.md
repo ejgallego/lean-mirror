@@ -1,5 +1,7 @@
 # Contributing
 
+Setup and the verification matrix are in [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
+
 ## Experimental API policy
 
 The top-level package export is the current Lean-specific experimentation surface:

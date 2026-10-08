@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readNpmPackEntry } from "./npm-pack.mjs";
+
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const root = fileURLToPath(new URL("..", import.meta.url));
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -38,49 +40,26 @@ for (const dependency of ["@leanprover/infoview", "react", "react-dom"]) {
   }
 }
 
-const pack =
-  process.platform === "win32"
-    ? spawnSync(npmCommand, ["pack", "--json", "--dry-run", "--cache", npmCache], {
-        cwd: root,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          npm_config_cache: npmCache,
-          NPM_CONFIG_CACHE: npmCache,
-        },
-      })
-    : spawnSync(
-        "/bin/bash",
-        [
-          "-lc",
-          `npm_config_cache=${JSON.stringify(npmCache)} ${JSON.stringify(npmCommand)} pack --json --dry-run --cache ${JSON.stringify(npmCache)}`,
-        ],
-        {
-          cwd: root,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            npm_config_cache: npmCache,
-            NPM_CONFIG_CACHE: npmCache,
-          },
-        },
-      );
+const pack = spawnSync(npmCommand, ["pack", "--json", "--dry-run", "--cache", npmCache], {
+  cwd: root,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    npm_config_cache: npmCache,
+    NPM_CONFIG_CACHE: npmCache,
+  },
+});
 
 if (pack.status !== 0) {
   process.stderr.write(pack.stderr ?? "");
   fail("npm pack --dry-run failed");
 }
 
-let result;
+let entry;
 try {
-  result = JSON.parse(pack.stdout);
+  entry = readNpmPackEntry(pack.stdout, packageJson.name);
 } catch (error) {
   fail(`Could not parse npm pack output: ${error instanceof Error ? error.message : String(error)}`);
-}
-
-const entry = Array.isArray(result) ? result[0] : null;
-if (!entry || !Array.isArray(entry.files)) {
-  fail("npm pack output did not include file metadata");
 }
 
 const packedFiles = new Set(entry.files.map((file) => file.path));
