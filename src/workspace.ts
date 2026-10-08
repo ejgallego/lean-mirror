@@ -68,7 +68,7 @@ function normalizeLoadedDocument(
  * Add a newly loaded document to mappings that were created while an LSP
  * request was in flight.
  *
- * @codemirror/lsp-client 6.2 creates reference mappings before asynchronously
+ * @codemirror/lsp-client 6.3 creates reference mappings before asynchronously
  * requesting response files, but only seeds them with files that were already
  * in the workspace. Its mapping registries are marked internal, so keep this
  * compatibility shim narrow and guarded.

@@ -357,7 +357,7 @@ async function runRealLeanConsumerExperiment() {
     await connection.initialized;
     assert(
       !connection.client.serverCapabilities?.documentFormattingProvider,
-      "Lean 4.33.0-rc1 unexpectedly advertises document formatting; revisit formatter integration",
+      "Lean unexpectedly advertises document formatting; revisit formatter integration",
     );
     const fileLease = await connection.client.workspace.acquireServerDocument(uri);
     assert(fileLease, "the real Lean experiment should open its document");
