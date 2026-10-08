@@ -15,7 +15,7 @@ npm run check:environment
 ```
 
 Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
-(`leanprover/lean4:v4.33.0-rc1`). Install rust-analyzer and Rust sources with
+(`leanprover/lean4:v4.34.1`). Install rust-analyzer and Rust sources with
 rustup. Primary CI uses Rust 1.89.0:
 
 ```bash
@@ -23,9 +23,9 @@ rustup toolchain install 1.89.0 --profile minimal --component rust-analyzer --co
 ```
 
 Select that toolchain in your shell when matching CI. `npm run check:environment`
-requires Lean, Lake, and rust-analyzer on PATH and checks Lean against the
-repository pin. `npm run ci` runs this prerequisite check first. Focused tests
-can still run without every integration prerequisite.
+requires matching root/demo Lean pins, Lean, Lake, and rust-analyzer on PATH, and
+checks Lean against the repository pin. `npm run ci` runs this prerequisite check
+first. Focused tests can still run without every integration prerequisite.
 
 ## Verification
 
@@ -43,6 +43,8 @@ The full command includes type checks, real Lean tests, demo and minimal browser
 tests, production builds, built-package consumers, package contents, and an
 isolated production-bundled browser consumer. GitHub CI selects the declared npm
 11 version and separately verifies packaging with Node 24 and npm 12.0.2.
+Isolated consumer installs revalidate registry metadata while reusing cached
+tarballs, so an older local npm cache cannot hide an updated dependency version.
 
 Run browser suites sequentially. Their launchers restore the tracked Rust and
 generated Lean demo fixtures before and after each suite. Do not mix them with
@@ -79,13 +81,21 @@ and npm 12.0.2. The final runtime revision also passed the full npm 11 command.
 Coverage includes 137 root tests, 46 platform tests, 10 adapter tests, the explicit
 Verso contract, 14 ordinary demo browser scenarios, and the minimal and packed
 browser scenarios. The three external Anneal scenarios remain a separate gate.
-The updated GitHub workflow was checked with actionlint; hosted execution follows
-when the branch is pushed.
+The updated GitHub workflow was checked with actionlint, and both hosted CI jobs
+passed in [takeover PR #4](https://github.com/ejgallego/lean-mirror/pull/4).
+
+The compatibility follow-up pins stable Lean 4.34.1 and CodeMirror LSP client
+6.3.0. Local validation passed the real-server and late-loaded-file mapping tests,
+ordinary and minimal browser scenarios, built-package consumers, and the isolated
+packed-browser scenario. The workspace mapping adapter remains unchanged because
+the upstream workspace implementation is unchanged. Packed-consumer installs now
+revalidate metadata after the upgrade exposed a stale npm cache; CI also rejects
+drift between the root and demo toolchain pins.
 
 The next product goal should identify a concrete host workflow and its acceptance
 criteria. Library experiments can start from `examples/minimal/publicLeanEditor.ts`;
-embedded Lean/Rust experiments use the full demo. Further toolchain upgrades,
-shared-package extraction, and external Anneal validation remain separate goals.
+embedded Lean/Rust experiments use the full demo. Shared-package extraction and
+external Anneal validation remain separate goals.
 
 Agent guidance stays short and records project-specific boundaries and completion
 criteria. Supporting documents are read when relevant to the task. This follows

@@ -37,16 +37,16 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
-- Root validation and the demo workspace now share the Lean 4.33.0-rc1 toolchain pin.
+- Root validation and the demo workspace now share the stable Lean 4.34.1 toolchain pin.
 - The demo now reconnects Lean client/server generations while preserving the active editor document, selection, and undo history.
 - Server-owned workspace documents now use `acquireServerDocument()` leases; the former unowned `openServerDocument()` operation was removed during the unstable `0.x` series.
-- Refreshed the compatible CodeMirror dependency family and pinned `@codemirror/lsp-client` 6.2.5 while the workspace mapping adapter depends on its guarded internal registries.
+- Refreshed the compatible CodeMirror dependency family and pinned `@codemirror/lsp-client` 6.3.0 while the workspace mapping adapter depends on its guarded internal registries.
 - Default Lean extensions now compose cross-file-aware navigation and rename commands instead of returning the unmodified upstream bundle.
 - `leanFileProgress()` cleanup is driven by `LeanEditorSession`; direct `createLeanLspClient()` users own extension cleanup.
 - The demo now owns its Lean client, progress state, and WebSocket through `LeanEditorSession`, including unload/reload coverage.
 - The demo infoview now delegates workspace edits to `applyLeanWorkspaceEdit()` instead of maintaining a second permissive edit engine.
 - Infoview client-notification forwarding now uses a generation-scoped transport extension instead of mutating each `LSPClient.notification` method.
-- The Lean formatting keymap is opt-in because Lean 4.33.0-rc1 does not advertise document formatting; custom servers can enable it with `features.formatKeymap`.
+- The Lean formatting keymap is opt-in because Lean 4.34.1 does not advertise document formatting; custom servers can enable it with `features.formatKeymap`.
 - Embedded fenced-block parsing now preserves correct UTF-16 offsets on CRLF input and gives duplicate labels stable generated keys.
 - Lean fallback language support leaves syntax colors to the host unless a `highlightStyle` is supplied.
 - `LeanWorkspace` explicitly supports one editor view per URI and rejects divergent duplicate views.
@@ -67,6 +67,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Empty string documents returned by host workspace loaders can now be cached, opened, and edited.
 - Synchronous server-to-client request handler failures now produce JSON-RPC error responses and notify the host error callback.
 - Packaging checks preserve the selected npm executable and accept both npm 11 and npm 12 JSON output.
+- Isolated packed consumers revalidate registry metadata so stale npm caches cannot reject newly pinned dependency versions.
 - Full CI now fails early for missing Lean/Lake/Rust prerequisites or a Lean version that differs from the repository toolchain pin.
 - WebSocket transport sends now report connecting sockets instead of silently dropping JSON-RPC messages, while terminal teardown sends remain harmless.
 - Hidden workspace edits coalesce into one immutable, correctly versioned LSP update; no-op edits no longer advance versions.

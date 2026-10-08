@@ -301,7 +301,7 @@ for its repository-only infrastructure, scope, and port overrides.
 ### Full integration demo
 
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
-demo workspace pin Lean 4.33.0-rc1; an elan installation selects and installs that
+demo workspace pin Lean 4.34.1; an elan installation selects and installs that
 toolchain automatically. `rust-analyzer` can be installed with
 `rustup component add rust-analyzer rust-src`. External Anneal mode also needs
 `cargo` and a checkout of the Rust project whose examples you want to open.

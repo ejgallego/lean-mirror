@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const toolchain = readFileSync(new URL("../lean-toolchain", import.meta.url), "utf8").trim();
+const demoToolchain = readFileSync(new URL("../demo/workspace/lean-toolchain", import.meta.url), "utf8").trim();
+if (toolchain !== demoToolchain) {
+  throw new Error(`Root and demo Lean toolchain pins must match: ${toolchain} versus ${demoToolchain}.`);
+}
 const expectedLeanVersion = /^leanprover\/lean4:v(.+)$/.exec(toolchain)?.[1];
 if (!expectedLeanVersion) {
   throw new Error(`Cannot verify Lean version for toolchain ${toolchain}. Update the CI environment check.`);

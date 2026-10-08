@@ -82,11 +82,11 @@ document changes so a later reconnect reopens their latest full text.
 
 The default extensions returned by `leanLspExtensions()` use Lean-aware
 navigation and rename commands. Navigation accepts both LSP `Location` and
-`LocationLink` responses; Lean 4.33 uses the latter for cross-file definitions.
+`LocationLink` responses; Lean uses the latter for cross-file definitions.
 Reference mappings also learn about files that `requestFile()` loads after the
 request starts.
 
-Document formatting is not enabled by default because Lean 4.33.0-rc1 does not
+Document formatting is not enabled by default because Lean 4.34.1 does not
 advertise an LSP formatter. A custom Lean server that implements
 `textDocument/formatting` can opt into the standard CodeMirror shortcut with
 `features: { formatKeymap: true }`. Hosts can also import `formatDocument` and
