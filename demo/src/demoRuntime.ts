@@ -90,6 +90,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
+  let rustMainPushTicket: DiagnosticGenerationTicket | null = null;
   let rustMainSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainPersistTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainAutoRegenerateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -370,6 +371,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           if (
             disposed ||
             !rustMainDiagnosticGate.isCurrent(ticket) ||
+            (rustMainPushTicket !== null && rustMainDiagnosticGate.isCurrent(rustMainPushTicket)) ||
             report.kind !== "full"
           ) {
             return;
@@ -1059,6 +1061,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             !rustMainDiagnosticGate.acceptsPush(params.version)
           ) {
             return true;
+          }
+          // rust-analyzer's pulls omit Cargo diagnostics. Once a push is
+          // accepted for this version, an empty native pull must not erase it.
+          if (params.uri === session.rustMainDocumentUri) {
+            rustMainPushTicket = rustMainDiagnosticGate.ticket();
           }
           return applyRustMainDiagnostics(params);
         },

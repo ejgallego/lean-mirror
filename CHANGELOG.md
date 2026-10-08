@@ -66,6 +66,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Current-version Rust push diagnostics survive later native pull responses that omit Cargo errors; demo browser scenarios restore the local Rust fixture independently.
+
 - Empty string documents returned by host workspace loaders can now be cached, opened, and edited.
 - Synchronous server-to-client request handler failures now produce JSON-RPC error responses and notify the host error callback.
 - Packaging checks preserve the selected npm executable and accept both npm 11 and npm 12 JSON output.
