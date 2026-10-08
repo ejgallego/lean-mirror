@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
+
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
