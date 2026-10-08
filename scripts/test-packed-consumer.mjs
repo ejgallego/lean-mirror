@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { runPlaywrightSuite } from "./run-playwright-suite.mjs";
+import { readNpmPackEntry } from "./npm-pack.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = fileURLToPath(new URL("../test/packed-consumer", import.meta.url));
@@ -70,7 +71,8 @@ async function expectNotInstalled(dependency) {
 }
 
 try {
-  const packed = JSON.parse(run(
+  const rootPackage = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  const entry = readNpmPackEntry(run(
     npmCommand,
     [
       "pack",
@@ -81,15 +83,10 @@ try {
       cache,
     ],
     root,
-  ));
-  const entry = Array.isArray(packed) ? packed[0] : null;
-  if (!entry || typeof entry.filename !== "string") {
-    throw new Error("npm pack did not report a tarball filename");
-  }
+  ), rootPackage.name);
   const tarball = join(temporaryRoot, entry.filename);
 
   await mkdir(consumer);
-  const rootPackage = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const packageDependency = pathToFileURL(tarball).href;
   await writeFile(
     join(consumer, "package.json"),
