@@ -16,10 +16,10 @@ npm run check:environment
 
 Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
 (`leanprover/lean4:v4.34.1`). Install rust-analyzer and Rust sources with
-rustup. Primary CI uses Rust 1.89.0:
+rustup. Primary CI uses Rust 1.99.0:
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal --component rust-analyzer --component rust-src
+rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src
 ```
 
 Select that toolchain in your shell when matching CI. `npm run check:environment`

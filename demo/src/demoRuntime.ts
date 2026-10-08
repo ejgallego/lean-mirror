@@ -540,6 +540,16 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     return fresh;
   }
 
+  function notifyRustMainSaved(): void {
+    const uri = session.rustMainDocumentUri;
+    if (!uri || lastRustMainSourceSent === null ||
+        rustClient?.workspace.getFile(uri)?.doc.toString() !== lastRustMainSourceSent) return;
+    rustClient.sync();
+    rustClient.notification("textDocument/didSave", {
+      textDocument: { uri }, text: lastRustMainSourceSent,
+    });
+  }
+
   function scheduleRustMainPersist(session: DemoSession, uri: string, source: string): void {
     if (uri !== session.rustMainDocumentUri) {
       return;
@@ -579,6 +589,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             return;
           }
           lastRustMainSourceSent = source;
+          // Cargo checks run on didSave, rather than ordinary document changes.
+          notifyRustMainSaved();
           lastEmbeddedLeanDocument = embeddedLeanDocument;
           refreshLeanWorkspaceArtifacts(result, leanDocument);
           options.ui.setDocumentSyncState(uri, "clean");
@@ -1053,8 +1065,18 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
     rustRuntime.initializing();
     rustClient = new LSPClient({
-      extensions: [rustProgress, ...languageServerExtensions()],
+      extensions: [
+        rustProgress, ...languageServerExtensions(),
+        { clientCapabilities: { experimental: { serverStatusNotification: true } } },
+      ],
       notificationHandlers: {
+        "experimental/serverStatus": (_client, params: { quiescent?: boolean }) => {
+          // Workspace loading can discard Cargo results from an early save.
+          // Recheck the saved buffer once loading finishes. Cargo checks do not
+          // change this workspace-loading state, so this cannot form a loop.
+          if (params.quiescent === true) notifyRustMainSaved();
+          return true;
+        },
         "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
           if (
             params.uri === session.rustMainDocumentUri &&
