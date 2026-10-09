@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
+
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
@@ -37,6 +39,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Primary CI uses Rust 1.99.0 and its rust-analyzer; Rust 1.89.0 produced conflicting same-version diagnostic pushes during workspace loading.
+
 - Root validation and the demo workspace now share the stable Lean 4.34.1 toolchain pin.
 - The demo now reconnects Lean client/server generations while preserving the active editor document, selection, and undo history.
 - Server-owned workspace documents now use `acquireServerDocument()` leases; the former unowned `openServerDocument()` operation was removed during the unstable `0.x` series.
@@ -63,6 +67,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - The minimal example now separates its reusable public-package editor composition from the private editor-platform shell adapter.
 
 ### Fixed
+
+- Rust source saves trigger Cargo checks, including saves made during workspace loading. Current-version push diagnostics survive native pull responses that omit Cargo errors. Browser scenarios restore a valid local Rust fixture independently.
 
 - Empty string documents returned by host workspace loaders can now be cached, opened, and edited.
 - Synchronous server-to-client request handler failures now produce JSON-RPC error responses and notify the host error callback.

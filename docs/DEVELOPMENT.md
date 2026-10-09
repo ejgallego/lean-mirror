@@ -16,10 +16,10 @@ npm run check:environment
 
 Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
 (`leanprover/lean4:v4.34.1`). Install rust-analyzer and Rust sources with
-rustup. Primary CI uses Rust 1.89.0:
+rustup. Primary CI uses Rust 1.99.0:
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal --component rust-analyzer --component rust-src
+rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src
 ```
 
 Select that toolchain in your shell when matching CI. `npm run check:environment`
@@ -51,6 +51,12 @@ generated Lean demo fixtures before and after each suite. Do not mix them with
 a manually edited demo session or another suite in the same checkout. A separate
 worktree needs its own `npm ci`; give simultaneous demo sessions distinct ports
 using the overrides in the README.
+
+The workspace example (`npm run example:workspace`) exercises file switching,
+revision-checked persistence, and server recovery through public package APIs.
+Run `npm run test:e2e:workspace` for these workflows; they also run against the
+isolated package in `npm run test:packed:browser`. Browser suites reset Main.lean,
+Helper.lean, Main.rs, and RustSnippets.lean from their committed baselines.
 
 The three external Anneal scenarios are deliberately skipped in ordinary demo
 CI. Run `npm run test:e2e:zerocopy-anneal` for work on generation, cache identity,

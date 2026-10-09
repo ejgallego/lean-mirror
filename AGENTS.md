@@ -26,7 +26,7 @@ failure or behavior being changed; avoid repeating passed checks without a new
 reason. Use `docs/DEVELOPMENT.md` for setup and the verification matrix.
 
 Local tests use development fixtures and local processes. Browser suites reset
-`demo/workspace/Main.rs` and `RustSnippets.lean`; preserve any manual edits to
+`demo/workspace/Main.lean`, `Helper.lean`, `Main.rs`, and `RustSnippets.lean`; preserve any manual edits to
 those fixtures before running them. Run browser suites sequentially because
 they share that workspace and fixed default ports.
 

@@ -298,6 +298,19 @@ See the
 [minimal example guide](https://github.com/ejgallego/lean-mirror/blob/main/examples/minimal/README.md)
 for its repository-only infrastructure, scope, and port overrides.
 
+### Multi-file workspace host
+
+```bash
+npm run example:workspace
+```
+
+Open `http://127.0.0.1:5274` to switch between `Main.lean` and `Helper.lean`,
+follow definitions with F12, and save both files to disk. Each file keeps its
+editor state and undo history when Lean reconnects after a dropped connection.
+Revision-checked saves report conflicting disk changes while keeping local edits.
+See the [workspace example guide](examples/workspace/README.md) for the public-only
+composition and browser checks.
+
 ### Full integration demo
 
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
