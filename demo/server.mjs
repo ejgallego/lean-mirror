@@ -52,6 +52,11 @@ const maxLspProcesses = parsePositiveInteger(
   8,
   "LEAN_DEMO_MAX_LSP_PROCESSES",
 );
+const lspRelayLimits = {
+  maxFrameBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_FRAME_BYTES, 8 * 1024 * 1024, "LEAN_DEMO_MAX_LSP_FRAME_BYTES"),
+  maxHeaderBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_HEADER_BYTES, 8192, "LEAN_DEMO_MAX_LSP_HEADER_BYTES"),
+  maxQueuedBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_QUEUE_BYTES, 8 * 1024 * 1024, "LEAN_DEMO_MAX_LSP_QUEUE_BYTES"),
+};
 const demoWorkspace = createDemoWorkspace(__dirname, {
   cwd: process.cwd(),
   env: process.env,
@@ -370,15 +375,16 @@ function attachSpawnedLsp(connection, command, args, cwd) {
     released = true;
     activeLspProcesses = Math.max(0, activeLspProcesses - 1);
   };
-  connection.once("close", release);
 
   const child = spawn(command, args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  child.once("exit", release);
+  child.once("error", release);
   child.once("error", () => connection.close());
   pipeServerStderr(child.stderr);
-  attachLspProcess(connection, child);
+  attachLspProcess(connection, child, lspRelayLimits);
 }
 
 wsServer.on("connection", (socket) => {
