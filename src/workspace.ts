@@ -7,6 +7,7 @@ import {
 import { ChangeSet, EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { LSPClient } from "@codemirror/lsp-client";
+import { captureClientOperation } from "./clientLifetime.js";
 
 export interface LeanWorkspaceLoadResult {
   doc: string | Text;
@@ -277,6 +278,9 @@ export class LeanWorkspace extends Workspace {
     if (loaded === null || loaded === undefined) {
       return null;
     }
+    // A view may have installed and edited this URI while the loader awaited IO.
+    const existing = this.getFile(uri);
+    if (existing) return existing;
     const normalized = normalizeLoadedDocument(loaded);
     const version = normalized.version ?? this.nextFileVersion(uri);
     const file = new LeanWorkspaceFile(
@@ -539,13 +543,12 @@ export class LeanWorkspace extends Workspace {
   }
 
   override async displayFile(uri: string): Promise<EditorView | null> {
+    const current = captureClientOperation(this.client);
     const existing = await this.ensureLoadedFile(uri);
-    const existingView = existing?.getView();
-    if (existingView) {
-      return existingView;
-    }
+    if (!current()) return null;
     const opened = await this.options.displayDocument?.(uri, this);
-    return opened ?? this.getFile(uri)?.getView() ?? null;
+    if (!current()) return null;
+    return opened ?? this.getFile(uri)?.getView() ?? existing?.getView() ?? null;
   }
 }
 

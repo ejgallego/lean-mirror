@@ -247,3 +247,14 @@ responses are required.
 Do not add implementation-only helpers to the top-level export.
 
 If a helper only exists to support tests, demo infrastructure, or local packaging scripts, keep it unexported.
+
+Session retirement rejects pending and subsequent requests on the retired client.
+Session-bound workspace edits and document display reject or ignore work that
+finishes loading after retirement. Direct offline workspace edits remain supported.
+An edit may also supply an `AbortSignal` through `options.signal`.
+State observers cannot prevent teardown delivery to other bindings; failures are
+reported through `onObserverError` (or `console.error` by default). Reentrant
+disposal during initialization does not start the retired transport.
+
+`displayDocument` is an activation request even when a document already has a
+retained editor view. Hosts should activate that view rather than creating a duplicate.

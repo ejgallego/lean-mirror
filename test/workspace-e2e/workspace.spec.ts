@@ -46,6 +46,16 @@ test("navigates across files, preserves edits and undo on server loss, and persi
   await page.keyboard.press("Control+End");
   await page.keyboard.type("\n-- helper unsaved");
   const helperElement = await content.elementHandle();
+  // Reusing a retained view must activate it, just like its first F12 visit.
+  await page.getByRole("button", { name: "Main.lean", exact: false }).click();
+  await content.click();
+  await page.keyboard.press("Control+Home");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
+  for (let i = 0; i < 9; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("F12");
+  await expect(page.locator("#active-file")).toHaveText("Helper.lean");
+  await expect(content).toBeFocused();
+  expect(await helperElement!.evaluate((node) => node.isConnected)).toBe(true);
   await page.keyboard.press("Control+Home");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
