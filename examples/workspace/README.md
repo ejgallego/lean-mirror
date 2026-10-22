@@ -7,7 +7,12 @@ automatically reconnects after a Lean transport failure. Reconnection retries
 three times; the Reconnect Lean button can retry after the backend returns.
 
 Save all explicitly persists changed files. Disk revisions are content hashes:
-another browser or disk edit produces a conflict instead of an overwrite.
+stale revisions and competing backend saves produce conflicts. Saves retain the
+previous disk inode in `.lean-mirror-recovery` and publish exclusively, so an
+outside edit remains recoverable even if it races a save. The source path can be
+briefly absent during publication; this sample requires a local filesystem with
+hardlinks. See the [save/recovery contract](../../docs/workspace-persistence.md)
+for interrupted saves, retained history, and durability limits.
 Changes made while a save is in flight remain dirty. Saves are independent per
 file; a failed save leaves remaining files dirty. Reloading the page loads the
 saved versions and discards unsaved buffers, so save before leaving.

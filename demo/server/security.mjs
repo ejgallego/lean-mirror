@@ -42,10 +42,13 @@ export function requestOriginAllowed(origin, allowedOrigins) {
 export async function readBoundedJsonBody(req, maxBytes) {
   const chunks = [];
   let size = 0;
-  for await (const chunk of req) {
+  const input = typeof req.iterator === "function" ? req.iterator({ destroyOnReturn: false }) : req;
+  for await (const chunk of input) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
     if (size > maxBytes) {
+      // Discard unread bytes without destroying the HTTP response socket.
+      req.resume?.();
       throw new DemoRequestTooLargeError(maxBytes);
     }
     chunks.push(buffer);

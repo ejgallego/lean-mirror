@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
-import { createLeanDocumentStore, parseLeanDocumentSave } from "./server/leanDocuments.mjs";
+import { createLeanDocumentStore } from "./server/leanDocuments.mjs";
+import { handleLeanDocumentRequest } from "./server/leanDocumentHttp.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
 import {
   DemoRequestTooLargeError,
@@ -143,33 +144,9 @@ async function handleHttpRequest(req, res) {
   if (new URL(req.url, `http://${host}:${port}`).pathname === "/lean-document") {
     await preparePromise;
     if (prepareError) throw prepareError;
-    try {
-      let snapshot;
-      if (req.method === "GET") {
-        const uri = new URL(req.url, `http://${host}:${port}`).searchParams.get("uri");
-        if (!uri) {
-          res.writeHead(400, withCorsHeaders(req));
-          res.end("Missing uri parameter");
-          return;
-        }
-        snapshot = await leanDocuments.read(uri);
-      } else if (req.method === "POST") {
-        const payload = await readValidatedJsonBody(req, res, parseLeanDocumentSave, "Invalid Lean document payload");
-        if (!payload) return;
-        snapshot = await leanDocuments.save(payload);
-      } else {
-        res.writeHead(405, withCorsHeaders(req));
-        res.end("Method not allowed");
-        return;
-      }
-      res.writeHead(200, withCorsHeaders(req, { "Content-Type": "application/json; charset=utf-8" }));
-      res.end(JSON.stringify(snapshot));
-    } catch (error) {
-      const code = error?.code;
-      if (code !== "ERR_LEAN_DOCUMENT_CONFLICT" && code !== "ERR_LEAN_DOCUMENT_FORBIDDEN") throw error;
-      res.writeHead(code === "ERR_LEAN_DOCUMENT_CONFLICT" ? 409 : 403, withCorsHeaders(req));
-      res.end(error.message);
-    }
+    await handleLeanDocumentRequest(req, res, {
+      store: leanDocuments, maxBodyBytes, headers: withCorsHeaders,
+    });
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.switchExample) {

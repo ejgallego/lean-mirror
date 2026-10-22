@@ -12,3 +12,5 @@ demo/workspace/.lake/
 demo/workspace/lake-manifest.json
 demo/rust-blocks/
 .demo-cache/
+
+demo/workspace/.lean-mirror-recovery/

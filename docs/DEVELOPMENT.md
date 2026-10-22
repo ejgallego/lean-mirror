@@ -54,6 +54,8 @@ using the overrides in the README.
 
 The workspace example (`npm run example:workspace`) exercises file switching,
 revision-checked persistence, and server recovery through public package APIs.
+The [save/recovery contract](workspace-persistence.md) describes retained disk
+versions and interruption handling.
 Run `npm run test:e2e:workspace` for these workflows; they also run against the
 isolated package in `npm run test:packed:browser`. Browser suites reset Main.lean,
 Helper.lean, Main.rs, and RustSnippets.lean from their committed baselines.
