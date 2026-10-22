@@ -31,6 +31,7 @@ export class ConnectionTransport implements Transport {
   private active = true;
   private readonly pending = new Map<string | number, ReturnType<typeof setTimeout>>();
   private readonly handlers = new Map<(message: string) => void, (message: string) => void>();
+  private readonly retiredHandlers = new Set<(message: string) => void>();
 
   constructor(private readonly transport: Transport, private readonly timeout = 3000) {}
 
@@ -77,12 +78,14 @@ export class ConnectionTransport implements Transport {
       jsonrpc: "2.0", id,
       error: { code: -32800, message: "Lean client connection was disconnected." },
     });
-    for (const handler of this.handlers.keys()) handler(response);
+    const handlers = this.active ? this.handlers.keys() : this.retiredHandlers;
+    for (const handler of handlers) handler(response);
   }
 
   retire(): void {
     if (!this.active) return;
     this.active = false;
+    for (const handler of this.handlers.keys()) this.retiredHandlers.add(handler);
     try {
       for (const id of this.pending.keys()) {
         this.forget(id);
@@ -90,8 +93,9 @@ export class ConnectionTransport implements Transport {
       }
     } finally {
       for (const wrapped of this.handlers.values()) this.transport.unsubscribe(wrapped);
+      this.handlers.clear();
       // Retain local handlers for already-queued upstream continuations. Their
-      // requests receive cancellation immediately, without restarting a timer.
+      // requests receive cancellation immediately, without leaving a timer.
       for (const id of this.pending.keys()) this.forget(id);
     }
   }

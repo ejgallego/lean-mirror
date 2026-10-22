@@ -108,6 +108,7 @@ class TransportWrappingLspClient extends LSPClient {
   private outgoing: Transport | null = null;
   private readonly requestTimeout: number;
   private used = false;
+  private disposeSubscriptions: (() => void) | null = null;
 
   constructor(
     config: LSPClientConfig,
@@ -145,8 +146,18 @@ class TransportWrappingLspClient extends LSPClient {
       for (const extension of this.transportExtensions) {
         wrapped = extension.wrapTransport?.(wrapped, this) ?? wrapped;
       }
-      this.outgoing = wrapped;
-      super.connect(wrapped);
+      const subscribers = new Set<(message: string) => void>();
+      this.disposeSubscriptions = () => {
+        for (const handler of subscribers) wrapped.unsubscribe(handler);
+        subscribers.clear();
+      };
+      const outgoing: Transport = {
+        send: (message) => wrapped.send(message),
+        subscribe(handler) { subscribers.add(handler); wrapped.subscribe(handler); },
+        unsubscribe(handler) { subscribers.delete(handler); wrapped.unsubscribe(handler); },
+      };
+      this.outgoing = outgoing;
+      super.connect(outgoing);
     } catch (error) {
       this.disconnect();
       throw error;
@@ -168,7 +179,10 @@ class TransportWrappingLspClient extends LSPClient {
       // initialize continuation would resolve that new promise instead of its
       // original one. Single-use clients retain the original resolver and use
       // the public workspace hook plus the owned wire for teardown.
-      this.workspace.disconnected();
+      const disposeSubscriptions = this.disposeSubscriptions;
+      this.disposeSubscriptions = null;
+      try { disposeSubscriptions?.(); }
+      finally { this.workspace.disconnected(); }
     }
   }
 

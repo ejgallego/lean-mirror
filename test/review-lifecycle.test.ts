@@ -53,6 +53,24 @@ describe("review lifecycle regressions", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("runs outer transport wrapper cleanup once when retiring the wire", async () => {
+    const unsubscribed = vi.fn();
+    const client = createLeanLspClient({ extensions: [{ wrapTransport(wire) {
+      return {
+        send: (message) => wire.send(message),
+        subscribe: (handler) => wire.subscribe(handler),
+        unsubscribe(handler) { unsubscribed(); wire.unsubscribe(handler); },
+      };
+    } }] });
+    const wire = transport();
+    const rawCleanup = vi.spyOn(wire, "unsubscribe");
+    client.connect(wire);
+    await client.initializing;
+    client.disconnect(); client.disconnect();
+    expect(unsubscribed).toHaveBeenCalledOnce();
+    expect(rawCleanup).toHaveBeenCalledOnce();
+  });
+
   it("cleans up a throwing transport wrapper", () => {
     const client = createLeanLspClient({ extensions: [{ wrapTransport() { throw new Error("wrapper failed"); } }] });
     expect(() => client.connect(transport())).toThrow("wrapper failed");
