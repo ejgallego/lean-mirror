@@ -77,6 +77,24 @@ tests, and build, and writes build artifacts there. Service synchronization or
 bridge changes also need its `npm run test:lsp`. See `editor-platform.md` for
 the dependency model.
 
+## Local process relay bounds
+
+The demo relay contains child framing/stream errors to their owning WebSocket
+session. It defaults to an 8 MiB LSP body limit, an 8192-byte header limit, and an
+8 MiB queue per direction. Configure positive integer byte limits with
+`LEAN_DEMO_MAX_LSP_FRAME_BYTES`, `LEAN_DEMO_MAX_LSP_HEADER_BYTES`, and
+`LEAN_DEMO_MAX_LSP_QUEUE_BYTES`. Child stdin respects `write()`/`drain`; slow browser
+sends pause stdout, and a peer exceeding a queue limit loses that session. Several
+complete frames may arrive in one pipe chunk; only retained partial frames and
+queued messages count against the relevant bounds. Stderr lines truncate at
+16384 characters.
+
+Shutdown drops queued work, tries the LSP exit sequence, then sends SIGTERM after
+120 ms and SIGKILL after another 500 ms unless the child exits. The process slot
+stays occupied until exit or a spawn error. These are development-host policies;
+process ownership and reconnect/replay policy remain host-specific. Nothing here
+creates a shared Node broker or a production memory guarantee for Lean itself.
+
 ## Takeover checkpoint
 
 The October 2026 review started from clean `main` at `c5c1f86`. Historical PR work

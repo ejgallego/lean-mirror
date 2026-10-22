@@ -80,6 +80,9 @@ document changes into the workspace cache. A direct client supports one
 connection; recreate it after disconnect, or use `LeanEditorSession.reconnect()`
 for fresh generations with host-managed text retention.
 
+`displayDocument` is an activation request even when a document already has a
+retained editor view. Hosts should activate that view rather than creating a duplicate.
+
 ### Cross-file navigation and edits
 
 The default extensions returned by `leanLspExtensions()` use Lean-aware
@@ -119,7 +122,9 @@ const result = await client.withMapping(async (mapping) => {
 Filesystem create, rename, and delete operations are rejected before any text
 change is applied. Those operations require host-specific authorization and
 persistence policy. `onDocumentChange` remains the persistence hook for edits
-to cached files without a view.
+to cached files without a view. It is a change notification, not a persistence
+transaction: rejected callbacks are reported and do not pin the cache against
+unloading. Hosts own dirty data, retry policy, and any durable write barrier.
 
 ### Session lifecycle
 
@@ -140,6 +145,20 @@ code reject stale results.
 `session.subscribe(listener, { emitCurrent })` supports multiple lifecycle
 observers and returns an unsubscribe function. The constructor-level
 `onStateChange` callback remains available for a single primary observer.
+
+Client retirement rejects pending and subsequent requests on the retired client.
+Direct clients support one connection, including failed attempts. Initialization
+rejects promptly on retirement; `connected` becomes false. Session reconnection
+creates a fresh client rather than resetting an upstream initialization resolver.
+Session-bound workspace edits and document display reject or ignore work that
+finishes loading after retirement. Direct offline workspace edits remain supported.
+An edit may also supply an `AbortSignal` through `options.signal`. Cancellation
+prevents mutations after awaited host work; it does not cancel arbitrary work
+already started inside a host loader. Infoview insertions, navigation, edits, and
+RPC keepalives also stop at their client/host lifetime.
+State observers cannot prevent teardown delivery to other bindings; failures are
+reported through `onObserverError` (or `console.error` by default). Reentrant
+disposal during initialization does not start the retired transport.
 
 Extensions with `onSessionDisconnect(client)` participate in owned teardown.
 `leanFileProgress()` implements this hook. Hosts using `createLeanLspClient()`
@@ -249,14 +268,3 @@ responses are required.
 Do not add implementation-only helpers to the top-level export.
 
 If a helper only exists to support tests, demo infrastructure, or local packaging scripts, keep it unexported.
-
-Session retirement rejects pending and subsequent requests on the retired client.
-Session-bound workspace edits and document display reject or ignore work that
-finishes loading after retirement. Direct offline workspace edits remain supported.
-An edit may also supply an `AbortSignal` through `options.signal`.
-State observers cannot prevent teardown delivery to other bindings; failures are
-reported through `onObserverError` (or `console.error` by default). Reentrant
-disposal during initialization does not start the retired transport.
-
-`displayDocument` is an activation request even when a document already has a
-retained editor view. Hosts should activate that view rather than creating a duplicate.
