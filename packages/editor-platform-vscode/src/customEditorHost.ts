@@ -200,7 +200,7 @@ export function documentOpenedMessage(
 }
 
 export function vscodeUriToString(uri: VsCodeUriLike): string {
-  return uri.toString(true);
+  return uri.toString();
 }
 
 async function handleEditorMessage(

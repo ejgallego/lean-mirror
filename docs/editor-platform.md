@@ -13,7 +13,11 @@ This keeps iteration cheap while the boundary is still moving. It does not requi
 
 `EditorServiceRuntime.trackRequest()` is the shared telemetry boundary for both LSP requests and
 custom bridge calls. It records start, duration, success, and failure without depending on either
-protocol.
+protocol. `maxLogEntries` accepts non-negative safe integers; zero disables log
+retention while service state and request tracking continue normally. Invalid
+limits fail immediately. The VS Code adapter uses canonical encoded URI strings
+(`uri.toString()`) for document identity; literal percent escapes remain distinct
+from their decoded filename characters.
 
 ## Update Flow
 

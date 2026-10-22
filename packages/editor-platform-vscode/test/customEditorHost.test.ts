@@ -1,4 +1,5 @@
-import { describe, expect, test } from "vitest";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   EditorPlatformStore,
@@ -329,6 +330,22 @@ describe("custom editor host", () => {
     store.setActiveDocument("file:///AfterDispose.lean");
 
     expect(panel.webview.posted).toHaveLength(1);
+  });
+
+  test("uses encoded transport URIs for percent escapes and special filename characters", () => {
+    const identities = new Set<string>();
+    for (const name of ["Main%23draft.lean", "Main#draft.lean", "Main%20draft.lean", "Main draft.lean", "𝒜.lean"]) {
+      const path = "/workspace/" + name;
+      const toString = vi.fn((skipEncoding?: boolean) => skipEncoding
+        ? "file://" + path.replaceAll("#", "%23").replaceAll("?", "%3F")
+        : pathToFileURL(path).href);
+      const uri = { toString };
+      const serialized = vscodeUriToString(uri);
+      expect(fileURLToPath(serialized)).toBe(path);
+      expect(toString).toHaveBeenCalledWith();
+      identities.add(serialized);
+    }
+    expect(identities.size).toBe(5);
   });
 
   test("creates document-opened messages from VS Code-shaped documents", () => {
