@@ -63,9 +63,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function createHarness(container: HTMLElement = document.createElement("div")) {
+async function createHarness(container: HTMLElement = document.createElement("div"), options: { displayGate?: () => Promise<void> | undefined } = {}) {
   const displayedViews = new Map<string, ReturnType<typeof createTestView>>();
   const persisted: string[] = [];
+  const activated: string[] = [];
   const transport = new MockTransport();
   transport.onRequest("initialize", () => ({
     capabilities: {
@@ -89,7 +90,11 @@ async function createHarness(container: HTMLElement = document.createElement("di
       signatureHelp: false,
     },
     workspace: createLeanWorkspace({
-      displayDocument(uri, workspace) {
+      async displayDocument(uri, workspace) {
+        await options.displayGate?.();
+        activated.push(uri);
+        const retained = displayedViews.get(uri);
+        if (retained) return retained;
         const file = workspace.getFile(uri);
         if (!file) {
           return null;
@@ -132,6 +137,7 @@ async function createHarness(container: HTMLElement = document.createElement("di
   return {
     client,
     container,
+    activated,
     displayedViews,
     editorApi: infoviewMock.editorApi as EditorApi,
     host,
@@ -242,6 +248,40 @@ describe("Lean infoview host", () => {
     helper?.destroy();
     harness.view.destroy();
     harness.client.disconnect();
+  });
+
+  it("activates a retained editor on repeated infoview navigation", async () => {
+    const harness = await createHarness();
+    await harness.editorApi.showDocument({ uri: HELPER_URI });
+    const helper = harness.displayedViews.get(HELPER_URI)!;
+    await harness.editorApi.showDocument({ uri: HELPER_URI });
+    expect(harness.displayedViews.get(HELPER_URI)).toBe(helper);
+    expect(harness.activated).toEqual([HELPER_URI, HELPER_URI]);
+    harness.host.dispose(); helper.destroy(); harness.view.destroy(); harness.client.disconnect();
+  });
+
+  it.each(["disconnect", "serverStopped", "dispose"] as const)("fences delayed infoview insertion and selection after %s", async (retirement) => {
+    let gate: Promise<void> | undefined;
+    let release!: () => void;
+    const harness = await createHarness(document.createElement("div"), { displayGate: () => gate });
+    await harness.editorApi.showDocument({ uri: HELPER_URI });
+    const helper = harness.displayedViews.get(HELPER_URI)!;
+    const before = helper.state.doc.toString();
+    const selection = helper.state.selection;
+    gate = new Promise<void>((resolve) => { release = resolve; });
+    const inserting = harness.editorApi.insertText("STALE", "here", { textDocument: { uri: HELPER_URI }, position: { line: 0, character: 0 } });
+    const navigating = harness.editorApi.showDocument({ uri: HELPER_URI, selection: {
+      start: { line: 0, character: 4 }, end: { line: 0, character: 10 },
+    } });
+    if (retirement === "disconnect") harness.client.disconnect();
+    else if (retirement === "serverStopped") harness.host.serverStopped({ message: "Stopped", reason: "test" });
+    else harness.host.dispose();
+    release();
+    await Promise.all([inserting, navigating]);
+    expect(helper.state.doc.toString()).toBe(before);
+    expect(helper.state.selection.eq(selection)).toBe(true);
+    expect(harness.persisted).toEqual([]);
+    harness.host.dispose(); helper.destroy(); harness.view.destroy(); harness.client.disconnect();
   });
 
   it("forwards subscribed client notifications through the generation extension", async () => {
