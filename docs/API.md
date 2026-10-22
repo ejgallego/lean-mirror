@@ -76,7 +76,9 @@ without fetching it again and can choose their own cache policy.
 Edits to cached-but-closed files update the workspace and invoke
 `onDocumentChange`, but do not emit an invalid `didChange` without a preceding
 `didOpen`. Direct-client disconnects absorb unsynchronized editor and hidden
-document changes so a later reconnect reopens their latest full text.
+document changes into the workspace cache. A direct client supports one
+connection; recreate it after disconnect, or use `LeanEditorSession.reconnect()`
+for fresh generations with host-managed text retention.
 
 ### Cross-file navigation and edits
 

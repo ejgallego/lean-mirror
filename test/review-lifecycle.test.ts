@@ -4,6 +4,7 @@ import {
   applyLeanWorkspaceEdit, createLeanEditorSession, createLeanLspClient,
   createLeanWorkspace, lean4, type LeanEditorSession, type LeanWorkspace,
 } from "../src/index.js";
+import { ConnectionTransport } from "../src/clientLifetime.js";
 import { createTestView } from "./support/helpers.js";
 import { MockTransport } from "./support/mockTransport.js";
 
@@ -15,6 +16,69 @@ function transport() {
 afterEach(() => { document.body.innerHTML = ""; });
 
 describe("review lifecycle regressions", () => {
+  it("fences an initialize response delivered just before retirement", async () => {
+    let receive!: (message: string) => void;
+    let initializeId: number;
+    const client = createLeanLspClient();
+    client.connect({ subscribe(handler) { receive = handler; }, unsubscribe() {}, send(message) {
+      const payload = JSON.parse(message);
+      if (payload.method === "initialize") initializeId = payload.id;
+    } });
+    const initialized = expect(client.initializing).rejects.toThrow(/disconnected/);
+    receive(JSON.stringify({ jsonrpc: "2.0", id: initializeId!, result: { capabilities: { hoverProvider: true } } }));
+    client.disconnect();
+    const next = transport();
+    expect(() => client.connect(next)).toThrow(/fresh client/);
+    await initialized;
+    await Promise.resolve();
+    expect(client.serverCapabilities).toBeNull();
+    expect(client.connected).toBe(false);
+    expect(next.sent).toEqual([]);
+  });
+
+  it("cancels queued requests without sending them to a replacement wire", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = createLeanLspClient();
+      const wire = transport();
+      client.connect(wire);
+      await client.initializing;
+      const pending = expect(client.request("old-work", {})).rejects.toThrow(/disconnected/);
+      client.disconnect();
+      expect(() => client.connect(transport())).toThrow(/fresh client/);
+      await pending;
+      await Promise.resolve();
+      expect(wire.requests("old-work")).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cleans up a throwing transport wrapper", () => {
+    const client = createLeanLspClient({ extensions: [{ wrapTransport() { throw new Error("wrapper failed"); } }] });
+    expect(() => client.connect(transport())).toThrow("wrapper failed");
+    expect(client.connected).toBe(false);
+    client.disconnect();
+  });
+
+  it("expires unanswered request records and removes failed sends", () => {
+    vi.useFakeTimers();
+    try {
+      const wire = new MockTransport();
+      const owned = new ConnectionTransport(wire, 10);
+      const receive = vi.fn();
+      owned.subscribe(receive);
+      owned.send(JSON.stringify({ id: 1, method: "missing" }));
+      expect(vi.getTimerCount()).toBe(1);
+      vi.advanceTimersByTime(10);
+      expect(vi.getTimerCount()).toBe(0);
+      owned.retire();
+      expect(receive).not.toHaveBeenCalled();
+      const failed = new ConnectionTransport({ ...wire, subscribe() {}, unsubscribe() {}, send() { throw new Error("closed"); } }, 10);
+      expect(() => failed.send(JSON.stringify({ id: 2, method: "failed" }))).toThrow("closed");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("rejects pending and subsequent requests when a generation retires", async () => {
     const session = createLeanEditorSession({ client: { timeout: 60_000 } });
     const connection = session.connect(transport());

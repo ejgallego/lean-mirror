@@ -29,18 +29,28 @@ export function captureClientOperation(client: LSPClient): () => boolean {
 /** Own wire requests so retirement settles upstream timers without private registries. */
 export class ConnectionTransport implements Transport {
   private active = true;
-  private readonly pending = new Set<string | number>();
+  private readonly pending = new Map<string | number, ReturnType<typeof setTimeout>>();
   private readonly handlers = new Map<(message: string) => void, (message: string) => void>();
 
-  constructor(private readonly transport: Transport) {}
+  constructor(private readonly transport: Transport, private readonly timeout = 3000) {}
+
+  private forget(id: string | number): void {
+    clearTimeout(this.pending.get(id));
+    this.pending.delete(id);
+  }
 
   send(message: string): void {
-    if (!this.active) return;
     const payload = JSON.parse(message);
-    if (payload.method && (typeof payload.id === "number" || typeof payload.id === "string")) {
-      this.pending.add(payload.id);
+    if (!this.active) {
+      if (payload.method && (typeof payload.id === "number" || typeof payload.id === "string")) this.cancel(payload.id);
+      return;
     }
-    this.transport.send(message);
+    if (payload.method && (typeof payload.id === "number" || typeof payload.id === "string")) {
+      this.forget(payload.id);
+      this.pending.set(payload.id, setTimeout(() => this.pending.delete(payload.id), this.timeout));
+    }
+    try { this.transport.send(message); }
+    catch (error) { this.forget(payload.id); throw error; }
   }
 
   subscribe(handler: (message: string) => void): void {
@@ -48,7 +58,7 @@ export class ConnectionTransport implements Transport {
       if (!this.active) return;
       try {
         const payload = JSON.parse(message);
-        if (!payload.method) this.pending.delete(payload.id);
+        if (!payload.method) this.forget(payload.id);
       } catch { /* Let the upstream client report invalid messages. */ }
       handler(message);
     };
@@ -62,16 +72,27 @@ export class ConnectionTransport implements Transport {
     this.handlers.delete(handler);
   }
 
+  private cancel(id: string | number): void {
+    const response = JSON.stringify({
+      jsonrpc: "2.0", id,
+      error: { code: -32800, message: "Lean client connection was disconnected." },
+    });
+    for (const handler of this.handlers.keys()) handler(response);
+  }
+
   retire(): void {
     if (!this.active) return;
     this.active = false;
-    for (const id of this.pending) {
-      const response = JSON.stringify({
-        jsonrpc: "2.0", id,
-        error: { code: -32800, message: "Lean client connection was disconnected." },
-      });
-      for (const handler of this.handlers.keys()) handler(response);
+    try {
+      for (const id of this.pending.keys()) {
+        this.forget(id);
+        this.cancel(id);
+      }
+    } finally {
+      for (const wrapped of this.handlers.values()) this.transport.unsubscribe(wrapped);
+      // Retain local handlers for already-queued upstream continuations. Their
+      // requests receive cancellation immediately, without restarting a timer.
+      for (const id of this.pending.keys()) this.forget(id);
     }
-    this.pending.clear();
   }
 }
