@@ -67,6 +67,7 @@ async function createHarness(container: HTMLElement = document.createElement("di
   const displayedViews = new Map<string, ReturnType<typeof createTestView>>();
   const persisted: string[] = [];
   const activated: string[] = [];
+  const requestRestart = vi.fn();
   const transport = new MockTransport();
   transport.onRequest("initialize", () => ({
     capabilities: {
@@ -128,7 +129,7 @@ async function createHarness(container: HTMLElement = document.createElement("di
     currentLanguageId: () => "lean4",
     currentUri: () => MAIN_URI,
     currentView: () => view,
-    requestRestart() {},
+    requestRestart,
     workspace: () => client.workspace as LeanWorkspace,
   });
 
@@ -142,6 +143,7 @@ async function createHarness(container: HTMLElement = document.createElement("di
     editorApi: infoviewMock.editorApi as EditorApi,
     host,
     notificationExtension,
+    requestRestart,
     persisted,
     transport,
     view,
@@ -359,6 +361,25 @@ describe("Lean infoview host", () => {
     harness.host.dispose();
     harness.view.destroy();
     harness.client.disconnect();
+  });
+
+  it("rejects retained client/restart callbacks after disposal and cancels pending host requests", async () => {
+    const harness = await createHarness();
+    harness.transport.onRequest("pending", () => new Promise<never>(() => undefined));
+    const pending = harness.editorApi.sendClientRequest(MAIN_URI, "pending", {});
+    await waitFor(() => harness.transport.requests("pending").length === 1);
+    harness.host.dispose();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    const sent = harness.transport.sent.length;
+    for (const callback of [
+      () => harness.editorApi.createRpcSession(MAIN_URI),
+      () => harness.editorApi.sendClientRequest(MAIN_URI, "late", {}),
+      () => harness.editorApi.sendClientNotification(MAIN_URI, "late", {}),
+      () => harness.editorApi.restartFile(MAIN_URI),
+    ]) await expect(callback()).rejects.toMatchObject({ name: "AbortError" });
+    expect(harness.transport.sent).toHaveLength(sent);
+    expect(harness.requestRestart).not.toHaveBeenCalled();
+    harness.view.destroy(); harness.client.disconnect();
   });
 
   it("aborts a pending RPC session connection when the server stops", async () => {

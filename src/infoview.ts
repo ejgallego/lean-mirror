@@ -88,6 +88,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   let infoviewApi: InfoviewApi;
 
   function currentClient(): LSPClient {
+    if (disposed) throw requestAbortedError();
     const client = options.client();
     if (!client) {
       throw new Error("Lean infoview requires an active client generation.");
@@ -210,7 +211,8 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function applyWorkspaceEdit(edit: lsp.WorkspaceEdit): Promise<void> {
-    if (!captureOperation()()) throw requestAbortedError();
+    const current = captureOperation();
+    if (!current()) throw requestAbortedError();
     const result = await applyLeanWorkspaceEdit(currentClient(), edit, {
       userEvent: "lean.infoview",
       signal: operationController.signal,
@@ -239,6 +241,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
 
   async function createRpcSession(uri: string): Promise<string> {
     const current = captureOperation();
+    if (!current()) throw requestAbortedError();
     const client = currentClient();
     client.sync();
     const controller = new AbortController();
@@ -298,8 +301,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     async sendClientRequest(_uri, method, params, requestOptions) {
       const client = currentClient();
       client.sync();
-      const abortSignal = requestOptions?.abortSignal;
-      return abortableClientRequest(client, method, params, abortSignal);
+      const signals = [operationController.signal];
+      if (requestOptions?.abortSignal) signals.push(requestOptions.abortSignal);
+      return abortableClientRequest(client, method, params, AbortSignal.any(signals));
     },
     async sendClientNotification(_uri, method, params) {
       currentClient().notification(method, params);
@@ -321,6 +325,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     applyEdit: applyWorkspaceEdit,
     showDocument,
     async restartFile(uri) {
+      if (disposed) throw requestAbortedError();
       options.requestRestart(`Lean infoview requested file restart for ${uri}`);
     },
     createRpcSession,
