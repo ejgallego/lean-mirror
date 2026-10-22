@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachLspProcess, encodeLspFrame, forwardLspFrames } from "../demo/server/lspProcessBridge.mjs";
+import { attachLspProcess, encodeLspFrame, forwardLspFrames, pipeServerStderr } from "../demo/server/lspProcessBridge.mjs";
 
 afterEach(() => { vi.useRealTimers(); });
 class Socket extends EventEmitter {
@@ -56,6 +56,29 @@ describe("bounded LSP process relay", () => {
     input.write(header);
     expect(onError).toHaveBeenCalledOnce();
     expect(input.listenerCount("data")).toBe(0);
+  });
+
+  it("accepts coalesced valid frames followed by a fragmented frame", () => {
+    const input = new PassThrough();
+    const messages: string[] = [];
+    const onError = vi.fn();
+    forwardLspFrames(input, (message) => messages.push(message), { maxFrameBytes: 128, maxHeaderBytes: 64, onError });
+    const frame = encodeLspFrame({ jsonrpc: "2.0", method: "small" });
+    const partial = frame.subarray(0, frame.length - 3);
+    input.write(Buffer.concat([...Array.from({ length: 400 }, () => frame), partial]));
+    expect(messages).toHaveLength(400);
+    input.write(frame.subarray(frame.length - 3));
+    expect(messages).toHaveLength(401);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("truncates long stderr lines and resumes normal line reporting", () => {
+    const input = new PassThrough();
+    const onLine = vi.fn();
+    pipeServerStderr(input, { maxLineLength: 8, onLine });
+    input.write("x".repeat(100));
+    input.write("y".repeat(100) + "\nnormal\n");
+    expect(onLine.mock.calls).toEqual([["xxxxxxxx [truncated]"], ["normal"]]);
   });
 
   it("rejects a truncated frame at EOF", () => {

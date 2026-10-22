@@ -43,11 +43,10 @@ export function forwardLspFrames(stream, onMessage, {
   }
   function data(chunk) {
     if (stopped) return;
-    if (buffer.length + chunk.length > maxFrameBytes + maxHeaderBytes + 4) {
-      fail("LSP buffered data exceeds the frame limit.");
-      return;
-    }
-    buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    // A pipe chunk can contain any number of individually valid frames. Bound
+    // the retained partial frame, not the aggregate chunk before parsing it.
+    const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    buffer = buffer.length ? Buffer.concat([buffer, incoming]) : incoming;
     while (!stopped) {
       const headerEnd = buffer.indexOf("\r\n\r\n");
       if (headerEnd < 0) {
@@ -63,7 +62,10 @@ export function forwardLspFrames(stream, onMessage, {
         fail("LSP Content-Length exceeds the frame limit or is invalid."); return;
       }
       const bodyStart = headerEnd + 4;
-      if (buffer.length < bodyStart + length) return;
+      if (buffer.length < bodyStart + length) {
+        buffer = Buffer.from(buffer); // Do not retain a large coalesced chunk.
+        return;
+      }
       const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
       buffer = buffer.subarray(bodyStart + length);
       try { onMessage(body); }
