@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
+
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
 - Lean language support, browser transport helpers, host-managed workspaces, utilities, demo app, and automated tests
 - Typed Lean `$/lean/fileProgress` tracking via `leanFileProgress()`, `LeanFileProgressStore`, and `LeanFileProgressKind`.
@@ -37,6 +39,10 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Direct clients now support one connection. Recreate them after disconnect or use `LeanEditorSession.reconnect()`; this prevents queued upstream operations from crossing connection generations.
+
+- Primary CI uses Rust 1.99.0 and its rust-analyzer; Rust 1.89.0 produced conflicting same-version diagnostic pushes during workspace loading.
+
 - Root validation and the demo workspace now share the stable Lean 4.34.1 toolchain pin.
 - The demo now reconnects Lean client/server generations while preserving the active editor document, selection, and undo history.
 - Server-owned workspace documents now use `acquireServerDocument()` leases; the former unowned `openServerDocument()` operation was removed during the unstable `0.x` series.
@@ -64,6 +70,15 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Retired client requests and asynchronous workspace edits stop at the connection lifetime; throwing or reentrant session observers no longer skip detach or start retired transports.
+- Display requests activate retained editor views, and late loaders cannot rewind document versions.
+- Browser/backend embedded Lean text and mappings now use one renderer, including imports, comma-separated labels, CRLF, and Unicode.
+- Malformed child LSP frames fail their session; framing, stdin/stdout queues, and stderr lines are bounded with backpressure and child reaping.
+- Workspace saves retain displaced disk versions for recovery, publish exclusively, serialize reads with saves, and preserve permission bits under a stricter umask. See `docs/workspace-persistence.md` for filesystem and recovery limits.
+- Shared log retention accepts zero to disable retention and rejects invalid limits; VS Code document identities use canonical encoded URIs.
+
+- Rust source saves trigger Cargo checks, including saves made during workspace loading. Current-version push diagnostics survive native pull responses that omit Cargo errors. Browser scenarios restore a valid local Rust fixture independently.
+
 - Empty string documents returned by host workspace loaders can now be cached, opened, and edited.
 - Synchronous server-to-client request handler failures now produce JSON-RPC error responses and notify the host error callback.
 - Packaging checks preserve the selected npm executable and accept both npm 11 and npm 12 JSON output.
@@ -71,7 +86,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Full CI now fails early for missing Lean/Lake/Rust prerequisites or a Lean version that differs from the repository toolchain pin.
 - WebSocket transport sends now report connecting sockets instead of silently dropping JSON-RPC messages, while terminal teardown sends remain harmless.
 - Hidden workspace edits coalesce into one immutable, correctly versioned LSP update; no-op edits no longer advance versions.
-- Cached-but-closed files no longer emit `didChange` without `didOpen`; pending edits are flushed before close and preserved across direct-client reconnection.
+- Cached-but-closed files no longer emit `didChange` without `didOpen`; pending edits are flushed before close and preserved in the disconnected workspace cache.
 - References now retain valid mappings for documents loaded after a request starts, including subsequent cached-document changes.
 - Definition navigation accepts Lean 4.33 `LocationLink` responses instead of assuming legacy `Location` fields.
 - VS Code document commands are serialized per URI and stale versioned changes are ignored.

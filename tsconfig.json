@@ -33,6 +33,7 @@
     "playwright.config.ts",
     "playwright.minimal.config.ts",
     "playwright.packed.config.ts",
+    "playwright.workspace.config.ts",
     "vitest.config.ts"
   ],
   "exclude": [

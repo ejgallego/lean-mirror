@@ -16,10 +16,10 @@ npm run check:environment
 
 Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
 (`leanprover/lean4:v4.34.1`). Install rust-analyzer and Rust sources with
-rustup. Primary CI uses Rust 1.89.0:
+rustup. Primary CI uses Rust 1.99.0:
 
 ```bash
-rustup toolchain install 1.89.0 --profile minimal --component rust-analyzer --component rust-src
+rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src
 ```
 
 Select that toolchain in your shell when matching CI. `npm run check:environment`
@@ -52,6 +52,14 @@ a manually edited demo session or another suite in the same checkout. A separate
 worktree needs its own `npm ci`; give simultaneous demo sessions distinct ports
 using the overrides in the README.
 
+The workspace example (`npm run example:workspace`) exercises file switching,
+revision-checked persistence, and server recovery through public package APIs.
+The [save/recovery contract](workspace-persistence.md) describes retained disk
+versions and interruption handling.
+Run `npm run test:e2e:workspace` for these workflows; they also run against the
+isolated package in `npm run test:packed:browser`. Browser suites reset Main.lean,
+Helper.lean, Main.rs, and RustSnippets.lean from their committed baselines.
+
 The three external Anneal scenarios are deliberately skipped in ordinary demo
 CI. Run `npm run test:e2e:zerocopy-anneal` for work on generation, cache identity,
 or prepared-example switching. This can download external projects and run
@@ -68,6 +76,24 @@ Set `VERSO_MIRROR_ROOT` if the sibling is elsewhere. This command runs its check
 tests, and build, and writes build artifacts there. Service synchronization or
 bridge changes also need its `npm run test:lsp`. See `editor-platform.md` for
 the dependency model.
+
+## Local process relay bounds
+
+The demo relay contains child framing/stream errors to their owning WebSocket
+session. It defaults to an 8 MiB LSP body limit, an 8192-byte header limit, and an
+8 MiB queue per direction. Configure positive integer byte limits with
+`LEAN_DEMO_MAX_LSP_FRAME_BYTES`, `LEAN_DEMO_MAX_LSP_HEADER_BYTES`, and
+`LEAN_DEMO_MAX_LSP_QUEUE_BYTES`. Child stdin respects `write()`/`drain`; slow browser
+sends pause stdout, and a peer exceeding a queue limit loses that session. Several
+complete frames may arrive in one pipe chunk; only retained partial frames and
+queued messages count against the relevant bounds. Stderr lines truncate at
+16384 characters.
+
+Shutdown drops queued work, tries the LSP exit sequence, then sends SIGTERM after
+120 ms and SIGKILL after another 500 ms unless the child exits. The process slot
+stays occupied until exit or a spawn error. These are development-host policies;
+process ownership and reconnect/replay policy remain host-specific. Nothing here
+creates a shared Node broker or a production memory guarantee for Lean itself.
 
 ## Takeover checkpoint
 

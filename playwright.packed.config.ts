@@ -15,7 +15,9 @@ const backendHost = process.env.PACKED_BACKEND_HOST ?? "127.0.0.1";
 const backendPort = process.env.PACKED_BACKEND_PORT ?? "7470";
 
 export default defineConfig({
-  testDir: "./test/minimal-e2e",
+  testDir: "./test",
+  workers: 1,
+  testMatch: ["minimal-e2e/*.spec.ts", "workspace-e2e/*.spec.ts"],
   timeout: 60_000,
   expect: {
     timeout: 20_000,
@@ -34,6 +36,7 @@ export default defineConfig({
         ...process.env,
         DEMO_FRONTEND_HOST: frontendHost,
         DEMO_FRONTEND_PORT: frontendPort,
+        LEAN_DEMO_LEAN_ONLY: "1",
         LEAN_DEMO_HOST: backendHost,
         LEAN_DEMO_PORT: backendPort,
       },

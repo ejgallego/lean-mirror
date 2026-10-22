@@ -17,6 +17,7 @@ import { keymap } from "@codemirror/view";
 import { leanFallbackLanguage } from "./language.js";
 import { leanJumpToDefinitionKeymap } from "./navigation.js";
 import { leanRenameKeymap } from "./rename.js";
+import { ConnectionTransport, clientLifetimeSignal, renewClientLifetime, retireClientOperations } from "./clientLifetime.js";
 import {
   leanSemanticTokens,
   type LeanSemanticTokensOptions,
@@ -103,20 +104,109 @@ function hasTransportWrapper(
 }
 
 class TransportWrappingLspClient extends LSPClient {
+  private connectionTransport: ConnectionTransport | null = null;
+  private outgoing: Transport | null = null;
+  private readonly requestTimeout: number;
+  private used = false;
+  private disposeSubscriptions: (() => void) | null = null;
+
   constructor(
     config: LSPClientConfig,
     private readonly transportExtensions: readonly LeanLspClientExtension[],
   ) {
     super(config);
+    this.requestTimeout = config.timeout ?? 3000;
+    const signal = renewClientLifetime(this);
+    const upstreamInitializing = this.initializing;
+    // Keep the upstream initialization resolver bound to this single connection.
+    // The public promise also settles when retirement wins the response race.
+    this.initializing = new Promise<null>((resolve, reject) => {
+      const aborted = () => reject(signal.reason);
+      signal.addEventListener("abort", aborted, { once: true });
+      void upstreamInitializing.then(() => {
+        if (signal.aborted) {
+          this.serverCapabilities = null;
+          reject(signal.reason);
+        } else resolve(null);
+      }, reject).finally(() => signal.removeEventListener("abort", aborted));
+    });
   }
 
+  override get connected(): boolean { return this.connectionTransport !== null; }
+
   override connect(transport: Transport): this {
-    let wrapped = transport;
-    for (const extension of this.transportExtensions) {
-      wrapped = extension.wrapTransport?.(wrapped, this) ?? wrapped;
+    if (this.used || clientLifetimeSignal(this)?.aborted) {
+      throw new Error("Lean LSP clients support one connection. Create a fresh client or use LeanEditorSession.reconnect().");
     }
-    super.connect(wrapped);
+    this.used = true;
+    const owned = new ConnectionTransport(transport, this.requestTimeout);
+    this.connectionTransport = owned;
+    try {
+      let wrapped: Transport = owned;
+      for (const extension of this.transportExtensions) {
+        wrapped = extension.wrapTransport?.(wrapped, this) ?? wrapped;
+      }
+      const subscribers = new Set<(message: string) => void>();
+      this.disposeSubscriptions = () => {
+        for (const handler of subscribers) wrapped.unsubscribe(handler);
+        subscribers.clear();
+      };
+      const outgoing: Transport = {
+        send: (message) => wrapped.send(message),
+        subscribe(handler) { subscribers.add(handler); wrapped.subscribe(handler); },
+        unsubscribe(handler) { subscribers.delete(handler); wrapped.unsubscribe(handler); },
+      };
+      this.outgoing = outgoing;
+      super.connect(outgoing);
+    } catch (error) {
+      this.disconnect();
+      throw error;
+    }
     return this;
+  }
+
+  override disconnect(): void {
+    retireClientOperations(this);
+    // Initialization may have no external waiter for a direct client.
+    void this.initializing.catch(() => undefined);
+    try {
+      this.connectionTransport?.retire();
+    } finally {
+      this.connectionTransport = null;
+      this.outgoing = null;
+      this.serverCapabilities = null;
+      // Upstream disconnect resets a mutable initialization resolver. A late
+      // initialize continuation would resolve that new promise instead of its
+      // original one. Single-use clients retain the original resolver and use
+      // the public workspace hook plus the owned wire for teardown.
+      const disposeSubscriptions = this.disposeSubscriptions;
+      this.disposeSubscriptions = null;
+      try { disposeSubscriptions?.(); }
+      finally { this.workspace.disconnected(); }
+    }
+  }
+
+  override request<Params, Result>(method: string, params: Params): Promise<Result> {
+    const signal = clientLifetimeSignal(this)!;
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise<Result>((resolve, reject) => {
+      const aborted = () => reject(signal.reason);
+      signal.addEventListener("abort", aborted, { once: true });
+      void super.request<Params, Result>(method, params).then(resolve, reject).finally(() => {
+        signal.removeEventListener("abort", aborted);
+      });
+    });
+  }
+
+  override notification(method: string, params: unknown): void {
+    const outgoing = this.outgoing;
+    if (!outgoing) return;
+    const send = () => {
+      if (this.outgoing === outgoing) outgoing.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    };
+    // Final didClose notifications must be sent while teardown still owns the wire.
+    if (this.serverCapabilities) send();
+    else void this.initializing.then(send, () => undefined);
   }
 }
 

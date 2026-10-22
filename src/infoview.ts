@@ -14,6 +14,7 @@ import {
 } from "@leanprover/infoview";
 import type * as lsp from "vscode-languageserver-protocol";
 
+import { captureClientOperation } from "./clientLifetime.js";
 import { applyLeanWorkspaceEdit } from "./workspaceEdit.js";
 import type { LeanEditorSessionExtension } from "./session.js";
 import type { LeanWorkspace } from "./workspace.js";
@@ -82,9 +83,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   let config: InfoviewConfig = { ...defaultInfoviewConfig };
   let initialized = false;
   let disposed = false;
+  let operationEpoch = 0;
+  let operationController = new AbortController();
   let infoviewApi: InfoviewApi;
 
   function currentClient(): LSPClient {
+    if (disposed) throw requestAbortedError();
     const client = options.client();
     if (!client) {
       throw new Error("Lean infoview requires an active client generation.");
@@ -143,12 +147,22 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     return Math.max(line.from, Math.min(line.to, line.from + position.character));
   }
 
-  async function displayView(uri: string): Promise<EditorView | null> {
+  function captureOperation(): () => boolean {
+    const client = options.client();
+    if (!client) return () => false;
+    const current = captureClientOperation(client);
+    const epoch = operationEpoch;
+    return () => !disposed && epoch === operationEpoch && options.client() === client && current();
+  }
+
+  async function displayView(uri: string, current: () => boolean): Promise<EditorView | null> {
+    if (!current()) return null;
     const workspace = options.workspace();
     if (!workspace) {
       return options.currentUri() === uri ? options.currentView() : null;
     }
     const opened = await workspace.displayFile(uri);
+    if (!current()) return null;
     return opened ?? workspace.getFile(uri)?.getView() ?? null;
   }
 
@@ -157,11 +171,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     kind: TextInsertKind,
     position?: lsp.TextDocumentPositionParams,
   ): Promise<void> {
+    const current = captureOperation();
+    if (!current()) return;
     const uri = position?.textDocument.uri ?? options.currentUri();
     if (!uri) {
       return;
     }
-    const view = position ? await displayView(uri) : options.currentView();
+    const view = position ? await displayView(uri, current) : options.currentView();
+    if (!current()) return;
     if (view) {
       const offset = position
         ? offsetFromPosition(view.state.doc, position.position)
@@ -179,7 +196,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
 
     const workspace = options.workspace();
     const file = workspace ? await workspace.requestFile(uri) : null;
-    if (!workspace || !file || !position) {
+    if (!current() || !workspace || !file || !position) {
       return;
     }
     const offset = offsetFromPosition(file.doc, position.position);
@@ -194,8 +211,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function applyWorkspaceEdit(edit: lsp.WorkspaceEdit): Promise<void> {
+    const current = captureOperation();
+    if (!current()) throw requestAbortedError();
     const result = await applyLeanWorkspaceEdit(currentClient(), edit, {
       userEvent: "lean.infoview",
+      signal: operationController.signal,
     });
     if (!result.applied) {
       throw new Error(
@@ -205,8 +225,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function showDocument(params: lsp.ShowDocumentParams): Promise<void> {
-    const view = await displayView(params.uri);
-    if (!view || !params.selection) {
+    const current = captureOperation();
+    const view = await displayView(params.uri, current);
+    if (!current() || !view || !params.selection) {
       return;
     }
     const anchor = offsetFromPosition(view.state.doc, params.selection.start);
@@ -219,6 +240,8 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function createRpcSession(uri: string): Promise<string> {
+    const current = captureOperation();
+    if (!current()) throw requestAbortedError();
     const client = currentClient();
     client.sync();
     const controller = new AbortController();
@@ -234,9 +257,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     } finally {
       rpcConnectControllers.delete(controller);
     }
+    if (!current()) throw requestAbortedError();
     const sessionId = String(connected.sessionId);
     const timer = window.setInterval(() => {
-      options.client()?.notification("$/lean/rpc/keepAlive", { sessionId, uri });
+      if (!current()) { closeRpcSession(sessionId); return; }
+      client.notification("$/lean/rpc/keepAlive", { sessionId, uri });
     }, keepAlivePeriodMs);
     rpcKeepAliveTimers.set(sessionId, timer);
     return sessionId;
@@ -251,6 +276,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   function closeRpcSessions(): void {
+    operationEpoch++;
+    operationController.abort();
+    operationController = new AbortController();
     for (const controller of rpcConnectControllers) {
       controller.abort();
     }
@@ -273,8 +301,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     async sendClientRequest(_uri, method, params, requestOptions) {
       const client = currentClient();
       client.sync();
-      const abortSignal = requestOptions?.abortSignal;
-      return abortableClientRequest(client, method, params, abortSignal);
+      const signals = [operationController.signal];
+      if (requestOptions?.abortSignal) signals.push(requestOptions.abortSignal);
+      return abortableClientRequest(client, method, params, AbortSignal.any(signals));
     },
     async sendClientNotification(_uri, method, params) {
       currentClient().notification(method, params);
@@ -296,6 +325,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     applyEdit: applyWorkspaceEdit,
     showDocument,
     async restartFile(uri) {
+      if (disposed) throw requestAbortedError();
       options.requestRestart(`Lean infoview requested file restart for ${uri}`);
     },
     createRpcSession,

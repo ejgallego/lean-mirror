@@ -1,0 +1,29 @@
+:root { color: #203344; background: #eef2f6; font-family: Inter, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+header, footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.3rem 1.6rem; }
+h1 { font-size: 1.5rem; font-weight: 650; margin: .3rem 0 0; }
+h2 { margin: 0; font-size: .9rem; }
+.eyebrow { margin: 0; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; color: #5c768c; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+button { font: inherit; cursor: pointer; padding: .55rem .8rem; border: 1px solid #c2ced8; border-radius: .4rem; background: white; color: #203344; }
+button:hover { border-color: #3e779e; }
+button:disabled { opacity: .5; cursor: default; }
+#save-all { background: #235b7b; color: white; }
+#connection-status { font-size: .85rem; }
+#connection-status[data-phase=ready] { color: #157450; }
+main { display: grid; grid-template-columns: 12rem minmax(20rem, 1.6fr) minmax(22rem, 1fr); gap: 1rem; padding: 0 1.6rem; }
+nav, .editor, aside { background: white; border: 1px solid #d4dde5; border-radius: .65rem; overflow: hidden; }
+nav { padding: 1rem .7rem; }
+nav h2 { margin: 0 .4rem .8rem; color: #5c768c; }
+nav button { display: block; width: 100%; margin: .35rem 0; text-align: left; border-color: transparent; }
+nav button[aria-pressed=true] { background: #e9f2f8; color: #1b557b; border-color: #bdd1e0; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; padding: .8rem 1rem; border-bottom: 1px solid #e1e7ec; }
+.panel-heading span { font-size: .75rem; color: #708493; }
+#workspace-editor, .workspace-editor-panel { height: 70vh; }
+.workspace-editor-panel[hidden] { display: none; }
+.cm-editor { font-size: .9rem; }
+#workspace-infoview { padding: .7rem; max-height: 70vh; overflow: auto; }
+#workspace-infoview .restart-file-button { position: static; display: block; margin: 1rem 0 0 auto; padding: .4rem .65rem; border: 1px solid #c2ced8; border-radius: .4rem; background: white; }
+footer { font-size: .8rem; color: #5c768c; }
+@media (max-width: 1000px) { main { grid-template-columns: 1fr; } nav { display: flex; gap: .5rem; align-items: center; } nav h2 { margin: 0; } nav button { width: auto; } header, footer { flex-wrap: wrap; } #workspace-editor, .workspace-editor-panel { height: 55vh; } }

@@ -75,6 +75,13 @@ async function fetchSession() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_000);
   try {
+    // Native preparation uses synchronous tools. Poll its cheap status endpoint
+    // first so timed-out waits do not queue expensive session snapshots behind
+    // that work and then all start together when preparation completes.
+    const statusResponse = await fetch(`${demo.backendUrl}/status`, { signal: controller.signal });
+    if (!statusResponse.ok) throw new Error(`status request returned ${statusResponse.status}`);
+    const preparationStatus = await statusResponse.json();
+    if (preparationStatus.phase !== "ready") return { preparationStatus, availableExamples: [] };
     const response = await fetch(`${demo.backendUrl}/session`, { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`session request returned ${response.status}`);

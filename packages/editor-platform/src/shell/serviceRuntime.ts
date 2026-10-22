@@ -44,6 +44,7 @@ export interface ServiceRequestHandle {
 }
 
 export interface EditorServiceRuntimeOptions {
+  /** Non-negative safe integer; zero disables log retention. */
   maxLogEntries?: number;
   now?: () => number;
   requestIdPrefix?: string;
@@ -60,7 +61,12 @@ export class EditorServiceRuntime {
     readonly store: EditorPlatformStore,
     readonly descriptor: EditorServiceDescriptor,
     private readonly options: EditorServiceRuntimeOptions = {}
-  ) {}
+  ) {
+    const limit = options.maxLogEntries;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
+      throw new RangeError("maxLogEntries must be a non-negative safe integer.");
+    }
+  }
 
   starting(message?: string): void {
     this.record({
