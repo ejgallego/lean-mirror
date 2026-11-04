@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   createLeanEditorSession, createLeanWorkspace, createWebSocketTransport,
-  detectLeanLineEnding, lean4, leanDocumentText, leanFallbackHighlightStyle, waitForWebSocketOpen,
+  detectLeanLineEnding, lean4, leanFallbackHighlightStyle, waitForWebSocketOpen,
   type LeanEditorSession, type LeanLineEnding, type LeanEditorSessionState, type LeanWorkspace,
 } from "codemirror-lean4-lsp";
 import {
@@ -63,12 +63,11 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   const documents = new Map<string, DocumentEntry>();
   for (const document of options.documents) {
     if (documents.has(document.uri)) throw new Error("Duplicate workspace document URI.");
-    documents.set(document.uri, {
-      ...document,
-      lineEnding: detectLeanLineEnding(document.text),
-      savedText: document.text,
-      saving: false,
-    });
+    // Compare and save text in the file's chosen ending. A mixed-ending file is
+    // normalized only when it is saved after an edit; edit-then-undo stays clean.
+    const lineEnding = detectLeanLineEnding(document.text);
+    const text = document.text.replace(/\r\n?|\n/g, lineEnding);
+    documents.set(document.uri, { ...document, lineEnding, text, savedText: text, saving: false });
   }
   let activeUri = first.uri;
   let infoview: LeanInfoviewHost | null = null;
@@ -111,7 +110,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
         onDocumentChange(uri, file) {
           const entry = documents.get(uri);
           if (entry) {
-            entry.text = leanDocumentText(file.doc, entry.lineEnding);
+            entry.text = file.doc.sliceString(0, file.doc.length, entry.lineEnding);
             emitDocument(entry);
           }
         },
@@ -139,7 +138,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
             ...(infoview ? [infoview.editorExtension()] : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
-                entry.text = leanDocumentText(update.state.doc, entry.lineEnding);
+                entry.text = update.state.doc.sliceString(0, update.state.doc.length, entry.lineEnding);
                 delete entry.error;
                 emitDocument(entry);
               }

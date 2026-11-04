@@ -77,7 +77,6 @@ export {
 export { leanUtilities, type LeanUtilityOptions } from "./utilities.js";
 export {
   detectLeanLineEnding,
-  leanDocumentText,
   type LeanLineEnding,
 } from "./lineEndings.js";
 export {

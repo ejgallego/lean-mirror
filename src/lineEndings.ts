@@ -1,6 +1,7 @@
-import type { Text } from "@codemirror/state";
-
-/** Line endings a host can persist. CodeMirror documents always use `"\n"` internally. */
+/**
+ * Line endings a host can persist. CodeMirror documents always use `"\n"`
+ * internally; serialize with `doc.sliceString(0, doc.length, lineEnding)`.
+ */
 export type LeanLineEnding = "\n" | "\r\n";
 
 /**
@@ -30,9 +31,4 @@ export function detectLeanLineEnding(
   }
   if (lineBreaks === 0) return fallback;
   return carriageReturnEndings > lineBreaks / 2 ? "\r\n" : "\n";
-}
-
-/** Serialize a CodeMirror document with the given line ending for persistence. */
-export function leanDocumentText(doc: Text, lineEnding: LeanLineEnding): string {
-  return doc.sliceString(0, doc.length, lineEnding);
 }

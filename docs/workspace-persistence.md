@@ -10,8 +10,10 @@ remain dirty. Multi-file saves are independent, not a filesystem transaction.
 CodeMirror joins lines with `\n`, so `doc.toString()` would silently rewrite a
 CRLF file as LF. The workspace example follows VS Code instead: it detects each
 file's ending once with `detectLeanLineEnding()` and serializes edits with
-`leanDocumentText()`. A file keeps CRLF or LF; a mixed file is normalized to its
-majority ending on first save. Lean normalizes CRLF itself, and LSP positions
+`Text.sliceString(0, length, ending)`. A file keeps CRLF or LF. Dirty state
+compares text in that ending, so editing and undoing leaves a file clean; a
+mixed file is normalized to its majority ending only when it is saved after an
+edit. Lean normalizes CRLF itself, and LSP positions
 do not depend on the ending.
 
 ## Writers and publication

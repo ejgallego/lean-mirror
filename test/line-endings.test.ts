@@ -1,7 +1,11 @@
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
-import { detectLeanLineEnding, leanDocumentText } from "../src/index.js";
+import type { Text } from "@codemirror/state";
+
+import { detectLeanLineEnding, type LeanLineEnding } from "../src/index.js";
+
+const serialize = (doc: Text, ending: LeanLineEnding) => doc.sliceString(0, doc.length, ending);
 
 describe("Lean line endings", () => {
   it("chooses the majority ending like VS Code", () => {
@@ -23,14 +27,14 @@ describe("Lean line endings", () => {
   it("writes an edited CRLF document back with CRLF", () => {
     const original = "import Helper\r\n\r\ndef answer := 42\r\n";
     const state = EditorState.create({ doc: original });
-    expect(leanDocumentText(state.doc, detectLeanLineEnding(original))).toBe(original);
+    expect(serialize(state.doc, detectLeanLineEnding(original))).toBe(original);
 
     const edited = state.update({
       changes: { from: state.doc.length, insert: "#eval answer\n" },
     }).state;
-    expect(leanDocumentText(edited.doc, "\r\n")).toBe(`${original}#eval answer\r\n`);
+    expect(serialize(edited.doc, "\r\n")).toBe(`${original}#eval answer\r\n`);
     // Mixed files are normalized to their majority ending.
     const mixed = EditorState.create({ doc: "a\r\nb\r\nc\nd" }).doc;
-    expect(leanDocumentText(mixed, detectLeanLineEnding("a\r\nb\r\nc\nd"))).toBe("a\r\nb\r\nc\r\nd");
+    expect(serialize(mixed, detectLeanLineEnding("a\r\nb\r\nc\nd"))).toBe("a\r\nb\r\nc\r\nd");
   });
 });

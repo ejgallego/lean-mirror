@@ -9,7 +9,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
-- `detectLeanLineEnding()` and `leanDocumentText()` let hosts persist documents with their original CRLF or LF endings, following VS Code's majority rule; the workspace example uses them.
+- `detectLeanLineEnding()` lets hosts persist documents with their original CRLF or LF ending, following VS Code's majority rule; the workspace example keeps each file's ending and stays clean after edit-and-undo.
 - A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
 
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
