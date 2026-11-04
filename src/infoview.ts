@@ -2,6 +2,7 @@ import { EditorSelection, Text } from "@codemirror/state";
 import type { Extension } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { LSPPlugin, type LSPClient } from "@codemirror/lsp-client";
+import * as infoviewModule from "@leanprover/infoview";
 import {
   defaultInfoviewConfig,
   renderInfoview,
@@ -20,6 +21,28 @@ import type { LeanEditorSessionExtension } from "./session.js";
 import type { LeanWorkspace } from "./workspace.js";
 
 const keepAlivePeriodMs = 10_000;
+
+interface MountedInfoview {
+  readonly api: InfoviewApi;
+  dispose(): void;
+}
+
+/**
+ * Mount the official infoview, preferring an owning `mountInfoview()` when the
+ * installed `@leanprover/infoview` provides one. `renderInfoview()` returns no
+ * unmount handle, so with it disposal can only detach the DOM.
+ */
+function mountOfficialInfoview(editorApi: EditorApi, element: HTMLElement): MountedInfoview {
+  // A computed lookup keeps bundlers from rejecting an export that older
+  // releases do not have.
+  const mountExport = "mountInfoview";
+  const mount = (infoviewModule as Record<string, unknown>)[mountExport];
+  if (typeof mount === "function") {
+    const mounted = (mount as (api: EditorApi, el: HTMLElement) => MountedInfoview)(editorApi, element);
+    return { api: mounted.api, dispose: () => mounted.dispose() };
+  }
+  return { api: renderInfoview(editorApi, element), dispose: () => undefined };
+}
 
 function requestAbortedError(): Error {
   const error = new Error("Lean infoview request aborted.");
@@ -324,13 +347,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     },
   };
 
-  // @leanprover/infoview offers no unmount. Render into an element this host
-  // owns so disposal detaches only that tree and the container can be reused.
-  // Removing the element does not unmount React: effect cleanups do not run.
+  // Render into an element this host owns so disposal removes only that tree
+  // and the container can be reused. Without `mountInfoview()`, removing the
+  // element does not unmount React: effect cleanups do not run.
   const mountRoot = document.createElement("div");
   mountRoot.className = "lean-infoview-root";
   options.container.append(mountRoot);
-  infoviewApi = renderInfoview(editorApi, mountRoot);
+  const mounted = mountOfficialInfoview(editorApi, mountRoot);
+  infoviewApi = mounted.api;
   void infoviewApi.changedInfoviewConfig(config);
 
   function setCursorLocation(location?: lsp.Location): void {
@@ -354,7 +378,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       if (disposed) return;
       disposed = true;
       closeRpcSessions();
-      mountRoot.remove();
+      try {
+        mounted.dispose();
+      } finally {
+        mountRoot.remove();
+      }
     },
     editorExtension() {
       return EditorView.updateListener.of((update: ViewUpdate) => {

@@ -263,10 +263,13 @@ slot returned by `renderEditorPlatformWorkspaceShell()`.
 The host renders the infoview into a child element it creates inside
 `container`. `dispose()` removes only that element, rejects later infoview
 requests, and stops forwarding events, so other container content is kept and a
-new host can mount into the same container. It does not unmount the infoview's
-React tree: `@leanprover/infoview` (0.13.0, and 0.14.0) exposes no unmount API,
-so React effect cleanups, including those of user widgets, do not run. Prefer
-one long-lived infoview host per page area over repeatedly creating and
+new host can mount into the same container. When the installed
+`@leanprover/infoview` exports `mountInfoview(editorApi, element)` returning
+`{ api, dispose }`, the host mounts through it and `dispose()` unmounts the
+React tree. Releases up to 0.14.0 only provide `renderInfoview()`, which returns
+no unmount handle: the tree is detached but not unmounted, so React effect
+cleanups, including those of user widgets, do not run. With those releases,
+prefer one long-lived infoview host per page area over repeatedly creating and
 disposing hosts.
 
 ## Official CodeMirror passthrough
