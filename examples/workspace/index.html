@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lean Workspace</title></head>
+  <body>
+    <header><div><p class="eyebrow">Lean workspace</p><h1>Small files. Connected proofs.</h1></div>
+      <div class="actions"><span id="connection-status" role="status">Connecting…</span><button id="reconnect">Reconnect Lean</button><button id="save-all" disabled>Save all</button></div>
+    </header>
+    <main>
+      <nav id="workspace-files" aria-label="Workspace files"><h2>Files</h2></nav>
+      <section class="editor"><div class="panel-heading"><h2 id="active-file">Opening workspace…</h2><span>F12 · Go to definition</span></div><div id="workspace-editor"></div></section>
+      <aside><div class="panel-heading"><h2>Lean Infoview</h2></div><div id="workspace-infoview"></div></aside>
+    </main>
+    <footer><span id="save-status" role="status">Loading files…</span><span>Edits stay in place when Lean reconnects. Save before leaving.</span></footer>
+    <script type="module" src="./workspace-main.ts"></script>
+  </body>
+</html>

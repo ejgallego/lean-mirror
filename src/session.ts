@@ -8,6 +8,7 @@ import {
   type LeanLspClientConfig,
   type LeanLspClientExtension,
 } from "./client.js";
+import { retireClientOperations } from "./clientLifetime.js";
 
 export type LeanEditorSessionPhase =
   | "idle"
@@ -43,6 +44,8 @@ export interface LeanEditorSessionExtension extends LeanLspClientExtension {
 export interface LeanEditorSessionOptions {
   client?: LeanLspClientConfig;
   onStateChange?: LeanEditorSessionStateListener;
+  /** Observer failures are isolated from lifecycle work; defaults to console.error. */
+  onObserverError?: (error: unknown) => void;
 }
 
 export interface LeanEditorSessionConnectOptions {
@@ -117,7 +120,7 @@ export class LeanEditorSession {
   ): () => void {
     this.stateListeners.add(listener);
     if (options.emitCurrent) {
-      listener(this.sessionState);
+      this.notify(listener, this.sessionState);
     }
     return () => {
       this.stateListeners.delete(listener);
@@ -163,7 +166,6 @@ export class LeanEditorSession {
       ...(options.disposeTransport ? { disposeTransport: options.disposeTransport } : {}),
     };
     this.active = active;
-    this.setState({ generation, phase: "initializing" });
 
     void initialized.then(
       () => {
@@ -179,10 +181,15 @@ export class LeanEditorSession {
     );
 
     try {
+      this.setState({ generation, phase: "initializing" });
+      // Observers can disconnect, dispose, or replace this generation.
+      if (this.active !== active) return connection;
       client.connect(transport);
     } catch (error) {
-      this.disconnectConnection(active);
-      this.setState({ error, generation, phase: "failed" });
+      if (this.active === active) {
+        this.disconnectConnection(active);
+        this.setState({ error, generation, phase: "failed" });
+      }
       throw error;
     }
 
@@ -230,6 +237,7 @@ export class LeanEditorSession {
       return;
     }
     this.active = null;
+    retireClientOperations(active.connection.client);
     active.rejectInitialization(
       new LeanEditorSessionDisconnectedError(active.connection.generation),
     );
@@ -270,9 +278,23 @@ export class LeanEditorSession {
 
   private setState(state: LeanEditorSessionState): void {
     this.sessionState = state;
-    this.options.onStateChange?.(state);
+    if (this.options.onStateChange) this.notify(this.options.onStateChange, state);
     for (const listener of [...this.stateListeners]) {
+      if (this.sessionState !== state) break;
+      this.notify(listener, state);
+    }
+  }
+
+  private notify(listener: LeanEditorSessionStateListener, state: LeanEditorSessionState): void {
+    try {
       listener(state);
+    } catch (error) {
+      try {
+        if (this.options.onObserverError) this.options.onObserverError(error);
+        else console.error("[lean-session] State observer failed", error);
+      } catch (reportError) {
+        console.error("[lean-session] Observer error reporting failed", reportError);
+      }
     }
   }
 }

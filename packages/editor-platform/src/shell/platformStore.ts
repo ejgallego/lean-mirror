@@ -122,9 +122,12 @@ export class EditorPlatformStore extends ObservableStore<EditorPlatformSnapshot>
 
   appendLog(event: LogEvent, options: { maxEntries?: number } = {}): void {
     const maxEntries = options.maxEntries ?? 500;
+    if (!Number.isSafeInteger(maxEntries) || maxEntries < 0) {
+      throw new RangeError("maxEntries must be a non-negative safe integer.");
+    }
     this.update((snapshot) => ({
       ...snapshot,
-      logs: [...snapshot.logs, event].slice(-maxEntries)
+      logs: maxEntries === 0 ? [] : [...snapshot.logs, event].slice(-maxEntries)
     }));
   }
 }

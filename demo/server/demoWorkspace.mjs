@@ -446,7 +446,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     async prepare() {
       try {
         setPreparationStatus("preparing", "Checking demo prerequisites.");
-        await ensureDemoPrerequisites();
+        await ensureDemoPrerequisites({ leanOnly: env.LEAN_DEMO_LEAN_ONLY === "1" });
         await configureExternalWorkspace();
         setPreparationStatus("preparing", "Preparing embedded Lean document.");
         await ensureEmbeddedLeanArtifacts(embeddedLeanPath, currentEmbeddedLeanContext());
@@ -582,8 +582,9 @@ async function ensureCommandAvailable(command, args, installHint) {
   );
 }
 
-async function ensureDemoPrerequisites() {
+async function ensureDemoPrerequisites({ leanOnly = false } = {}) {
   await ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
+  if (leanOnly) return;
   await ensureCommandAvailable(
     "rust-analyzer",
     ["--version"],

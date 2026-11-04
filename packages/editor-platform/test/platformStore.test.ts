@@ -9,6 +9,17 @@ import {
 import { describe, expect, test } from "vitest";
 
 describe("EditorPlatformStore", () => {
+  test("zero log retention clears existing logs and rejects invalid caps", () => {
+    const store = new EditorPlatformStore();
+    const event = { level: "info", message: "message", timestamp: 1 } as const;
+    store.appendLog(event);
+    store.appendLog(event, { maxEntries: 0 });
+    store.appendLog(event, { maxEntries: 0 });
+    expect(store.snapshot.logs).toEqual([]);
+    for (const maxEntries of [-1, 0.5, Infinity, NaN]) {
+      expect(() => store.appendLog(event, { maxEntries })).toThrow(RangeError);
+    }
+  });
   test("tracks service status updates", () => {
     const store = new EditorPlatformStore();
     const snapshots: string[] = [];

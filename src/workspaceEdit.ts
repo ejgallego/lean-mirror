@@ -16,6 +16,7 @@ import type {
   TextEdit,
   WorkspaceEdit,
 } from "vscode-languageserver-protocol";
+import { captureClientOperation } from "./clientLifetime.js";
 
 export interface LeanWorkspaceEditOptions {
   /**
@@ -28,6 +29,8 @@ export interface LeanWorkspaceEditOptions {
   sync?: boolean;
   /** CodeMirror user event attached to each transaction. */
   userEvent?: string;
+  /** Cancel host work, including asynchronous target loading. */
+  signal?: AbortSignal;
 }
 
 export interface LeanWorkspaceEditResult {
@@ -228,6 +231,9 @@ export async function applyLeanWorkspaceEdit(
   edit: WorkspaceEdit,
   options: LeanWorkspaceEditOptions = {},
 ): Promise<LeanWorkspaceEditResult> {
+  const current = captureClientOperation(client);
+  const cancelled = () => !current() || options.signal?.aborted;
+  if (cancelled()) return failed("Workspace edit was cancelled or its client disconnected.");
   const collected = collectEditGroups(edit);
   if (!Array.isArray(collected)) {
     return collected;
@@ -248,6 +254,7 @@ export async function applyLeanWorkspaceEdit(
       }
     }),
   );
+  if (cancelled()) return failed("Workspace edit was cancelled or its client disconnected.");
   for (const result of loaded) {
     if (!result.file) {
       const group = collected.find((candidate) => candidate.uri === result.uri);
@@ -275,6 +282,9 @@ export async function applyLeanWorkspaceEdit(
 
   const changedUris: string[] = [];
   for (const group of prepared) {
+    if (cancelled()) {
+      return { applied: false, changedUris, failureReason: "Workspace edit was cancelled or its client disconnected." };
+    }
     if (group.changes.length === 0) {
       continue;
     }

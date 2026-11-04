@@ -9,8 +9,9 @@ const rustBlocksDir = join(rootDir, "demo", "rust-blocks");
 
 export async function resetDemoWorkspace() {
   await mkdir(workspaceDir, { recursive: true });
-  await copyFile(join(baselineDir, "Main.rs"), join(workspaceDir, "Main.rs"));
-  await copyFile(join(baselineDir, "RustSnippets.lean"), join(workspaceDir, "RustSnippets.lean"));
+  for (const name of ["Main.lean", "Helper.lean", "Main.rs", "RustSnippets.lean"]) {
+    await copyFile(join(baselineDir, name), join(workspaceDir, name));
+  }
   await rm(rustBlocksDir, { recursive: true, force: true });
 }
 

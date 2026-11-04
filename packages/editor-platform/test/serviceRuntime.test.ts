@@ -3,6 +3,16 @@ import { describe, expect, test } from "vitest";
 import { EditorPlatformStore, EditorServiceRuntime } from "../src/index.js";
 
 describe("EditorServiceRuntime", () => {
+  test("can disable log retention without disabling service state or requests", async () => {
+    const store = new EditorPlatformStore();
+    const service = { id: "lean", kind: "lean-lsp", label: "Lean" };
+    const runtime = new EditorServiceRuntime(store, service, { maxLogEntries: 0 });
+    runtime.ready();
+    expect(await runtime.trackRequest("test", () => 42)).toBe(42);
+    expect(store.snapshot.services.lean?.status.state).toBe("ready");
+    expect(store.snapshot.logs).toEqual([]);
+    expect(() => new EditorServiceRuntime(store, service, { maxLogEntries: -1 })).toThrow(RangeError);
+  });
   test("records lifecycle events into the platform store", () => {
     let now = 100;
     const store = new EditorPlatformStore();

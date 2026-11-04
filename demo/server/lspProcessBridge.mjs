@@ -20,30 +20,61 @@ export function encodeLspFrame(payload) {
   ]);
 }
 
-export function forwardLspFrames(stream, onMessage) {
+export function forwardLspFrames(stream, onMessage, {
+  maxHeaderBytes = 8192,
+  maxFrameBytes = 8 * 1024 * 1024,
+  onError = () => stream.destroy(),
+} = {}) {
   let buffer = Buffer.alloc(0);
-  stream.on("data", (chunk) => {
-    buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    for (;;) {
+  let stopped = false;
+  function dispose() {
+    stopped = true;
+    buffer = Buffer.alloc(0);
+    stream.off("data", data);
+    stream.off("end", end);
+  }
+  function fail(message) {
+    dispose();
+    onError(new Error(message));
+  }
+  function end() {
+    if (buffer.length) fail("Incomplete LSP frame at end of stream.");
+    else dispose();
+  }
+  function data(chunk) {
+    if (stopped) return;
+    // A pipe chunk can contain any number of individually valid frames. Bound
+    // the retained partial frame, not the aggregate chunk before parsing it.
+    const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    buffer = buffer.length ? Buffer.concat([buffer, incoming]) : incoming;
+    while (!stopped) {
       const headerEnd = buffer.indexOf("\r\n\r\n");
       if (headerEnd < 0) {
+        if (buffer.length > maxHeaderBytes) fail("LSP header exceeds the header limit.");
         return;
       }
+      if (headerEnd > maxHeaderBytes) { fail("LSP header exceeds the header limit."); return; }
       const header = buffer.subarray(0, headerEnd).toString("utf8");
-      const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) {
-        throw new Error(`Malformed LSP header: ${header}`);
+      const matches = [...header.matchAll(/^Content-Length:[ \t]*(\d+)[ \t]*$/gim)];
+      if (matches.length !== 1) { fail("Malformed or duplicate LSP Content-Length header."); return; }
+      const length = Number(matches[0][1]);
+      if (!Number.isSafeInteger(length) || length <= 0 || length > maxFrameBytes) {
+        fail("LSP Content-Length exceeds the frame limit or is invalid."); return;
       }
-      const length = Number(match[1]);
       const bodyStart = headerEnd + 4;
       if (buffer.length < bodyStart + length) {
+        buffer = Buffer.from(buffer); // Do not retain a large coalesced chunk.
         return;
       }
       const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
       buffer = buffer.subarray(bodyStart + length);
-      onMessage(body);
+      try { onMessage(body); }
+      catch (error) { dispose(); onError(error); }
     }
-  });
+  }
+  stream.on("data", data);
+  stream.on("end", end);
+  return { dispose };
 }
 
 export function pipeServerStderr(
@@ -52,10 +83,12 @@ export function pipeServerStderr(
     ignoredPatterns = defaultIgnorableClosePatterns,
     onLine = (line) => console.error(line),
     shouldSkipFollowingLines = defaultShouldSkipFollowingLines,
+    maxLineLength = 16_384,
   } = {},
 ) {
   let buffer = "";
   let skipBlock = false;
+  let droppingLine = false;
 
   function emit(line) {
     const text = line.replace(/\r$/, "");
@@ -76,14 +109,21 @@ export function pipeServerStderr(
   }
 
   stream.on("data", (chunk) => {
-    buffer += chunk.toString("utf8");
-    for (;;) {
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) {
-        break;
+    const parts = chunk.toString("utf8").split("\n");
+    for (let index = 0; index < parts.length; index++) {
+      const complete = index < parts.length - 1;
+      if (!droppingLine) {
+        buffer += parts[index].slice(0, maxLineLength + 1 - buffer.length);
+        if (buffer.length > maxLineLength) {
+          emit(buffer.slice(0, maxLineLength) + " [truncated]");
+          buffer = "";
+          droppingLine = true;
+        } else if (complete) {
+          emit(buffer);
+          buffer = "";
+        }
       }
-      emit(buffer.slice(0, newline));
-      buffer = buffer.slice(newline + 1);
+      if (complete) droppingLine = false;
     }
   });
 
@@ -162,58 +202,110 @@ export function requestGracefulShutdown(
   } catch {}
 }
 
-export function attachLspProcess(
-  socket,
-  child,
-  {
-    killDelayMs = 120,
-    shutdownExitDelayMs = 25,
-    state = createLspProcessState(),
-  } = {},
-) {
+export function attachLspProcess(socket, child, {
+  killDelayMs = 120,
+  killEscalationMs = 500,
+  shutdownExitDelayMs = 25,
+  maxQueuedBytes = 8 * 1024 * 1024,
+  maxHeaderBytes = 8192,
+  maxFrameBytes = 8 * 1024 * 1024,
+  onError = (error) => console.error("[demo] LSP session failed:", error.message),
+  state = createLspProcessState(),
+} = {}) {
   let shuttingDown = false;
-  forwardLspFrames(child.stdout, (message) => {
-    if (socket.readyState === SOCKET_OPEN) {
-      socket.send(message);
-    }
-  });
+  let exited = false;
+  let blocked = false;
+  let incomingBytes = 0;
+  let outgoingBytes = 0;
+  let sending = false;
+  let terminateTimer;
+  let killTimer;
+  const incoming = [];
+  const outgoing = [];
 
-  socket.on("message", (message) => {
-    const payload = normalizeClientLspPayload(
-      Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8"),
-    );
-    noteClientLspMessage(state, payload);
-    child.stdin.write(`Content-Length: ${payload.length}\r\n\r\n`);
-    child.stdin.write(payload);
-  });
-
-  const shutdown = () => {
-    if (shuttingDown) {
-      return;
-    }
+  function shutdown() {
+    if (shuttingDown) return;
     shuttingDown = true;
     state.expectedClose = true;
-    requestGracefulShutdown(child, state, { exitDelayMs: shutdownExitDelayMs });
-    if (!child.killed) {
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill();
-        }
-      }, killDelayMs);
+    parser.dispose();
+    incoming.length = outgoing.length = 0;
+    incomingBytes = outgoingBytes = 0;
+    child.stdin.off("drain", drain);
+    if (!exited) {
+      requestGracefulShutdown(child, state, { exitDelayMs: shutdownExitDelayMs });
+      if (!state.initialized) child.stdin.end();
+      terminateTimer = setTimeout(() => { if (!exited) child.kill("SIGTERM"); }, killDelayMs);
+      killTimer = setTimeout(() => { if (!exited) child.kill("SIGKILL"); }, killDelayMs + killEscalationMs);
     }
-    if (socket.readyState === SOCKET_OPEN || socket.readyState === SOCKET_CONNECTING) {
-      socket.close();
+    if (socket.readyState === SOCKET_OPEN || socket.readyState === SOCKET_CONNECTING) socket.close();
+  }
+  function fail(error) {
+    if (shuttingDown) return;
+    shutdown();
+    onError(error instanceof Error ? error : new Error(String(error)));
+  }
+  function drain() {
+    if (shuttingDown) return;
+    blocked = false;
+    while (incoming.length && !blocked) {
+      const frame = incoming.shift();
+      incomingBytes -= frame.length;
+      try { blocked = !child.stdin.write(frame); }
+      catch (error) { fail(error); return; }
     }
-  };
-
-  socket.on("close", shutdown);
-  socket.on("error", shutdown);
-  child.on("exit", () => {
-    if (socket.readyState === SOCKET_OPEN || socket.readyState === SOCKET_CONNECTING) {
-      socket.close();
+    if (blocked) socket.pause?.();
+    else socket.resume?.();
+  }
+  function sendNext() {
+    if (shuttingDown || sending || !outgoing.length) return;
+    if (socket.readyState !== SOCKET_OPEN) { shutdown(); return; }
+    const message = outgoing.shift();
+    const bytes = Buffer.byteLength(message);
+    sending = true;
+    try {
+      socket.send(message, (error) => {
+        if (shuttingDown) return;
+        sending = false;
+        outgoingBytes -= bytes;
+        if (error) { fail(error); return; }
+        if (outgoingBytes < maxQueuedBytes / 2) child.stdout.resume();
+        sendNext();
+      });
+    } catch (error) { fail(error); }
+  }
+  const parser = forwardLspFrames(child.stdout, (message) => {
+    const bytes = Buffer.byteLength(message);
+    if (bytes + outgoingBytes > maxQueuedBytes) { fail(new Error("LSP WebSocket output queue limit exceeded.")); return; }
+    outgoing.push(message);
+    outgoingBytes += bytes;
+    if (outgoingBytes >= maxQueuedBytes / 2) child.stdout.pause();
+    sendNext();
+  }, { maxHeaderBytes, maxFrameBytes, onError: fail });
+  socket.on("message", (message) => {
+    if (shuttingDown) return;
+    const payload = normalizeClientLspPayload(Buffer.isBuffer(message) ? message : Buffer.from(String(message), "utf8"));
+    const header = Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "utf8");
+    if (payload.length + header.length + incomingBytes + child.stdin.writableLength > maxQueuedBytes) {
+      fail(new Error("LSP child input queue limit exceeded.")); return;
     }
+    noteClientLspMessage(state, payload);
+    const frame = Buffer.concat([header, payload]);
+    incoming.push(frame);
+    incomingBytes += frame.length;
+    if (!blocked) drain();
   });
-
+  socket.on("close", shutdown);
+  socket.on("error", fail);
+  child.stdin.on("drain", drain);
+  child.stdin.on("error", fail);
+  child.stdout.on("error", fail);
+  child.on("error", fail);
+  child.on("exit", () => {
+    exited = true;
+    clearTimeout(terminateTimer);
+    clearTimeout(killTimer);
+    shutdown();
+  });
   return { shutdown, state };
 }
 

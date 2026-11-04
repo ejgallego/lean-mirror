@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
-const backendHost = process.env.MINIMAL_BACKEND_HOST ?? "127.0.0.1";
-const backendPort = String(process.env.MINIMAL_BACKEND_PORT ?? "7457");
-const frontendHost = process.env.MINIMAL_FRONTEND_HOST ?? "127.0.0.1";
-const frontendPort = String(process.env.MINIMAL_FRONTEND_PORT ?? "5273");
+const workspaceMode = process.argv.includes("--workspace");
+const prefix = workspaceMode ? "WORKSPACE" : "MINIMAL";
+const backendHost = process.env[prefix + "_BACKEND_HOST"] ?? "127.0.0.1";
+const backendPort = String(process.env[prefix + "_BACKEND_PORT"] ?? (workspaceMode ? "7458" : "7457"));
+const frontendHost = process.env[prefix + "_FRONTEND_HOST"] ?? "127.0.0.1";
+const frontendPort = String(process.env[prefix + "_FRONTEND_PORT"] ?? (workspaceMode ? "5274" : "5273"));
 const backendUrl = `http://${backendHost}:${backendPort}`;
 const frontendUrl = `http://${frontendHost}:${frontendPort}`;
 const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
@@ -30,7 +32,7 @@ function spawnChild(command, args, env) {
     children.delete(child);
     if (!shuttingDown) {
       console.error(
-        `[minimal-example] ${command} exited unexpectedly (${code ?? signal ?? "unknown"}).`,
+        `[lean-example] ${command} exited unexpectedly (${code ?? signal ?? "unknown"}).`,
       );
       void shutdown(typeof code === "number" && code !== 0 ? code : 1);
     }
@@ -120,20 +122,21 @@ try {
     ...process.env,
     DEMO_FRONTEND_HOST: frontendHost,
     DEMO_FRONTEND_PORT: frontendPort,
+    LEAN_DEMO_LEAN_ONLY: "1",
     LEAN_DEMO_HOST: backendHost,
     LEAN_DEMO_PORT: backendPort,
   });
   await waitForBackend(backend);
-  spawnChild(npxCommand, ["vite", "--config", "./examples/minimal/vite.config.ts"], {
+  spawnChild(npxCommand, ["vite", "--config", workspaceMode ? "./examples/workspace/vite.config.ts" : "./examples/minimal/vite.config.ts"], {
     ...process.env,
-    MINIMAL_FRONTEND_HOST: frontendHost,
-    MINIMAL_FRONTEND_PORT: frontendPort,
+    [prefix + "_FRONTEND_HOST"]: frontendHost,
+    [prefix + "_FRONTEND_PORT"]: frontendPort,
     VITE_LEAN_BACKEND_URL: backendUrl,
   });
-  console.log(`[minimal-example] Frontend: ${frontendUrl}`);
-  console.log(`[minimal-example] Lean backend: ${backendUrl}`);
+  console.log(`[lean-example] Frontend: ${frontendUrl}`);
+  console.log(`[lean-example] Lean backend: ${backendUrl}`);
   await runFinished;
 } catch (error) {
-  console.error(`[minimal-example] ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`[lean-example] ${error instanceof Error ? error.message : String(error)}`);
   await shutdown(1);
 }

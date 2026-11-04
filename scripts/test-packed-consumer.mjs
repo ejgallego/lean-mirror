@@ -115,6 +115,13 @@ try {
     ]);
   }
 
+  if (browserMode) {
+    for (const name of ["workspace-main.ts", "publicLeanWorkspace.ts", "workspace.css"]) {
+      await copyFile(join(root, "examples", "workspace", name), join(consumer, name));
+    }
+    await copyFile(join(root, "examples", "workspace", "index.html"), join(consumer, "workspace.html"));
+  }
+
   run(
     npmCommand,
     [
@@ -191,6 +198,7 @@ try {
       arguments: ["--config", "playwright.packed.config.ts"],
       environment: {
         PACKED_BROWSER_CONSUMER_ROOT: consumer,
+        WORKSPACE_BROWSER_PATH: "/workspace.html",
       },
     });
     if (status !== 0) {

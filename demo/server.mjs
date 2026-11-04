@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
+import { createLeanDocumentStore } from "./server/leanDocuments.mjs";
+import { handleLeanDocumentRequest } from "./server/leanDocumentHttp.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
 import {
   DemoRequestTooLargeError,
@@ -22,6 +24,10 @@ import {
 } from "./shared/demoProtocol.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const leanDocuments = createLeanDocumentStore([
+  join(__dirname, "workspace", "Main.lean"),
+  join(__dirname, "workspace", "Helper.lean"),
+]);
 const host = process.env.LEAN_DEMO_HOST ?? "127.0.0.1";
 const port = Number(process.env.LEAN_DEMO_PORT ?? "7357");
 const allowRemote = process.env.LEAN_DEMO_ALLOW_REMOTE === "1";
@@ -47,6 +53,11 @@ const maxLspProcesses = parsePositiveInteger(
   8,
   "LEAN_DEMO_MAX_LSP_PROCESSES",
 );
+const lspRelayLimits = {
+  maxFrameBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_FRAME_BYTES, 8 * 1024 * 1024, "LEAN_DEMO_MAX_LSP_FRAME_BYTES"),
+  maxHeaderBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_HEADER_BYTES, 8192, "LEAN_DEMO_MAX_LSP_HEADER_BYTES"),
+  maxQueuedBytes: parsePositiveInteger(process.env.LEAN_DEMO_MAX_LSP_QUEUE_BYTES, 8 * 1024 * 1024, "LEAN_DEMO_MAX_LSP_QUEUE_BYTES"),
+};
 const demoWorkspace = createDemoWorkspace(__dirname, {
   cwd: process.cwd(),
   env: process.env,
@@ -128,6 +139,14 @@ async function handleHttpRequest(req, res) {
       }),
     );
     res.end(JSON.stringify(await demoWorkspace.readSession(websocketUrls())));
+    return;
+  }
+  if (new URL(req.url, `http://${host}:${port}`).pathname === "/lean-document") {
+    await preparePromise;
+    if (prepareError) throw prepareError;
+    await handleLeanDocumentRequest(req, res, {
+      store: leanDocuments, maxBodyBytes, headers: withCorsHeaders,
+    });
     return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.switchExample) {
@@ -333,15 +352,16 @@ function attachSpawnedLsp(connection, command, args, cwd) {
     released = true;
     activeLspProcesses = Math.max(0, activeLspProcesses - 1);
   };
-  connection.once("close", release);
 
   const child = spawn(command, args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  child.once("exit", release);
+  child.once("error", release);
   child.once("error", () => connection.close());
   pipeServerStderr(child.stderr);
-  attachLspProcess(connection, child);
+  attachLspProcess(connection, child, lspRelayLimits);
 }
 
 wsServer.on("connection", (socket) => {

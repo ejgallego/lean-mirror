@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
 function commandAvailable(command: string): boolean {
@@ -21,7 +22,21 @@ test.skip(
   `Lean demo prerequisites are required for the browser E2E test: missing ${missingPrerequisites.join(", ")}.`,
 );
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, request }) => {
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? "127.0.0.1"}:${process.env.DEMO_BACKEND_PORT ?? "7360"}`;
+  const session = await (await request.get(backend + "/session")).json();
+  if (session.rootUri === new URL("../../demo/workspace", import.meta.url).href) {
+    // Restore through the backend queue so a failed scenario cannot leave its
+    // persisted Rust edit behind for the next one. External workspaces stay alone.
+    const [code, leanDocument] = await Promise.all([
+      readFile(new URL("../../demo/baseline/Main.rs", import.meta.url), "utf8"),
+      readFile(new URL("../../demo/baseline/RustSnippets.lean", import.meta.url), "utf8"),
+    ]);
+    const restored = await request.post(backend + "/rust-main", {
+      data: { uri: session.rustMainDocumentUri, code, leanDocument, revision: 0 },
+    });
+    expect(restored.ok()).toBe(true);
+  }
   const errors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" && !isExpectedTransientConsoleError(message.text())) {
@@ -373,6 +388,54 @@ test("demo updates Rust and embedded Lean diagnostics after edits", async ({ pag
   await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("Nat.succ");
   await expect(page.locator(".cm-embedded-block-widget .cm-lintRange-error")).toHaveCount(0);
   await page.waitForTimeout(900);
+});
+
+test("demo keeps versioned Rust diagnostics when a later pull is empty", async ({ page }) => {
+  let edited = false;
+  let pendingId: string | number | undefined;
+  let versionedPush: string | undefined;
+  let delivered = false;
+  await page.routeWebSocket(/\/rust-main-lsp$/, (route) => {
+    const server = route.connectToServer();
+    const deliver = () => {
+      if (pendingId === undefined || versionedPush === undefined || delivered) return;
+      // Replay a real current-version Cargo push before an empty native pull.
+      // The two rust-analyzer streams need not contain the same diagnostics.
+      route.send(versionedPush);
+      route.send(JSON.stringify({
+        jsonrpc: "2.0", id: pendingId, result: { kind: "full", items: [] },
+      }));
+      delivered = true;
+    };
+    route.onMessage((message) => {
+      const payload = JSON.parse(message.toString());
+      if (edited && payload.method === "textDocument/diagnostic") {
+        pendingId = payload.id;
+        deliver();
+        return;
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const payload = JSON.parse(message.toString());
+      if (edited && payload.method === "textDocument/publishDiagnostics") {
+        if (payload.params.version !== undefined && payload.params.diagnostics.some(
+          (diagnostic: { code?: string }) => diagnostic.code === "E0308",
+        )) {
+          versionedPush = message.toString();
+          deliver();
+        }
+        return;
+      }
+      route.send(message);
+    });
+  });
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  edited = true;
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "\"bad\""))).toBe(true);
+  await expect.poll(() => delivered).toBe(true);
+  await expect(page.locator("#editor > .cm-editor .cm-lintRange-error")).not.toHaveCount(0);
 });
 
 test("demo syncs Rust keyboard edits", async ({ page }) => {

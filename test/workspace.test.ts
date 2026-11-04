@@ -526,7 +526,7 @@ describe("LeanWorkspace", () => {
     client.disconnect();
   });
 
-  it("reopens unsynchronized editor text after a direct client reconnect", async () => {
+  it("retains offline text but requires a fresh client for a new connection", async () => {
     const initialized = createInitializedClient(createLeanWorkspace());
     const { client } = initialized;
     const view = createTestView("def value := 1\n", lean4({ client, uri: MAIN_URI }));
@@ -551,17 +551,9 @@ describe("LeanWorkspace", () => {
     nextTransport.onRequest("initialize", () => ({
       capabilities: { textDocumentSync: 2 },
     }));
-    client.connect(nextTransport);
-    await client.initializing;
-    await waitFor(() => nextTransport.notifications("textDocument/didOpen").length === 1);
-
-    expect(nextTransport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
-      textDocument: {
-        text: "def value := 3\n",
-        uri: MAIN_URI,
-        version: 2,
-      },
-    });
+    expect(() => client.connect(nextTransport)).toThrow(/fresh client/);
+    expect(nextTransport.sent).toEqual([]);
+    expect(workspace.getFile(MAIN_URI)?.doc.toString()).toBe("def value := 3\n");
 
     view.destroy();
     client.disconnect();

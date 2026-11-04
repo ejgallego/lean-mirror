@@ -1,10 +1,10 @@
 import type { Extension } from "@codemirror/state";
+import { embeddedLeanRole, renderEmbeddedLeanDocument } from "../shared/embeddedLeanDocument.mjs";
 
 import { lean4, leanFallbackHighlightStyle } from "codemirror-lean4-lsp";
 import { lineCommentFencedHostFingerprint } from "../shared/embeddedLineComments.mjs";
 import {
   createLineCommentAdapter,
-  type EmbeddedBlock,
   type EmbeddedBlockDiagnostic,
   type LineCommentEmbeddedBlock,
 } from "./embeddedBlocks.js";
@@ -41,93 +41,18 @@ export interface EmbeddedLeanDiagnosticInput {
   severity?: EmbeddedBlockDiagnostic["severity"];
 }
 
-function leanRole(block: EmbeddedBlock): EmbeddedLeanBlock["role"] {
-  const info = "info" in block && typeof block.info === "string" ? block.info.trim().toLowerCase() : "";
-  const label = block.label?.trim().toLowerCase();
-  return info === "editor-prelude" ||
-    info === "prelude" ||
-    label === "editor-prelude" ||
-    label === "prelude" ||
-    label === "imports"
-    ? "prelude"
-    : "snippet";
-}
-
-function lineNumberAt(source: string, offset: number): number {
-  const end = Math.max(0, Math.min(source.length, offset));
-  let line = 1;
-  for (let index = 0; index < end; index += 1) {
-    const char = source[index];
-    if (char === "\r") {
-      line += 1;
-      if (source[index + 1] === "\n") {
-        index += 1;
-      }
-    } else if (char === "\n") {
-      line += 1;
-    }
-  }
-  return line;
-}
-
 function withRole(block: LineCommentEmbeddedBlock): EmbeddedLeanBlock {
-  return {
-    ...block,
-    role: leanRole(block),
-  };
+  return { ...block, role: embeddedLeanRole(block.info ?? block.label) };
 }
 
 export function buildEmbeddedLeanDocument(
   source: string,
   options: EmbeddedLeanDocumentOptions = {},
 ): EmbeddedLeanDocument {
-  const blocks = parseEmbeddedLeanBlocks(source);
-  const defaultImports = options.defaultImports ?? [];
-  const prelude = blocks.filter((block) => block.role === "prelude");
-  const snippets = blocks.filter((block) => block.role !== "prelude");
-  const lines: string[] = [];
-  const mappings: EmbeddedLeanDocumentMapping[] = [];
-
-  for (const moduleName of defaultImports) {
-    lines.push(`import ${moduleName}`);
-  }
-  if (defaultImports.length > 0) {
-    lines.push("");
-  }
-  if (options.preamble && options.preamble.length > 0) {
-    lines.push(...options.preamble);
-    lines.push("");
-  }
-
-  for (const block of [...prelude, ...snippets]) {
-    const line = lineNumberAt(source, block.from);
-    const title = block.label ?? `block ${block.ordinal}`;
-    lines.push(`/- ${title} from ${options.sourceName ?? "Rust source"}:${line} -/`);
-    const codeLines = block.code.split("\n");
-    for (const [index, codeLine] of codeLines.entries()) {
-      mappings.push({
-        blockKey: block.key,
-        blockLineStart: block.code
-          .split("\n")
-          .slice(0, index)
-          .reduce((offset, current) => offset + current.length + 1, 0),
-        generatedLine: lines.length,
-      });
-      lines.push(codeLine);
-    }
-    lines.push("");
-  }
-
-  if (options.postamble && options.postamble.length > 0) {
-    lines.push(...options.postamble);
-    lines.push("");
-  }
-
-  return {
-    blocks,
-    doc: lines.join("\n").trimEnd() + "\n",
-    mappings,
-  };
+  const rendered = renderEmbeddedLeanDocument(source, options);
+  return { ...rendered, blocks: rendered.blocks.map((block) => ({
+    ...block, title: block.label ?? `Lean Block ${block.ordinal}`,
+  })) };
 }
 
 export function mapEmbeddedLeanDiagnostics(

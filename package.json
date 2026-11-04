@@ -77,7 +77,7 @@
     "check:environment": "node ./scripts/check-ci-environment.mjs",
     "check:platform": "npm run check -w @leanprover/editor-platform",
     "check:vscode": "npm run check -w @leanprover/editor-platform-vscode",
-    "ci": "npm run check:environment && npm run check && npm run check:platform && npm run check:vscode && npm test && npm run test:platform && npm run test:consumer:verso && npm run test:vscode && npm run test:e2e && npm run test:e2e:minimal && npm run build:example:minimal && npm run test:consumer && npm run build:vscode && npm run pack:check && npm run test:packed:browser",
+    "ci": "npm run check:environment && npm run check && npm run check:platform && npm run check:vscode && npm test && npm run test:platform && npm run test:consumer:verso && npm run test:vscode && npm run test:e2e && npm run test:e2e:minimal && npm run test:e2e:workspace && npm run build:example:minimal && npm run build:example:workspace && npm run test:consumer && npm run build:vscode && npm run pack:check && npm run test:packed:browser",
     "demo": "node ./scripts/run-demo.mjs",
     "demo:backend": "node ./demo/server.mjs",
     "demo:frontend": "vite --config ./demo/vite.config.ts",
@@ -97,7 +97,10 @@
     "test:vscode": "npm run test -w @leanprover/editor-platform-vscode",
     "test:e2e": "node ./scripts/test-e2e.mjs",
     "test:e2e:minimal": "node ./scripts/test-minimal-example-e2e.mjs",
-    "test:e2e:zerocopy-anneal": "node ./scripts/test-zerocopy-anneal-e2e.mjs"
+    "test:e2e:zerocopy-anneal": "node ./scripts/test-zerocopy-anneal-e2e.mjs",
+    "example:workspace": "node ./scripts/run-minimal-example.mjs --workspace",
+    "test:e2e:workspace": "node ./scripts/test-workspace-example-e2e.mjs",
+    "build:example:workspace": "vite build --config ./examples/workspace/vite.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

@@ -10,6 +10,7 @@ import type {
   ServerCapabilities,
   TextDocumentPositionParams,
 } from "vscode-languageserver-protocol";
+import { captureClientOperation } from "./clientLifetime.js";
 
 type NavigationLocation = Location | LocationLink;
 
@@ -50,6 +51,7 @@ function navigate(view: EditorView, request: NavigationRequest): boolean {
   }
 
   plugin.client.sync();
+  const current = captureClientOperation(plugin.client);
   void plugin.client.withMapping(async (mapping) => {
     const response = await plugin.client.request<
       TextDocumentPositionParams,
@@ -59,7 +61,7 @@ function navigate(view: EditorView, request: NavigationRequest): boolean {
       position: plugin.toPosition(view.state.selection.main.head),
     });
     const location = Array.isArray(response) ? response[0] : response;
-    if (!location) {
+    if (!location || !current() || LSPPlugin.get(view) !== plugin) {
       return;
     }
 
@@ -67,7 +69,7 @@ function navigate(view: EditorView, request: NavigationRequest): boolean {
     const targetView = target.uri === plugin.uri
       ? view
       : await plugin.client.workspace.displayFile(target.uri);
-    if (!targetView) {
+    if (!targetView || !current() || LSPPlugin.get(view) !== plugin) {
       return;
     }
     const position = mapping.getMapping(target.uri)

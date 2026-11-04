@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  RUSTUP_TOOLCHAIN: 1.89.0
+  RUSTUP_TOOLCHAIN: 1.99.0
 
 jobs:
   test:
