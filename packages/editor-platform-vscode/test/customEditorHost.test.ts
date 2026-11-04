@@ -395,6 +395,58 @@ describe("custom editor host", () => {
     expect(activated).toEqual(["file:///New.lean"]);
   });
 
+  test("rejects an earlier webview session's commands even when they arrive late", async () => {
+    const webview = new FakeWebview();
+    const applied: string[] = [];
+    const stale: string[] = [];
+    createEditorPlatformCustomEditorHost({
+      store: new EditorPlatformStore(),
+      webview,
+      publishSnapshots: false,
+      onStaleMessage: (message) => stale.push(message.type === "document-changed" ? message.payload.text : message.type),
+      handlers: {
+        documentChanged({ text }) {
+          applied.push(text);
+        }
+      }
+    });
+    const uri = "file:///Main.lean";
+    const change = (session: string | undefined, text: string, version: number) => webview.receive(
+      platformMessage("document-changed", { uri, text, version, ...(session ? { session } : {}) })
+    );
+
+    webview.receive(platformMessage("ready", { session: "old" }));
+    change("old", "old-before-ready", 20);
+    await waitFor(() => applied.length === 1);
+    webview.receive(platformMessage("ready", { session: "new" }));
+    change("new", "new-1", 1);
+    // Delivered after the new ready: receive order alone would accept it.
+    change("old", "old-late", 21);
+    change(undefined, "no-session", 22);
+    change("new", "new-2", 2);
+    await waitFor(() => applied.length === 3);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(applied).toEqual(["old-before-ready", "new-1", "new-2"]);
+    expect(stale).toEqual(["old-late", "no-session"]);
+  });
+
+  test("echoes the webview session in command results", async () => {
+    const webview = new FakeWebview();
+    createEditorPlatformCustomEditorHost({
+      store: new EditorPlatformStore(),
+      webview,
+      publishSnapshots: false,
+      handlers: { openDocument() {} }
+    });
+    webview.receive(platformMessage("ready", { session: "s1" }));
+    webview.receive(platformMessage("open-document", { uri: "file:///Main.lean", requestId: 7, session: "s1" }));
+    await waitFor(() => webview.posted.some((message) => message.type === "command-result"));
+    expect(webview.posted.filter((message) => message.type === "command-result")).toEqual([
+      platformMessage("command-result", { command: "open-document", handled: true, ok: true, requestId: 7, session: "s1" })
+    ]);
+  });
+
   test("rejects malformed editor commands before invoking handlers", () => {
     const store = new EditorPlatformStore();
     const webview = new FakeWebview();
