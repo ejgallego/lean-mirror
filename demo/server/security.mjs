@@ -35,6 +35,23 @@ export function parseAllowedOrigins(value, defaults) {
   return new Set(configured && configured.length > 0 ? configured : defaults);
 }
 
+/**
+ * Reject DNS-rebinding requests to a loopback-bound backend. A rebinding page
+ * reaches 127.0.0.1 under its own domain, so its Host header is not loopback.
+ * Same-origin GET requests carry no Origin header, so the Origin check alone
+ * does not cover them.
+ */
+export function requestHostAllowed(hostHeader, allowRemote) {
+  if (allowRemote || hostHeader === undefined) {
+    return true;
+  }
+  try {
+    return isLoopbackHost(new URL(`http://${hostHeader}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function requestOriginAllowed(origin, allowedOrigins) {
   return origin === undefined || allowedOrigins.has(origin);
 }

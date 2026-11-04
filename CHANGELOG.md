@@ -104,6 +104,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - Sanitized all custom LSP hover HTML with a conservative allowlist.
 - Restricted the demo backend to loopback by default, added browser-origin checks, bounded HTTP and WebSocket payloads, and capped concurrent LSP processes.
+- The loopback-bound demo backend rejects HTTP requests and WebSocket upgrades whose `Host` header is not loopback, closing DNS-rebinding reads that carry no `Origin` header.
 
 ### Removed
 

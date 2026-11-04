@@ -346,8 +346,9 @@ If those ports are busy, override them:
 DEMO_BACKEND_PORT=7358 DEMO_FRONTEND_PORT=5174 npm run demo
 ```
 
-The backend binds to loopback by default. Directly binding it to a non-loopback address is refused
-unless `LEAN_DEMO_ALLOW_REMOTE=1` is set. Remote mode is intended only for controlled experiments;
+The backend binds to loopback by default and then rejects requests whose `Host` header is not a
+loopback name, which blocks DNS-rebinding pages. Directly binding it to a non-loopback address is refused
+unless `LEAN_DEMO_ALLOW_REMOTE=1` is set; that mode skips the `Host` check. Remote mode is intended only for controlled experiments;
 configure `LEAN_DEMO_ALLOWED_ORIGINS`, payload limits, and the LSP process cap before using it.
 
 External generation can take several minutes. When `LEAN_DEMO_ANNEAL_MANIFEST`

@@ -13,6 +13,7 @@ import {
   parseAllowedOrigins,
   parsePositiveInteger,
   readBoundedJsonBody,
+  requestHostAllowed,
   requestOriginAllowed,
 } from "./server/security.mjs";
 import {
@@ -101,6 +102,11 @@ async function readValidatedJsonBody(req, res, parser, invalidMessage) {
 }
 
 async function handleHttpRequest(req, res) {
+  if (!requestHostAllowed(req.headers.host, allowRemote)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Host not allowed");
+    return;
+  }
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
   if (!requestOriginAllowed(origin, allowedOrigins)) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
@@ -371,6 +377,10 @@ wsServer.on("connection", (socket) => {
 httpServer.on("upgrade", (req, socket, head) => {
   if (!req.url) {
     socket.destroy();
+    return;
+  }
+  if (!requestHostAllowed(req.headers.host, allowRemote)) {
+    rejectUpgrade(socket, "403 Forbidden", "Host not allowed");
     return;
   }
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
