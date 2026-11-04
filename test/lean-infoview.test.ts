@@ -401,6 +401,30 @@ describe("Lean infoview host", () => {
     harness.client.disconnect();
   });
 
+  it.each(["serverRestarted", "dispose"] as const)("aborts a pending RPC connection on %s without creating a keep-alive timer", async (retirement) => {
+    const harness = await createHarness();
+    const setInterval = vi.spyOn(window, "setInterval");
+    let reply!: (value: { sessionId: string }) => void;
+    harness.transport.onRequest(
+      "$/lean/rpc/connect",
+      () => new Promise<{ sessionId: string }>((resolve) => { reply = resolve; }),
+    );
+
+    const session = harness.editorApi.createRpcSession(MAIN_URI);
+    await waitFor(() => harness.transport.requests("$/lean/rpc/connect").length === 1);
+    if (retirement === "serverRestarted") harness.host.serverRestarted();
+    else harness.host.dispose();
+
+    await expect(session).rejects.toMatchObject({ name: "AbortError" });
+    reply({ sessionId: "late" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(setInterval).not.toHaveBeenCalled();
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
   it("owns Lean RPC keep-alive timers until close or host teardown", async () => {
     const harness = await createHarness();
     const setInterval = vi.spyOn(window, "setInterval");
