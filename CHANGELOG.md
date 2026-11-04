@@ -76,7 +76,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
 - The private VS Code adapter no longer drops every document change after a webview reload. Each `ready` starts a new webview epoch: earlier queued commands do not run, and earlier handlers do not reply into the reloaded webview.
 - `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.
-- Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview.
+- Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview. The infoview's React tree is still not unmounted, because `@leanprover/infoview` exposes no unmount API.
 - Retired client requests and asynchronous workspace edits stop at the connection lifetime; throwing or reentrant session observers no longer skip detach or start retired transports.
 - Display requests activate retained editor views, and late loaders cannot rewind document versions.
 - Browser/backend embedded Lean text and mappings now use one renderer, including imports, comma-separated labels, CRLF, and Unicode.

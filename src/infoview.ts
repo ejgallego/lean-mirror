@@ -337,6 +337,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
 
   // @leanprover/infoview offers no unmount. Render into an element this host
   // owns so disposal detaches only that tree and the container can be reused.
+  // Removing the element does not unmount React: effect cleanups do not run.
   const mountRoot = document.createElement("div");
   mountRoot.className = "lean-infoview-root";
   options.container.append(mountRoot);

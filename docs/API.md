@@ -260,6 +260,15 @@ The host's `editorExtension()` only tracks cursor, focus, and document changes;
 it can be mounted into any DOM container, including the generic information
 slot returned by `renderEditorPlatformWorkspaceShell()`.
 
+The host renders the infoview into a child element it creates inside
+`container`. `dispose()` removes only that element, rejects later infoview
+requests, and stops forwarding events, so other container content is kept and a
+new host can mount into the same container. It does not unmount the infoview's
+React tree: `@leanprover/infoview` (0.13.0, and 0.14.0) exposes no unmount API,
+so React effect cleanups, including those of user widgets, do not run. Prefer
+one long-lived infoview host per page area over repeatedly creating and
+disposing hosts.
+
 ## Official CodeMirror passthrough
 
 Import these from `codemirror-lean4-lsp/codemirror` when you want direct access to official `@codemirror/lsp-client` APIs such as:
