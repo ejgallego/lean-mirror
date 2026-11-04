@@ -103,6 +103,13 @@ function hasTransportWrapper(
   );
 }
 
+/**
+ * Lean answers many requests (hover, goals, semantic tokens) only after it has
+ * elaborated up to the requested position, which routinely exceeds the
+ * upstream 3-second default while a file or its imports are being processed.
+ */
+const defaultLeanRequestTimeoutMs = 20_000;
+
 class TransportWrappingLspClient extends LSPClient {
   private connectionTransport: ConnectionTransport | null = null;
   private outgoing: Transport | null = null;
@@ -115,7 +122,7 @@ class TransportWrappingLspClient extends LSPClient {
     private readonly transportExtensions: readonly LeanLspClientExtension[],
   ) {
     super(config);
-    this.requestTimeout = config.timeout ?? 3000;
+    this.requestTimeout = config.timeout ?? defaultLeanRequestTimeoutMs;
     const signal = renewClientLifetime(this);
     const upstreamInitializing = this.initializing;
     // Keep the upstream initialization resolver bound to this single connection.
@@ -233,6 +240,7 @@ export function createLeanLspClient(config: LeanLspClientConfig = {}): LSPClient
   const transportExtensions = configuredExtensions.filter(hasTransportWrapper);
   return new TransportWrappingLspClient({
     ...rest,
+    timeout: rest.timeout ?? defaultLeanRequestTimeoutMs,
     extensions: configuredExtensions,
     highlightLanguage: highlight,
   }, transportExtensions);

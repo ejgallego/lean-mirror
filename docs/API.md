@@ -46,6 +46,11 @@ These exports are the current experimental package surface. During `0.x`, they m
 changed, or removed without aliases or a deprecation window. Pin an exact package version for
 experiments that need reproducibility.
 
+`createLeanLspClient()` defaults the request `timeout` to 20 seconds instead of the upstream
+3 seconds, because Lean answers many requests only after elaborating up to the requested
+position. A timed-out request rejects locally; Lean may still finish the work. Pass `timeout`
+to choose another bound.
+
 `createWebSocketTransport()` reports sends attempted while a socket is still connecting and
 ignores terminal sends during teardown. Await `waitForWebSocketOpen()` before connecting an
 `LSPClient`. `LeanWorkspace` supports multiple documents but deliberately enforces one editor
