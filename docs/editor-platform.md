@@ -17,7 +17,9 @@ protocol. `maxLogEntries` accepts non-negative safe integers; zero disables log
 retention while service state and request tracking continue normally. Invalid
 limits fail immediately. The VS Code adapter uses canonical encoded URI strings
 (`uri.toString()`) for document identity; literal percent escapes remain distinct
-from their decoded filename characters.
+from their decoded filename characters. Each webview `ready` message starts a new
+document-version epoch: a reloaded webview may restart its `document-changed`
+versions, and late changes from the previous webview are acknowledged as unhandled.
 
 ## Update Flow
 

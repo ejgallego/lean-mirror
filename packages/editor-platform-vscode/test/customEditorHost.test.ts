@@ -289,6 +289,44 @@ describe("custom editor host", () => {
     expect(handled).toEqual([1, 2]);
   });
 
+  test("accepts restarted document versions after the webview reloads", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    const handled: string[] = [];
+    let releaseOld!: () => void;
+    const oldCanFinish = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        async documentChanged({ text, version }) {
+          handled.push(`${version}:${text}`);
+          if (text === "old-3") {
+            await oldCanFinish;
+          }
+        }
+      }
+    });
+    const uri = "file:///Main.lean";
+
+    webview.receive(platformMessage("document-changed", { uri, text: "old-2", version: 2 }));
+    webview.receive(platformMessage("document-changed", { uri, text: "old-3", version: 3 }));
+    await waitFor(() => handled.length === 2);
+    // Reload while the old webview's last change is still being handled.
+    webview.receive(platformMessage("ready", {}));
+    releaseOld();
+    webview.receive(platformMessage("document-changed", { uri, text: "new-1", version: 1 }));
+    webview.receive(platformMessage("document-changed", { uri, text: "new-2", version: 2 }));
+    await waitFor(() => handled.length === 4);
+    webview.receive(platformMessage("document-changed", { uri, text: "stale", version: 2 }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(handled).toEqual(["2:old-2", "3:old-3", "1:new-1", "2:new-2"]);
+  });
+
   test("rejects malformed editor commands before invoking handlers", () => {
     const store = new EditorPlatformStore();
     const webview = new FakeWebview();
