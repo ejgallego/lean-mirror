@@ -15,7 +15,9 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 cannot install Chromium dependencies on Ubuntu 26.04,
+    # which ubuntu-latest now selects. Revisit when Playwright is upgraded.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
