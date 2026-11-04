@@ -70,6 +70,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview.
 - Retired client requests and asynchronous workspace edits stop at the connection lifetime; throwing or reentrant session observers no longer skip detach or start retired transports.
 - Display requests activate retained editor views, and late loaders cannot rewind document versions.
 - Browser/backend embedded Lean text and mappings now use one renderer, including imports, comma-separated labels, CRLF, and Unicode.

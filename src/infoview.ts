@@ -288,13 +288,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   async function copyToClipboard(text: string): Promise<void> {
-    if (navigator.clipboard) {
+    if (!disposed && navigator.clipboard) {
       await navigator.clipboard.writeText(text);
     }
   }
 
   const editorApi: EditorApi = {
     async saveConfig(nextConfig) {
+      if (disposed) return;
       config = { ...nextConfig };
       await infoviewApi.changedInfoviewConfig(config);
     },
@@ -334,7 +335,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     },
   };
 
-  infoviewApi = renderInfoview(editorApi, options.container);
+  // @leanprover/infoview offers no unmount. Render into an element this host
+  // owns so disposal detaches only that tree and the container can be reused.
+  const mountRoot = document.createElement("div");
+  mountRoot.className = "lean-infoview-root";
+  options.container.append(mountRoot);
+  infoviewApi = renderInfoview(editorApi, mountRoot);
   void infoviewApi.changedInfoviewConfig(config);
 
   function setCursorLocation(location?: lsp.Location): void {
@@ -355,9 +361,10 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
 
   return {
     dispose() {
+      if (disposed) return;
       disposed = true;
       closeRpcSessions();
-      options.container.replaceChildren();
+      mountRoot.remove();
     },
     editorExtension() {
       return EditorView.updateListener.of((update: ViewUpdate) => {
@@ -367,6 +374,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       });
     },
     serverRestarted(initializeResult) {
+      if (disposed) return;
       closeRpcSessions();
       const client = options.client();
       const result: lsp.InitializeResult<LeanServerCapabilities> = {
@@ -381,16 +389,17 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       void infoviewApi.serverRestarted(result);
     },
     serverStopped(reason) {
+      if (disposed) return;
       closeRpcSessions();
       void infoviewApi.serverStopped(reason);
     },
     forwardClientNotification(method, params) {
-      if (subscribed(clientNotificationSubscriptions, method)) {
+      if (!disposed && subscribed(clientNotificationSubscriptions, method)) {
         void infoviewApi.sentClientNotification(method, params);
       }
     },
     forwardServerNotification(method, params) {
-      if (subscribed(serverNotificationSubscriptions, method)) {
+      if (!disposed && subscribed(serverNotificationSubscriptions, method)) {
         void infoviewApi.gotServerNotification(method, params);
       }
     },
