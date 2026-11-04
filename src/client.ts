@@ -113,16 +113,15 @@ const defaultLeanRequestTimeoutMs = 20_000;
 class TransportWrappingLspClient extends LSPClient {
   private connectionTransport: ConnectionTransport | null = null;
   private outgoing: Transport | null = null;
-  private readonly requestTimeout: number;
   private used = false;
   private disposeSubscriptions: (() => void) | null = null;
 
   constructor(
-    config: LSPClientConfig,
+    config: LSPClientConfig & { timeout: number },
     private readonly transportExtensions: readonly LeanLspClientExtension[],
+    private readonly requestTimeout = config.timeout,
   ) {
     super(config);
-    this.requestTimeout = config.timeout ?? defaultLeanRequestTimeoutMs;
     const signal = renewClientLifetime(this);
     const upstreamInitializing = this.initializing;
     // Keep the upstream initialization resolver bound to this single connection.

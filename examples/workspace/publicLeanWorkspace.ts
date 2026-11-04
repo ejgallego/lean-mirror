@@ -87,7 +87,6 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   const session = createLeanEditorSession({
     client: {
       rootUri: options.rootUri,
-      timeout: 10_000,
       features: { semanticTokens: true },
       extensions: [leanInfoviewClientNotifications(() => infoview)],
       ...(options.sanitizeHTML ? { sanitizeHTML: options.sanitizeHTML } : {}),
