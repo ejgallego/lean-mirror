@@ -53,7 +53,8 @@ export interface LeanWorkspaceOptions {
 }
 
 function toText(doc: string | Text): Text {
-  return typeof doc === "string" ? Text.of(doc.split(/\r?\n/u)) : doc;
+  // Split like CodeMirror's default so loaded text equals an editor view's doc.
+  return typeof doc === "string" ? Text.of(doc.split(/\r\n?|\n/u)) : doc;
 }
 
 function normalizeLoadedDocument(

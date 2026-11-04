@@ -9,6 +9,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- `detectLeanLineEnding()` and `leanDocumentText()` let hosts persist documents with their original CRLF or LF endings, following VS Code's majority rule; the workspace example uses them.
 - A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
 
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
@@ -71,6 +72,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
 - The private VS Code adapter no longer drops every document change after a webview reload; each `ready` starts a new document-version epoch.
 - `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.
 - Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview.

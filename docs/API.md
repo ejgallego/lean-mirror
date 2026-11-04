@@ -38,6 +38,9 @@ Import these from `codemirror-lean4-lsp`:
 - `leanJumpToTypeDefinition`
 - `leanJumpToImplementation`
 - `leanJumpToDefinitionKeymap`
+- `detectLeanLineEnding`
+- `leanDocumentText`
+- `LeanLineEnding`
 - `createWebSocketTransport`
 - `waitForWebSocketOpen`
 - `createMessagePortTransport`
@@ -84,6 +87,11 @@ Edits to cached-but-closed files update the workspace and invoke
 document changes into the workspace cache. A direct client supports one
 connection; recreate it after disconnect, or use `LeanEditorSession.reconnect()`
 for fresh generations with host-managed text retention.
+
+Loaded strings split lines like CodeMirror (`\r\n`, `\r`, or `\n`), and
+documents always join lines with `\n`. Hosts that persist text should keep each
+file's ending: `detectLeanLineEnding(loadedText)` applies VS Code's majority rule,
+and `leanDocumentText(doc, ending)` serializes a document with it.
 
 `displayDocument` is an activation request even when a document already has a
 retained editor view. Hosts should activate that view rather than creating a duplicate.

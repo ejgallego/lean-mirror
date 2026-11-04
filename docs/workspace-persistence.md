@@ -5,6 +5,15 @@ Helper.lean. The public editor library does not own filesystem writes. The host
 keeps dirty text and disk revision hashes; edits made while a save is pending
 remain dirty. Multi-file saves are independent, not a filesystem transaction.
 
+## Line endings
+
+CodeMirror joins lines with `\n`, so `doc.toString()` would silently rewrite a
+CRLF file as LF. The workspace example follows VS Code instead: it detects each
+file's ending once with `detectLeanLineEnding()` and serializes edits with
+`leanDocumentText()`. A file keeps CRLF or LF; a mixed file is normalized to its
+majority ending on first save. Lean normalizes CRLF itself, and LSP positions
+do not depend on the ending.
+
 ## Writers and publication
 
 Reads and saves through one store run in a per-URI queue. Separate backend

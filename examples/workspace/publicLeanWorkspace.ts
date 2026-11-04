@@ -2,8 +2,8 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   createLeanEditorSession, createLeanWorkspace, createWebSocketTransport,
-  lean4, leanFallbackHighlightStyle, waitForWebSocketOpen,
-  type LeanEditorSession, type LeanEditorSessionState, type LeanWorkspace,
+  detectLeanLineEnding, lean4, leanDocumentText, leanFallbackHighlightStyle, waitForWebSocketOpen,
+  type LeanEditorSession, type LeanLineEnding, type LeanEditorSessionState, type LeanWorkspace,
 } from "codemirror-lean4-lsp";
 import {
   createLeanInfoviewHost, leanInfoviewClientNotifications, type LeanInfoviewHost,
@@ -47,6 +47,8 @@ export interface MountedLeanWorkspace {
   dispose(): void;
 }
 interface DocumentEntry extends WorkspaceDocument {
+  /** Detected from the loaded text and kept on save, as VS Code does. */
+  lineEnding: LeanLineEnding;
   savedText: string;
   view?: EditorView;
   panel?: HTMLElement;
@@ -61,7 +63,12 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   const documents = new Map<string, DocumentEntry>();
   for (const document of options.documents) {
     if (documents.has(document.uri)) throw new Error("Duplicate workspace document URI.");
-    documents.set(document.uri, { ...document, savedText: document.text, saving: false });
+    documents.set(document.uri, {
+      ...document,
+      lineEnding: detectLeanLineEnding(document.text),
+      savedText: document.text,
+      saving: false,
+    });
   }
   let activeUri = first.uri;
   let infoview: LeanInfoviewHost | null = null;
@@ -105,7 +112,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
         onDocumentChange(uri, file) {
           const entry = documents.get(uri);
           if (entry) {
-            entry.text = file.doc.toString();
+            entry.text = leanDocumentText(file.doc, entry.lineEnding);
             emitDocument(entry);
           }
         },
@@ -133,7 +140,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
             ...(infoview ? [infoview.editorExtension()] : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
-                entry.text = update.state.doc.toString();
+                entry.text = leanDocumentText(update.state.doc, entry.lineEnding);
                 delete entry.error;
                 emitDocument(entry);
               }
