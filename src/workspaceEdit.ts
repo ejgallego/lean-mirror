@@ -270,7 +270,7 @@ export async function applyLeanWorkspaceEdit(
   const prepared: PreparedGroup[] = [];
   for (const group of collected) {
     const file = files.get(group.uri);
-    if (!file) {
+    if (!file || client.workspace.getFile(group.uri) !== file) {
       return failed(`Workspace document ${group.uri} is unavailable.`, group.index);
     }
     const result = prepareChanges(group, file, options.mapping);

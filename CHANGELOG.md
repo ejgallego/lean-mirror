@@ -70,6 +70,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.
 - Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview.
 - Retired client requests and asynchronous workspace edits stop at the connection lifetime; throwing or reentrant session observers no longer skip detach or start retired transports.
 - Display requests activate retained editor views, and late loaders cannot rewind document versions.
