@@ -17,9 +17,17 @@ protocol. `maxLogEntries` accepts non-negative safe integers; zero disables log
 retention while service state and request tracking continue normally. Invalid
 limits fail immediately. The VS Code adapter uses canonical encoded URI strings
 (`uri.toString()`) for document identity; literal percent escapes remain distinct
-from their decoded filename characters. Each webview `ready` message starts a new
-document-version epoch: a reloaded webview may restart its `document-changed`
-versions, and late changes from the previous webview are acknowledged as unhandled.
+from their decoded filename characters.
+
+Each webview `ready` message starts a new webview epoch. A reloaded webview may
+restart its `document-changed` versions. Commands queued before `ready` no longer
+run, and handlers that were already running do not post their `command-result`
+into the new webview, so equal request IDs from both views cannot be confused. A
+running handler is not cancelled and its side effects are not undone. The epoch
+is assigned when a message is received: `ready` is a receive-order barrier, and
+the adapter assumes the transport delivers an old webview's messages before its
+replacement's `ready`. Messages carry no sender identity, so a message from an
+old webview that arrives after that `ready` cannot be told apart from new work.
 
 ## Update Flow
 

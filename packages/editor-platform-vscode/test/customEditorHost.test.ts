@@ -327,6 +327,74 @@ describe("custom editor host", () => {
     expect(handled).toEqual(["2:old-2", "3:old-3", "1:new-1", "2:new-2"]);
   });
 
+  test("does not reply to the reloaded webview with an earlier webview's result", async () => {
+    const webview = new FakeWebview();
+    let releaseOld!: () => void;
+    let releaseNew!: () => void;
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise<void>((resolve) => { releaseNew = resolve; });
+    const completed: string[] = [];
+    createEditorPlatformCustomEditorHost({
+      store: new EditorPlatformStore(),
+      webview,
+      publishSnapshots: false,
+      handlers: {
+        async documentChanged({ text }) {
+          await (text === "old" ? oldGate : newGate);
+          completed.push(text);
+        }
+      }
+    });
+    const change = (text: string, version: number) => webview.receive(platformMessage("document-changed", {
+      uri: "file:///Main.lean", text, version, requestId: "change:1"
+    }));
+    const results = () => webview.posted.filter((message) => message.type === "command-result");
+
+    change("old", 99);
+    webview.receive(platformMessage("ready", {}));
+    change("new", 1);
+    releaseOld();
+    await waitFor(() => completed.includes("old"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Both views may use request ID change:1; only the new handler may answer it.
+    expect(results()).toEqual([]);
+
+    releaseNew();
+    await waitFor(() => results().length === 1);
+    expect(completed).toEqual(["old", "new"]);
+    expect(results()).toEqual([platformMessage("command-result", {
+      command: "document-changed", handled: true, ok: true, requestId: "change:1"
+    })]);
+  });
+
+  test("drops an earlier webview's queued commands after ready", async () => {
+    const store = new EditorPlatformStore();
+    const webview = new FakeWebview();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const activated: string[] = [];
+    createEditorPlatformCustomEditorHost({
+      store,
+      webview,
+      handlers: {
+        documentChanged: () => gate,
+        setActiveDocument({ uri }) { activated.push(uri); }
+      }
+    });
+
+    webview.receive(platformMessage("document-changed", { uri: "file:///Old.lean", text: "old", version: 1 }));
+    // Queued behind the pending change for the same URI.
+    webview.receive(platformMessage("set-active-document", { uri: "file:///Old.lean" }));
+    webview.receive(platformMessage("ready", {}));
+    webview.receive(platformMessage("set-active-document", { uri: "file:///New.lean" }));
+    await waitFor(() => activated.length === 1);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(store.snapshot.activeDocumentUri).toBe("file:///New.lean");
+    expect(activated).toEqual(["file:///New.lean"]);
+  });
+
   test("rejects malformed editor commands before invoking handlers", () => {
     const store = new EditorPlatformStore();
     const webview = new FakeWebview();
