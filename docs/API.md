@@ -116,7 +116,7 @@ versions and UTF-16 ranges before dispatching any transaction, applies both
 `changes` and text-only `documentChanges`, and synchronizes LSP-open targets by
 default. As the LSP specification requires, a character past the end of its line
 is clamped to the line end. A line past the end of the document, overlapping
-ranges, or a start after its end reject the whole edit. Pass the `WorkspaceMapping` that surrounded the originating request so
+ranges, or a start after its end (checked before clamping) reject the whole edit. Pass the `WorkspaceMapping` that surrounded the originating request so
 edits remain correct if local changes occur while the server is answering:
 
 ```ts

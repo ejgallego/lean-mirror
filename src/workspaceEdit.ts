@@ -189,8 +189,11 @@ function prepareChanges(
   const currentDoc = file.getView()?.state.doc ?? file.doc;
   const positioned: PositionedChange[] = [];
   for (const [sourceIndex, edit] of group.edits.entries()) {
-    const from = mappedPosition(mapping, file, currentDoc, edit.range.start, 1);
-    const to = mappedPosition(mapping, file, currentDoc, edit.range.end, -1);
+    // Check the server's own ordering before clamping can collapse a reversed range.
+    const { start, end } = edit.range;
+    const reversed = start.line > end.line || (start.line === end.line && start.character > end.character);
+    const from = reversed ? null : mappedPosition(mapping, file, currentDoc, start, 1);
+    const to = reversed ? null : mappedPosition(mapping, file, currentDoc, end, -1);
     if (from === null || to === null || from > to) {
       return failed(
         `Workspace edit for ${group.uri} contains an invalid or stale range.`,

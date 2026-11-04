@@ -264,6 +264,31 @@ describe("applyLeanWorkspaceEdit", () => {
       "-- local\ndef helperValue : Nat := 42\n",
     );
 
+    // Clamping must not turn a reversed range into an insertion, with or without a mapping.
+    for (const options of [{}, { mapping: client.workspaceMapping() }]) {
+      const reversed = await applyLeanWorkspaceEdit(client, {
+        changes: {
+          [MAIN_URI]: [{
+            range: { start: { line: 0, character: 30 }, end: { line: 0, character: 25 } },
+            newText: "REVERSED",
+          }],
+        },
+      }, options);
+      options.mapping?.destroy();
+      expect(reversed).toMatchObject({ applied: false, changedUris: [] });
+    }
+    // An insertion at an overlong character is still valid and lands at the line end.
+    const append = await applyLeanWorkspaceEdit(client, {
+      changes: {
+        [MAIN_URI]: [{
+          range: { start: { line: 0, character: 99 }, end: { line: 0, character: 99 } },
+          newText: " -- ok",
+        }],
+      },
+    });
+    expect(append).toMatchObject({ applied: true, changedUris: [MAIN_URI] });
+    expect(view.state.doc.toString()).toBe("def answer : Nat := 42 -- ok\n");
+
     const pastLastLine = await applyLeanWorkspaceEdit(client, {
       changes: {
         [MAIN_URI]: [{
@@ -273,7 +298,7 @@ describe("applyLeanWorkspaceEdit", () => {
       },
     });
     expect(pastLastLine).toMatchObject({ applied: false, changedUris: [] });
-    expect(view.state.doc.toString()).toBe("def answer : Nat := 42\n");
+    expect(view.state.doc.toString()).toBe("def answer : Nat := 42 -- ok\n");
 
     view.destroy();
     client.disconnect();
