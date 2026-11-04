@@ -12,6 +12,9 @@ button:disabled { opacity: .5; cursor: default; }
 #save-all { background: #235b7b; color: white; }
 #connection-status { font-size: .85rem; }
 #connection-status[data-phase=ready] { color: #157450; }
+#checking-status { font-size: .85rem; color: #5c768c; }
+#checking-status[data-phase=checking] { color: #8a5a00; }
+#checking-status[data-phase=checked] { color: #157450; }
 main { display: grid; grid-template-columns: 12rem minmax(20rem, 1.6fr) minmax(22rem, 1fr); gap: 1rem; padding: 0 1.6rem; }
 nav, .editor, aside { background: white; border: 1px solid #d4dde5; border-radius: .65rem; overflow: hidden; }
 nav { padding: 1rem .7rem; }

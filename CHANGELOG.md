@@ -40,6 +40,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- The workspace example mounts editors immediately and returns a `ready` promise; `dispose()` or an `AbortSignal` cancels a pending startup. It reports Lean's file checking separately from the connection and tracks current and saved text as immutable documents.
 - `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document and ranges whose start follows their end are still rejected; ordering is checked before clamping.
 - `createLeanLspClient()` and session clients default to a 20-second request timeout instead of the upstream 3 seconds; pass `timeout` to override it.
 - Direct clients now support one connection. Recreate them after disconnect or use `LeanEditorSession.reconnect()`; this prevents queued upstream operations from crossing connection generations.

@@ -1,8 +1,8 @@
-import { EditorState } from "@codemirror/state";
+import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   createLeanEditorSession, createLeanWorkspace, createWebSocketTransport,
-  detectLeanLineEnding, lean4, leanFallbackHighlightStyle, waitForWebSocketOpen,
+  detectLeanLineEnding, lean4, leanFallbackHighlightStyle, leanFileProgress, waitForWebSocketOpen,
   type LeanEditorSession, type LeanLineEnding, type LeanEditorSessionState, type LeanWorkspace,
 } from "codemirror-lean4-lsp";
 import {
@@ -22,15 +22,23 @@ export interface WorkspaceDocumentState {
   saving: boolean;
   error?: string;
 }
+/** Whether Lean is still processing a document; independent of the connection. */
+export interface WorkspaceCheckingState {
+  uri: string;
+  checking: boolean;
+}
 export interface MountLeanWorkspaceOptions {
   documents: readonly WorkspaceDocument[];
   editorContainer: HTMLElement;
   infoviewContainer: HTMLElement;
   rootUri: string;
   websocketUrl: string;
+  /** Aborting disposes the workspace, including while it is still connecting. */
+  signal?: AbortSignal;
   saveDocument(document: WorkspaceDocument): Promise<WorkspaceDocument>;
   onActiveDocument?(uri: string): void;
   onDocumentState?(state: WorkspaceDocumentState): void;
+  onCheckingState?(state: WorkspaceCheckingState): void;
   onDiagnostics?(params: lsp.PublishDiagnosticsParams): void;
   onSessionState?(state: LeanEditorSessionState): void;
   onReconnectStart?(reason: string): void;
@@ -38,6 +46,12 @@ export interface MountLeanWorkspaceOptions {
   sanitizeHTML?(html: string): string;
 }
 export interface MountedLeanWorkspace {
+  /**
+   * Settles when the first Lean connection is ready. Rejects with an
+   * `AbortError` if the workspace is disposed first, or with the last
+   * connection error; editors stay usable offline and `reconnect()` can retry.
+   */
+  readonly ready: Promise<void>;
   readonly session: LeanEditorSession;
   readonly currentUri: string;
   readonly currentView: EditorView;
@@ -46,31 +60,47 @@ export interface MountedLeanWorkspace {
   reconnect(reason?: string): Promise<void>;
   dispose(): void;
 }
-interface DocumentEntry extends WorkspaceDocument {
-  /** Detected from the loaded text and kept on save, as VS Code does. */
-  lineEnding: LeanLineEnding;
-  savedText: string;
+interface DocumentEntry {
+  readonly uri: string;
+  revision: string;
+  /** Detected from the loaded text and used when saving, as VS Code does. */
+  readonly lineEnding: LeanLineEnding;
+  /** Current editor text, kept when the view or Lean connection goes away. */
+  draft: Text;
+  /** Text last loaded from or saved to disk. */
+  saved: Text;
   view?: EditorView;
   panel?: HTMLElement;
   saving: boolean;
   error?: string;
 }
 
-/** A host composition over public toolkit entries, with one retained view per URI. */
-export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Promise<MountedLeanWorkspace> {
+function workspaceDisposedError(): DOMException {
+  return new DOMException("Workspace is disposed.", "AbortError");
+}
+
+/**
+ * A host composition over public toolkit entries, with one retained view per URI.
+ * Editors mount immediately; Lean connects in the background (see `ready`).
+ */
+export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedLeanWorkspace {
   const first = options.documents[0];
   if (!first) throw new Error("A workspace needs at least one document.");
+  if (options.signal?.aborted) throw workspaceDisposedError();
   const documents = new Map<string, DocumentEntry>();
   for (const document of options.documents) {
     if (documents.has(document.uri)) throw new Error("Duplicate workspace document URI.");
-    // Compare and save text in the file's chosen ending. A mixed-ending file is
-    // normalized only when it is saved after an edit; edit-then-undo stays clean.
-    const lineEnding = detectLeanLineEnding(document.text);
-    const text = document.text.replace(/\r\n?|\n/g, lineEnding);
-    documents.set(document.uri, { ...document, lineEnding, text, savedText: text, saving: false });
+    // Split like CodeMirror, so dirty state compares logical content: a
+    // mixed-ending file stays clean after edit-and-undo and is normalized to
+    // its majority ending only when an edit is saved.
+    const saved = Text.of(document.text.split(/\r\n?|\n/));
+    documents.set(document.uri, {
+      uri: document.uri, revision: document.revision,
+      lineEnding: detectLeanLineEnding(document.text),
+      draft: saved, saved, saving: false,
+    });
   }
   let activeUri = first.uri;
-  let infoview: LeanInfoviewHost | null = null;
   let socket: WebSocket | null = null;
   let disposed = false;
   let reconnecting: Promise<void> | null = null;
@@ -79,30 +109,38 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   function emitDocument(entry: DocumentEntry): void {
     if (disposed) return;
     options.onDocumentState?.({
-      uri: entry.uri, dirty: entry.text !== entry.savedText, saving: entry.saving,
+      uri: entry.uri, dirty: !entry.draft.eq(entry.saved), saving: entry.saving,
       ...(entry.error ? { error: entry.error } : {}),
     });
   }
+  const infoviewNotifications = leanInfoviewClientNotifications(() => infoview);
+  const fileProgress = leanFileProgress({
+    onUpdate(update) {
+      if (!disposed && update.uri && documents.has(update.uri)) {
+        options.onCheckingState?.({ uri: update.uri, checking: update.state?.isProcessing ?? false });
+      }
+    },
+  });
   const session = createLeanEditorSession({
     client: {
       rootUri: options.rootUri,
       features: { semanticTokens: true },
-      extensions: [leanInfoviewClientNotifications(() => infoview)],
+      extensions: [infoviewNotifications, fileProgress],
       ...(options.sanitizeHTML ? { sanitizeHTML: options.sanitizeHTML } : {}),
       notificationHandlers: {
         "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
-          infoview?.forwardServerNotification("textDocument/publishDiagnostics", params);
+          infoview.forwardServerNotification("textDocument/publishDiagnostics", params);
           options.onDiagnostics?.(params);
           return false;
         },
       },
       unhandledNotification(_client, method, params) {
-        infoview?.forwardServerNotification(method, params);
+        infoview.forwardServerNotification(method, params);
       },
       workspace: createLeanWorkspace({
         loadDocument(uri) {
           const entry = documents.get(uri);
-          return entry ? { doc: entry.text } : null;
+          return entry ? { doc: entry.draft } : null;
         },
         displayDocument(uri) {
           return documents.has(uri) ? showDocument(uri) : null;
@@ -110,7 +148,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
         onDocumentChange(uri, file) {
           const entry = documents.get(uri);
           if (entry) {
-            entry.text = file.doc.sliceString(0, file.doc.length, entry.lineEnding);
+            entry.draft = file.doc;
             emitDocument(entry);
           }
         },
@@ -118,9 +156,18 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
     },
   });
   const unsubscribe = session.subscribe((state) => options.onSessionState?.(state), { emitCurrent: true });
+  const infoview: LeanInfoviewHost = createLeanInfoviewHost({
+    client: () => session.client,
+    container: options.infoviewContainer,
+    currentLanguageId: () => "lean4",
+    currentUri: () => activeUri,
+    currentView: () => documents.get(activeUri)?.view ?? null,
+    requestRestart: (reason) => { void reconnect(reason).catch(() => undefined); },
+    workspace: () => (session.client?.workspace as LeanWorkspace | undefined) ?? null,
+  });
 
   function showDocument(uri: string): EditorView {
-    if (disposed) throw new Error("Workspace is disposed.");
+    if (disposed) throw workspaceDisposedError();
     const entry = documents.get(uri);
     if (!entry) throw new Error("Document is outside the host workspace.");
     if (!entry.view) {
@@ -132,13 +179,13 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
       entry.view = new EditorView({
         parent: panel,
         state: EditorState.create({
-          doc: entry.text,
+          doc: entry.draft,
           extensions: [
             ...lean4({ session, uri, utilities: true, highlightStyle: leanFallbackHighlightStyle }),
-            ...(infoview ? [infoview.editorExtension()] : []),
+            infoview.editorExtension(),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
-                entry.text = update.state.doc.sliceString(0, update.state.doc.length, entry.lineEnding);
+                entry.draft = update.state.doc;
                 delete entry.error;
                 emitDocument(entry);
               }
@@ -155,7 +202,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
     options.onActiveDocument?.(uri);
     entry.view.requestMeasure();
     entry.view.focus();
-    infoview?.updateCursorLocation();
+    infoview.updateCursorLocation();
     return entry.view;
   }
 
@@ -164,7 +211,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
     socket = next;
     try {
       await waitForWebSocketOpen(next);
-      if (disposed) throw new Error("Workspace is disposed.");
+      if (disposed) throw workspaceDisposedError();
       const connection = session.connect(createWebSocketTransport(next), {
         disposeTransport: () => next.close(),
       });
@@ -180,31 +227,36 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
     }
   }
 
+  /** Connect with retries; a disposed workspace stops with an AbortError. */
+  async function connectWithRetries(): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      if (disposed) throw workspaceDisposedError();
+      try {
+        await connect();
+        if (disposed) throw workspaceDisposedError();
+        infoview.serverRestarted();
+        infoview.updateCursorLocation();
+        return;
+      } catch (error) {
+        if (disposed) throw workspaceDisposedError();
+        lastError = error;
+        session.disconnect();
+      }
+    }
+    options.onError?.(lastError);
+    throw lastError;
+  }
+
   function reconnect(reason = "Reconnect requested"): Promise<void> {
-    if (disposed) return Promise.reject(new Error("Workspace is disposed."));
+    if (disposed) return Promise.reject(workspaceDisposedError());
     if (reconnecting) return reconnecting;
     options.onReconnectStart?.(reason);
-    infoview?.serverStopped({ message: "Lean is reconnecting.", reason });
+    infoview.serverStopped({ message: "Lean is reconnecting.", reason });
     // Detach old plugins and RPC work immediately; editor documents and history stay mounted.
     session.disconnect();
-    const task = (async () => {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-        if (disposed) throw new Error("Workspace is disposed.");
-        try {
-          await connect();
-          infoview?.serverRestarted();
-          infoview?.updateCursorLocation();
-          return;
-        } catch (error) {
-          lastError = error;
-          session.disconnect();
-        }
-      }
-      options.onError?.(lastError);
-      throw lastError;
-    })();
+    const task = connectWithRetries();
     reconnecting = task;
     void task.finally(() => {
       if (reconnecting === task) reconnecting = null;
@@ -213,19 +265,21 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   }
 
   function saveAll(): Promise<void> {
-    if (disposed) return Promise.reject(new Error("Workspace is disposed."));
+    if (disposed) return Promise.reject(workspaceDisposedError());
     if (saving) return saving;
     const task = (async () => {
       for (const entry of documents.values()) {
-        if (entry.text === entry.savedText) continue;
-        const text = entry.text;
+        if (entry.draft.eq(entry.saved)) continue;
+        // Save this exact snapshot; edits made while the save is in flight stay dirty.
+        const doc = entry.draft;
         entry.saving = true;
         delete entry.error;
         emitDocument(entry);
         try {
+          const text = doc.sliceString(0, doc.length, entry.lineEnding);
           const saved = await options.saveDocument({ uri: entry.uri, text, revision: entry.revision });
           entry.revision = saved.revision;
-          entry.savedText = text;
+          entry.saved = doc;
         } catch (error) {
           entry.error = error instanceof Error ? error.message : String(error);
           throw error;
@@ -245,36 +299,27 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    options.signal?.removeEventListener("abort", dispose);
     unsubscribe();
-    infoview?.dispose();
+    infoview.dispose();
     for (const entry of documents.values()) {
       entry.view?.destroy();
       entry.panel?.remove();
     }
     session.dispose();
+    // Closing a still-connecting socket rejects the pending startup.
     socket?.close();
   }
 
-  try {
-    await connect();
-    infoview = createLeanInfoviewHost({
-      client: () => session.client,
-      container: options.infoviewContainer,
-      currentLanguageId: () => "lean4",
-      currentUri: () => activeUri,
-      currentView: () => documents.get(activeUri)?.view ?? null,
-      requestRestart: (reason) => { void reconnect(reason).catch(() => undefined); },
-      workspace: () => (session.client?.workspace as LeanWorkspace | undefined) ?? null,
-    });
-    infoview.serverRestarted();
-    showDocument(activeUri);
-    for (const entry of documents.values()) emitDocument(entry);
-  } catch (error) {
-    dispose();
-    throw error;
-  }
+  options.signal?.addEventListener("abort", dispose, { once: true });
+  showDocument(activeUri);
+  for (const entry of documents.values()) emitDocument(entry);
+  const ready = connectWithRetries();
+  // Callers may ignore `ready`; failures are also reported through onError.
+  void ready.catch(() => undefined);
+
   return {
-    session, showDocument, saveAll, reconnect, dispose,
+    ready, session, showDocument, saveAll, reconnect, dispose,
     get currentUri() { return activeUri; },
     get currentView() { return documents.get(activeUri)!.view!; },
   };

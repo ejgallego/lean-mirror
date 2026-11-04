@@ -98,6 +98,21 @@ test("navigates across files, preserves edits and undo on server loss, and persi
   expect(pageErrors).toEqual([]);
 });
 
+test("reports Lean checking separately from the connection", async ({ page }) => {
+  await page.goto(pagePath);
+  const checking = page.locator("#checking-status");
+  await expect(page.locator("#connection-status")).toHaveText("Ready");
+  await expect(checking).toHaveText("Checked");
+  const content = page.locator("#workspace-editor .workspace-editor-panel:not([hidden]) .cm-content");
+  await content.click();
+  await page.keyboard.press("Control+End");
+  // Sleeping during elaboration keeps Lean busy long enough to observe the checking state.
+  await page.keyboard.type("\n#eval IO.sleep 3000");
+  await expect(checking).toHaveText(/Checking Main\.lean/);
+  await expect(checking).toHaveText("Checked", { timeout: 60_000 });
+  await expect(page.locator("#connection-status")).toHaveText("Ready");
+});
+
 test("keeps local edits when another client changes the disk revision", async ({ page, request }) => {
   await page.goto(pagePath);
   await expect(page.locator("#connection-status")).toHaveText("Ready");
