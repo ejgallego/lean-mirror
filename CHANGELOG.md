@@ -40,6 +40,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document are still rejected.
 - `createLeanLspClient()` and session clients default to a 20-second request timeout instead of the upstream 3 seconds; pass `timeout` to override it.
 - Direct clients now support one connection. Recreate them after disconnect or use `LeanEditorSession.reconnect()`; this prevents queued upstream operations from crossing connection generations.
 

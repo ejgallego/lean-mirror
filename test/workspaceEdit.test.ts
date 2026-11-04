@@ -205,7 +205,7 @@ describe("applyLeanWorkspaceEdit", () => {
           {
             range: {
               start: { line: 0, character: 4 },
-              end: { line: 0, character: 100 },
+              end: { line: 5, character: 0 },
             },
             newText: "invalid",
           },
@@ -219,6 +219,61 @@ describe("applyLeanWorkspaceEdit", () => {
     });
     expect(view.state.doc.toString()).toBe("def answer : Nat := 42\n");
     expect(helper?.doc.toString()).toContain("helperValue");
+
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("clamps characters past a line end as the LSP specification requires", async () => {
+    const { client, transport } = createWorkspaceClient();
+    const view = createTestView(
+      "def answer : Nat := 41\n",
+      lean4({ client, uri: MAIN_URI }),
+    );
+    await client.initializing;
+    await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
+    const workspace = client.workspace as LeanWorkspace;
+    await workspace.requestFile(HELPER_URI);
+
+    const direct = await applyLeanWorkspaceEdit(client, {
+      changes: {
+        [MAIN_URI]: [{
+          range: { start: { line: 0, character: 20 }, end: { line: 0, character: 999 } },
+          newText: "42",
+        }],
+      },
+    });
+    expect(direct).toMatchObject({ applied: true, changedUris: [MAIN_URI] });
+    expect(view.state.doc.toString()).toBe("def answer : Nat := 42\n");
+
+    // With a request-time mapping, clamp against the request-time text and
+    // then map through local edits made while the request was in flight.
+    const mapping = client.workspaceMapping();
+    workspace.updateFile(HELPER_URI, { changes: { from: 0, insert: "-- local\n" } });
+    const mapped = await applyLeanWorkspaceEdit(client, {
+      changes: {
+        [HELPER_URI]: [{
+          range: { start: { line: 0, character: 25 }, end: { line: 0, character: 999 } },
+          newText: "42",
+        }],
+      },
+    }, { mapping });
+    mapping.destroy();
+    expect(mapped).toMatchObject({ applied: true, changedUris: [HELPER_URI] });
+    expect(workspace.getFile(HELPER_URI)?.doc.toString()).toBe(
+      "-- local\ndef helperValue : Nat := 42\n",
+    );
+
+    const pastLastLine = await applyLeanWorkspaceEdit(client, {
+      changes: {
+        [MAIN_URI]: [{
+          range: { start: { line: 3, character: 0 }, end: { line: 3, character: 0 } },
+          newText: "-- appended",
+        }],
+      },
+    });
+    expect(pastLastLine).toMatchObject({ applied: false, changedUris: [] });
+    expect(view.state.doc.toString()).toBe("def answer : Nat := 42\n");
 
     view.destroy();
     client.disconnect();

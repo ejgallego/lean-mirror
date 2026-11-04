@@ -107,20 +107,31 @@ function collectEditGroups(edit: WorkspaceEdit): EditGroup[] | LeanWorkspaceEdit
   return groups;
 }
 
-function positionToOffset(doc: Text, position: Position): number | null {
+/**
+ * Validate a position against `doc`. Following the LSP specification, a
+ * character past the end of its line is clamped to the line end. Positions on
+ * a line past the end of the document are rejected rather than clamped, since
+ * that usually means the edit targets different text.
+ */
+function clampPosition(doc: Text, position: Position): Position | null {
   if (
     !Number.isInteger(position.line) ||
     !Number.isInteger(position.character) ||
     position.line < 0 ||
+    position.character < 0 ||
     position.line >= doc.lines
   ) {
     return null;
   }
-  const line = doc.line(position.line + 1);
-  if (position.character < 0 || position.character > line.length) {
-    return null;
-  }
-  return line.from + position.character;
+  const lineLength = doc.line(position.line + 1).length;
+  return position.character > lineLength
+    ? { line: position.line, character: lineLength }
+    : position;
+}
+
+function positionToOffset(doc: Text, position: Position): number | null {
+  const clamped = clampPosition(doc, position);
+  return clamped ? doc.line(clamped.line + 1).from + clamped.character : null;
 }
 
 function mappingStartDocument(mapping: WorkspaceMapping, uri: string): Text | null {
@@ -139,11 +150,12 @@ function mappedPosition(
 ): number | null {
   if (mapping?.getMapping(file.uri)) {
     const startDoc = mappingStartDocument(mapping, file.uri);
-    if (startDoc && positionToOffset(startDoc, position) === null) {
+    const start = startDoc ? clampPosition(startDoc, position) : position;
+    if (!start) {
       return null;
     }
     try {
-      const offset = mapping.mapPosition(file.uri, position, assoc);
+      const offset = mapping.mapPosition(file.uri, start, assoc);
       return Number.isInteger(offset) && offset >= 0 && offset <= currentDoc.length
         ? offset
         : null;
