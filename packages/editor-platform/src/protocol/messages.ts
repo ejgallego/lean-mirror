@@ -14,6 +14,12 @@ export interface PlatformProtocolEnvelope<TType extends string, TPayload extends
 }
 
 export type EditorCommandRequestId = string | number;
+/**
+ * Identifies one webview instance. A webview that declares a session in `ready`
+ * sends it with every command, so a host can reject work from an earlier
+ * instance even when it arrives late.
+ */
+export type EditorSessionId = string;
 export type EditorCommandType =
   | "open-document"
   | "document-changed"
@@ -26,12 +32,14 @@ export type EditorCommandResult =
       handled: boolean;
       ok: true;
       requestId: EditorCommandRequestId;
+      session?: EditorSessionId;
     }
   | {
       command: EditorCommandType;
       message: string;
       ok: false;
       requestId: EditorCommandRequestId;
+      session?: EditorSessionId;
     };
 
 export type HostToEditorMessage =
@@ -43,11 +51,11 @@ export type HostToEditorMessage =
   | PlatformProtocolEnvelope<"command-result", EditorCommandResult>;
 
 export type EditorToHostMessage =
-  | PlatformProtocolEnvelope<"ready">
-  | PlatformProtocolEnvelope<"open-document", { requestId?: EditorCommandRequestId; uri: DocumentUri }>
-  | PlatformProtocolEnvelope<"document-changed", { requestId?: EditorCommandRequestId; uri: DocumentUri; text: string; version?: number }>
-  | PlatformProtocolEnvelope<"restart-service", { requestId?: EditorCommandRequestId; serviceId: string; reason?: string }>
-  | PlatformProtocolEnvelope<"set-active-document", { requestId?: EditorCommandRequestId; uri: DocumentUri; languageId?: LanguageId }>;
+  | PlatformProtocolEnvelope<"ready", { session?: EditorSessionId }>
+  | PlatformProtocolEnvelope<"open-document", { requestId?: EditorCommandRequestId; session?: EditorSessionId; uri: DocumentUri }>
+  | PlatformProtocolEnvelope<"document-changed", { requestId?: EditorCommandRequestId; session?: EditorSessionId; uri: DocumentUri; text: string; version?: number }>
+  | PlatformProtocolEnvelope<"restart-service", { requestId?: EditorCommandRequestId; session?: EditorSessionId; serviceId: string; reason?: string }>
+  | PlatformProtocolEnvelope<"set-active-document", { requestId?: EditorCommandRequestId; session?: EditorSessionId; uri: DocumentUri; languageId?: LanguageId }>;
 
 export type EditorPlatformMessage = HostToEditorMessage | EditorToHostMessage;
 
@@ -115,12 +123,21 @@ function hasValidOptionalRequestId(payload: UnknownRecord): boolean {
   return payload.requestId === undefined || isCommandRequestId(payload.requestId);
 }
 
+function hasValidOptionalSession(payload: UnknownRecord): boolean {
+  return payload.session === undefined || (isString(payload.session) && payload.session.length > 0);
+}
+
+function hasValidCommandMetadata(payload: UnknownRecord): boolean {
+  return hasValidOptionalRequestId(payload) && hasValidOptionalSession(payload);
+}
+
 function isEditorCommandResult(value: unknown): value is EditorCommandResult {
   if (
     !isRecord(value) ||
     !isString(value.command) ||
     !editorCommandTypes.has(value.command as EditorCommandType) ||
     !isCommandRequestId(value.requestId) ||
+    !hasValidOptionalSession(value) ||
     typeof value.ok !== "boolean"
   ) {
     return false;
@@ -273,20 +290,20 @@ function hasValidPayload(type: string, payload: unknown): boolean {
     case "command-result":
       return isEditorCommandResult(payload);
     case "ready":
-      return Object.keys(payload).length === 0;
+      return Object.keys(payload).every((key) => key === "session") && hasValidOptionalSession(payload);
     case "open-document":
-      return isString(payload.uri) && hasValidOptionalRequestId(payload);
+      return isString(payload.uri) && hasValidCommandMetadata(payload);
     case "document-changed":
       return (
         isString(payload.uri) &&
         isString(payload.text) &&
-        hasValidOptionalRequestId(payload) &&
+        hasValidCommandMetadata(payload) &&
         (payload.version === undefined || isNonNegativeInteger(payload.version))
       );
     case "restart-service":
-      return isString(payload.serviceId) && isOptionalString(payload.reason) && hasValidOptionalRequestId(payload);
+      return isString(payload.serviceId) && isOptionalString(payload.reason) && hasValidCommandMetadata(payload);
     case "set-active-document":
-      return isString(payload.uri) && isOptionalString(payload.languageId) && hasValidOptionalRequestId(payload);
+      return isString(payload.uri) && isOptionalString(payload.languageId) && hasValidCommandMetadata(payload);
     default:
       return false;
   }

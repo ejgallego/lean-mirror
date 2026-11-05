@@ -2,6 +2,7 @@ import { EditorSelection, Text } from "@codemirror/state";
 import type { Extension } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { LSPPlugin, type LSPClient } from "@codemirror/lsp-client";
+import * as infoviewModule from "@leanprover/infoview";
 import {
   defaultInfoviewConfig,
   renderInfoview,
@@ -20,6 +21,28 @@ import type { LeanEditorSessionExtension } from "./session.js";
 import type { LeanWorkspace } from "./workspace.js";
 
 const keepAlivePeriodMs = 10_000;
+
+interface MountedInfoview {
+  readonly api: InfoviewApi;
+  dispose(): void;
+}
+
+/**
+ * Mount the official infoview, preferring an owning `mountInfoview()` when the
+ * installed `@leanprover/infoview` provides one. `renderInfoview()` returns no
+ * unmount handle, so with it disposal can only detach the DOM.
+ */
+function mountOfficialInfoview(editorApi: EditorApi, element: HTMLElement): MountedInfoview {
+  // A computed lookup keeps bundlers from rejecting an export that older
+  // releases do not have.
+  const mountExport = "mountInfoview";
+  const mount = (infoviewModule as Record<string, unknown>)[mountExport];
+  if (typeof mount === "function") {
+    const mounted = (mount as (api: EditorApi, el: HTMLElement) => MountedInfoview)(editorApi, element);
+    return { api: mounted.api, dispose: () => mounted.dispose() };
+  }
+  return { api: renderInfoview(editorApi, element), dispose: () => undefined };
+}
 
 function requestAbortedError(): Error {
   const error = new Error("Lean infoview request aborted.");
@@ -79,12 +102,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   const serverNotificationSubscriptions = new Map<string, number>();
   const clientNotificationSubscriptions = new Map<string, number>();
   const rpcKeepAliveTimers = new Map<string, number>();
-  const rpcConnectControllers = new Set<AbortController>();
   let config: InfoviewConfig = { ...defaultInfoviewConfig };
   let initialized = false;
   let disposed = false;
-  let operationEpoch = 0;
-  let operationController = new AbortController();
+  // One scope per server generation. Retiring it aborts every operation that
+  // captured its signal: pending requests, RPC connects, and delayed edits.
+  let scope = new AbortController();
   let infoviewApi: InfoviewApi;
 
   function currentClient(): LSPClient {
@@ -151,8 +174,8 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     const client = options.client();
     if (!client) return () => false;
     const current = captureClientOperation(client);
-    const epoch = operationEpoch;
-    return () => !disposed && epoch === operationEpoch && options.client() === client && current();
+    const { signal } = scope;
+    return () => !signal.aborted && options.client() === client && current();
   }
 
   async function displayView(uri: string, current: () => boolean): Promise<EditorView | null> {
@@ -215,7 +238,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     if (!current()) throw requestAbortedError();
     const result = await applyLeanWorkspaceEdit(currentClient(), edit, {
       userEvent: "lean.infoview",
-      signal: operationController.signal,
+      signal: scope.signal,
     });
     if (!result.applied) {
       throw new Error(
@@ -244,19 +267,12 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     if (!current()) throw requestAbortedError();
     const client = currentClient();
     client.sync();
-    const controller = new AbortController();
-    rpcConnectControllers.add(controller);
-    let connected: { sessionId: string | number };
-    try {
-      connected = await abortableClientRequest(
-        client,
-        "$/lean/rpc/connect",
-        { uri },
-        controller.signal,
-      );
-    } finally {
-      rpcConnectControllers.delete(controller);
-    }
+    const connected = await abortableClientRequest<{ uri: string }, { sessionId: string | number }>(
+      client,
+      "$/lean/rpc/connect",
+      { uri },
+      scope.signal,
+    );
     if (!current()) throw requestAbortedError();
     const sessionId = String(connected.sessionId);
     const timer = window.setInterval(() => {
@@ -276,12 +292,8 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   function closeRpcSessions(): void {
-    operationEpoch++;
-    operationController.abort();
-    operationController = new AbortController();
-    for (const controller of rpcConnectControllers) {
-      controller.abort();
-    }
+    scope.abort();
+    if (!disposed) scope = new AbortController();
     for (const sessionId of [...rpcKeepAliveTimers.keys()]) {
       closeRpcSession(sessionId);
     }
@@ -302,7 +314,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     async sendClientRequest(_uri, method, params, requestOptions) {
       const client = currentClient();
       client.sync();
-      const signals = [operationController.signal];
+      const signals = [scope.signal];
       if (requestOptions?.abortSignal) signals.push(requestOptions.abortSignal);
       return abortableClientRequest(client, method, params, AbortSignal.any(signals));
     },
@@ -335,13 +347,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     },
   };
 
-  // @leanprover/infoview offers no unmount. Render into an element this host
-  // owns so disposal detaches only that tree and the container can be reused.
-  // Removing the element does not unmount React: effect cleanups do not run.
+  // Render into an element this host owns so disposal removes only that tree
+  // and the container can be reused. Without `mountInfoview()`, removing the
+  // element does not unmount React: effect cleanups do not run.
   const mountRoot = document.createElement("div");
   mountRoot.className = "lean-infoview-root";
   options.container.append(mountRoot);
-  infoviewApi = renderInfoview(editorApi, mountRoot);
+  const mounted = mountOfficialInfoview(editorApi, mountRoot);
+  infoviewApi = mounted.api;
   void infoviewApi.changedInfoviewConfig(config);
 
   function setCursorLocation(location?: lsp.Location): void {
@@ -365,7 +378,11 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
       if (disposed) return;
       disposed = true;
       closeRpcSessions();
-      mountRoot.remove();
+      try {
+        mounted.dispose();
+      } finally {
+        mountRoot.remove();
+      }
     },
     editorExtension() {
       return EditorView.updateListener.of((update: ViewUpdate) => {

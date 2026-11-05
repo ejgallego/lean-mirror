@@ -10,6 +10,7 @@ import {
   type EditorCommandRequestId,
   type EditorCommandResult,
   type EditorCommandType,
+  type EditorSessionId,
   type EditorPlatformEndpoint,
   type EditorToHostMessage,
   type HostToEditorMessage,
@@ -73,6 +74,8 @@ export interface EditorPlatformCustomEditorHostOptions {
   publishSnapshots?: boolean;
   emitCurrentSnapshot?: boolean;
   onInvalidMessage?: (message: unknown) => void;
+  /** A valid command from a webview session other than the current one; it is dropped. */
+  onStaleMessage?: (message: EditorToHostMessage) => void;
   onHandlerError?: (error: unknown, message: EditorToHostMessage) => void;
 }
 
@@ -94,7 +97,7 @@ export function createEditorPlatformCustomEditorHost(
   );
   const subscriptions: Unsubscribe[] = [];
   const messageQueues = new Map<string, Promise<void>>();
-  const documentVersions: DocumentVersionState = { epoch: 0, versions: new Map() };
+  const documentVersions: DocumentVersionState = { epoch: 0, session: undefined, versions: new Map() };
   let disposed = false;
 
   // A webview generation owns its queued commands and their replies. Work queued
@@ -114,10 +117,19 @@ export function createEditorPlatformCustomEditorHost(
   subscriptions.push(
     endpoint.subscribe((message) => {
       if (message.type === "ready") {
-        // `ready` is a receive-order barrier: a reloaded webview restarts its
-        // document version counters and owns everything received after it.
+        // A reloaded webview restarts its document version counters. Without a
+        // session, `ready` is a receive-order barrier: it owns everything
+        // received after it. With one, only commands carrying it are accepted.
         documentVersions.epoch += 1;
+        documentVersions.session = message.payload.session;
         documentVersions.versions.clear();
+      } else if (
+        documentVersions.session !== undefined &&
+        message.payload.session !== documentVersions.session
+      ) {
+        // Sent by another webview instance, possibly arriving after a newer ready.
+        options.onStaleMessage?.(message);
+        return;
       }
       const epoch = documentVersions.epoch;
       const queueKey = editorMessageQueueKey(message);
@@ -216,6 +228,8 @@ export function vscodeUriToString(uri: VsCodeUriLike): string {
 interface DocumentVersionState {
   /** Incremented on each webview `ready`; work received before it is retired. */
   epoch: number;
+  /** The session declared by the current webview's `ready`, if any. */
+  session: EditorSessionId | undefined;
   readonly versions: Map<string, number>;
 }
 
@@ -284,7 +298,8 @@ async function dispatchEditorMessage(
         command: command.type,
         handled,
         ok: true,
-        requestId: command.requestId
+        requestId: command.requestId,
+        ...(command.session === undefined ? {} : { session: command.session })
       } satisfies EditorCommandResult));
     }
   } catch (error) {
@@ -293,7 +308,8 @@ async function dispatchEditorMessage(
         command: command.type,
         message: error instanceof Error ? error.message : String(error),
         ok: false,
-        requestId: command.requestId
+        requestId: command.requestId,
+        ...(command.session === undefined ? {} : { session: command.session })
       } satisfies EditorCommandResult));
     }
     throw error;
@@ -302,13 +318,14 @@ async function dispatchEditorMessage(
 
 function editorCommandRequest(
   message: EditorToHostMessage
-): { requestId: EditorCommandRequestId; type: EditorCommandType } | undefined {
+): { requestId: EditorCommandRequestId; session?: EditorSessionId; type: EditorCommandType } | undefined {
   if (message.type === "ready" || message.payload.requestId === undefined) {
     return undefined;
   }
   return {
     requestId: message.payload.requestId,
-    type: message.type
+    type: message.type,
+    ...(message.payload.session === undefined ? {} : { session: message.payload.session })
   };
 }
 

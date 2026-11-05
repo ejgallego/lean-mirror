@@ -24,10 +24,17 @@ restart its `document-changed` versions. Commands queued before `ready` no longe
 run, and handlers that were already running do not post their `command-result`
 into the new webview, so equal request IDs from both views cannot be confused. A
 running handler is not cancelled and its side effects are not undone. The epoch
-is assigned when a message is received: `ready` is a receive-order barrier, and
+is assigned when a message is received.
+
+A webview may declare a session in `ready` (`{ session: "<non-empty id>" }`) and
+send the same `session` with every command; command results echo it. While the
+current `ready` declared a session, commands carrying any other session, or none,
+are dropped on receipt and reported through `onStaleMessage`, even when an old
+webview's message arrives after its replacement's `ready`. A webview that does
+not declare a session keeps the receive-order rule: `ready` is a barrier, and
 the adapter assumes the transport delivers an old webview's messages before its
-replacement's `ready`. Messages carry no sender identity, so a message from an
-old webview that arrives after that `ready` cannot be told apart from new work.
+replacement's `ready`. The `session` field is optional everywhere, so existing
+editors remain valid.
 
 ## Update Flow
 
