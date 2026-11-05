@@ -12,6 +12,11 @@ export default defineConfig({
         rootDir,
         "node_modules/@leanprover/infoview/dist/index.production.min.js",
       ),
+      // The package's infoview.css is a build-time copy of the official stylesheet.
+      "codemirror-lean4-lsp/infoview.css": resolve(
+        rootDir,
+        "node_modules/@leanprover/infoview/dist/index.css",
+      ),
       "codemirror-lean4-lsp/infoview": resolve(rootDir, "src/infoview.ts"),
       "codemirror-lean4-lsp": resolve(rootDir, "src/index.ts"),
     },

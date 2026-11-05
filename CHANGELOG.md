@@ -42,6 +42,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- The workspace example mounts editors immediately and returns a `ready` promise; `dispose()` or an `AbortSignal` cancels a pending startup. It reports Lean's file checking separately from the connection and tracks current and saved text as immutable documents.
 - Raised the CodeMirror dependency floors to the current releases (`@codemirror/state` 6.7.6, `view` 6.43.15, `language` 6.13.1, `commands` 6.11.1, `search` 6.7.2, `autocomplete` 6.20.4, `@lezer/highlight` 1.2.5). `@codemirror/lsp-client` stays pinned at 6.3.0, the latest release.
 - `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document and ranges whose start follows their end are still rejected; ordering is checked before clamping.
 - `createLeanLspClient()` and session clients default to a 20-second request timeout instead of the upstream 3 seconds; pass `timeout` to override it.
@@ -76,6 +77,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- The workspace example shares pending startup with reconnect requests, so disposal closes the connection and rejects every waiter. Fatal Lean progress now shows a failed check and recovers after correcting the document.
 - Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
 - The private VS Code adapter no longer drops every document change after a webview reload. Each `ready` starts a new webview epoch: earlier queued commands do not run, and earlier handlers do not reply into the reloaded webview.
 - `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.

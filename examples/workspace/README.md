@@ -17,6 +17,23 @@ Changes made while a save is in flight remain dirty. Saves are independent per
 file; a failed save leaves remaining files dirty. Reloading the page loads the
 saved versions and discards unsaved buffers, so save before leaving.
 
+`mountLeanWorkspace()` returns immediately: editors are usable before Lean
+connects, and its `ready` promise settles when the first connection is ready.
+`dispose()`, or aborting the optional `signal`, cancels a pending startup and
+rejects `ready` with an `AbortError`. Calling `reconnect()` while startup or a
+reconnect is pending shares that task,
+so disposing closes its sole pending socket and rejects every waiter.
+
+The header shows the connection and Lean's file checking (from
+`$/lean/fileProgress`) separately, since a ready connection
+can still be elaborating. Each file keeps its current and saved text as
+immutable CodeMirror documents, so dirty state compares content, and the file's
+line ending is applied only when saving.
+
+A fatal progress notification (for example, a missing import) shows
+"Checking failed" instead of ongoing work. Diagnostics explain the failure;
+correcting the document allows checking to finish normally.
+
 `publicLeanWorkspace.ts` composes CodeMirror, the session, workspace, and official
 infoview using only published package entries. The shell supplies loading and
 persistence callbacks. The example is repository infrastructure, outside the npm

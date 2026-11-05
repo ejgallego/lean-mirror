@@ -8,8 +8,10 @@ const element = <T extends HTMLElement>(selector: string): T => {
   return value;
 };
 const states = new Map<string, WorkspaceDocumentState>();
+const checking = new Map<string, "checking" | "failed">();
 let workspace: MountedLeanWorkspace | null = null;
 const status = element("#connection-status");
+const checkingStatus = element("#checking-status");
 const feedback = element("#save-status");
 const save = element<HTMLButtonElement>("#save-all");
 const restart = element<HTMLButtonElement>("#reconnect");
@@ -19,6 +21,11 @@ async function snapshot(uri: string): Promise<WorkspaceDocument> {
   const response = await fetch(backend + "/lean-document?uri=" + encodeURIComponent(uri));
   if (!response.ok) throw new Error(await response.text());
   return readSnapshot(await response.json());
+}
+const fileName = (uri: string): string => uri.split("/").at(-1) ?? uri;
+function showChecking(text: string, phase: "waiting" | "checking" | "checked" | "failed"): void {
+  checkingStatus.textContent = text;
+  checkingStatus.dataset.phase = phase;
 }
 function readSnapshot(value: unknown): WorkspaceDocument {
   if (!value || typeof value !== "object" || !("uri" in value) || !("text" in value) || !("revision" in value) ||
@@ -49,7 +56,7 @@ async function start(): Promise<void> {
     buttons.set(document.uri, button);
     files.append(button);
   }
-  workspace = await mountLeanWorkspace({
+  workspace = mountLeanWorkspace({
     documents, rootUri: session.rootUri, websocketUrl: session.websocketUrl,
     editorContainer: element("#workspace-editor"),
     infoviewContainer: element("#workspace-infoview"),
@@ -73,15 +80,30 @@ async function start(): Promise<void> {
         ([...states.values()].some((entry) => entry.saving) ? "Saving…" :
           [...states.values()].some((entry) => entry.dirty) ? "Unsaved changes" : "All changes saved");
     },
+    onCheckingState(state) {
+      if (state.phase === "checked") checking.delete(state.uri);
+      else checking.set(state.uri, state.phase);
+      // Connection readiness is separate: a ready transport may still be elaborating.
+      const failed = [...checking].filter(([, phase]) => phase === "failed").map(([uri]) => fileName(uri));
+      if (failed.length > 0) showChecking("Checking failed: " + failed.join(", "), "failed");
+      else if (checking.size > 0) showChecking("Checking " + [...checking.keys()].map(fileName).join(", ") + "…", "checking");
+      else showChecking("Checked", "checked");
+    },
     onSessionState(state) {
       status.dataset.generation = String(state.generation);
       status.dataset.phase = state.phase;
       status.textContent = state.phase === "ready" ? "Ready" : state.phase === "initializing" ? "Connecting…" : "Disconnected";
       restart.disabled = state.phase === "initializing";
+      if (state.phase !== "ready") {
+        checking.clear();
+        showChecking("Waiting for Lean", "waiting");
+      }
     },
     onReconnectStart() { status.textContent = "Reconnecting…"; },
     onError(error) { status.textContent = "Offline — edits are kept"; feedback.textContent = String(error); },
   });
+  // Startup failures are reported through onError; the editors stay usable offline.
+  void workspace.ready.catch(() => undefined);
   save.addEventListener("click", () => { void workspace?.saveAll().catch(() => undefined); });
   restart.addEventListener("click", () => { void workspace?.reconnect().catch(() => undefined); });
   window.addEventListener("beforeunload", () => workspace?.dispose(), { once: true });
