@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  applyLeanWorkspaceEdit,
   createLeanLspClient,
   createLeanWorkspace,
   lean4,
@@ -305,6 +306,88 @@ describe("LeanWorkspace", () => {
     expect(await unloading).toBe("unloaded");
     expect(workspace.getFile(HELPER_URI)).toBeNull();
 
+    client.disconnect();
+  });
+
+  it("splits loaded line breaks like CodeMirror, including lone carriage returns", async () => {
+    const source = "def a := 1\rdef b := 2\r\ndef c := 3\n";
+    const { client } = createInitializedClient(
+      createLeanWorkspace({ loadDocument: (uri) => (uri === HELPER_URI ? source : null) }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    const file = await workspace.requestFile(HELPER_URI);
+    expect(file?.doc.lines).toBe(4);
+    // A host view built from the same source text matches the loaded document.
+    const view = createTestView(source, lean4({ client, uri: HELPER_URI }));
+    expect(workspace.getFile(HELPER_URI)?.getView()).toBe(view);
+
+    view.destroy();
+    client.disconnect();
+  });
+
+  it("treats a loading lease acquisition as use of the document", async () => {
+    let resolveLoad!: (doc: string) => void;
+    const { client, transport } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI
+            ? new Promise<string>((resolve) => { resolveLoad = resolve; })
+            : null;
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    const acquiring = workspace.acquireServerDocument(HELPER_URI);
+    const unloading = workspace.unloadDocument(HELPER_URI);
+    resolveLoad("abc");
+    const lease = await acquiring;
+
+    expect(await unloading).toBe("in-use");
+    expect(lease?.file).toBe(workspace.getFile(HELPER_URI));
+    await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
+
+    lease?.release();
+    expect(await workspace.unloadDocument(HELPER_URI)).toBe("unloaded");
+    client.disconnect();
+  });
+
+  it("rejects a workspace edit whose target is unloaded while it loads", async () => {
+    let resolveLoad!: (doc: string) => void;
+    const changed: string[] = [];
+    const { client } = createInitializedClient(
+      createLeanWorkspace({
+        loadDocument(uri) {
+          return uri === HELPER_URI
+            ? new Promise<string>((resolve) => { resolveLoad = resolve; })
+            : null;
+        },
+        onDocumentChange(uri) {
+          changed.push(uri);
+        },
+      }),
+    );
+    await client.initializing;
+    const workspace = client.workspace as LeanWorkspace;
+
+    const editing = applyLeanWorkspaceEdit(client, {
+      changes: {
+        [HELPER_URI]: [{
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+          newText: "xyz",
+        }],
+      },
+    });
+    await Promise.resolve();
+    const unloading = workspace.unloadDocument(HELPER_URI);
+    resolveLoad("abc");
+
+    expect(await unloading).toBe("unloaded");
+    expect(await editing).toMatchObject({ applied: false, changedUris: [] });
+    expect(changed).toEqual([]);
     client.disconnect();
   });
 

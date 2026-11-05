@@ -94,14 +94,17 @@ export function createEditorPlatformCustomEditorHost(
   );
   const subscriptions: Unsubscribe[] = [];
   const messageQueues = new Map<string, Promise<void>>();
-  const documentVersions = new Map<string, number>();
+  const documentVersions: DocumentVersionState = { epoch: 0, versions: new Map() };
   let disposed = false;
 
-  const dispatch = (message: EditorToHostMessage): Promise<void> => {
-    if (disposed) {
+  // A webview generation owns its queued commands and their replies. Work queued
+  // by an earlier generation never runs or replies after a later `ready`.
+  const isCurrent = (epoch: number): boolean => !disposed && epoch === documentVersions.epoch;
+  const dispatch = (message: EditorToHostMessage, epoch: number): Promise<void> => {
+    if (!isCurrent(epoch)) {
       return Promise.resolve();
     }
-    return dispatchEditorMessage(options, endpoint, message, documentVersions, () => disposed);
+    return dispatchEditorMessage(options, endpoint, message, documentVersions, epoch, () => isCurrent(epoch));
   };
 
   const reportFailure = (error: unknown, message: EditorToHostMessage): void => {
@@ -110,16 +113,23 @@ export function createEditorPlatformCustomEditorHost(
 
   subscriptions.push(
     endpoint.subscribe((message) => {
+      if (message.type === "ready") {
+        // `ready` is a receive-order barrier: a reloaded webview restarts its
+        // document version counters and owns everything received after it.
+        documentVersions.epoch += 1;
+        documentVersions.versions.clear();
+      }
+      const epoch = documentVersions.epoch;
       const queueKey = editorMessageQueueKey(message);
       if (!queueKey) {
-        void dispatch(message).catch((error: unknown) => reportFailure(error, message));
+        void dispatch(message, epoch).catch((error: unknown) => reportFailure(error, message));
         return;
       }
 
       const previous = messageQueues.get(queueKey);
       const task = previous
-        ? previous.catch(() => undefined).then(() => dispatch(message))
-        : dispatch(message);
+        ? previous.catch(() => undefined).then(() => dispatch(message, epoch))
+        : dispatch(message, epoch);
       messageQueues.set(queueKey, task);
       void task
         .catch((error: unknown) => reportFailure(error, message))
@@ -203,10 +213,17 @@ export function vscodeUriToString(uri: VsCodeUriLike): string {
   return uri.toString();
 }
 
+interface DocumentVersionState {
+  /** Incremented on each webview `ready`; work received before it is retired. */
+  epoch: number;
+  readonly versions: Map<string, number>;
+}
+
 async function handleEditorMessage(
   options: EditorPlatformCustomEditorHostOptions,
   message: EditorToHostMessage,
-  documentVersions: Map<string, number>
+  documentVersions: DocumentVersionState,
+  epoch: number
 ): Promise<boolean> {
   switch (message.type) {
     case "ready":
@@ -220,7 +237,7 @@ async function handleEditorMessage(
     case "document-changed":
       if (
         message.payload.version !== undefined &&
-        message.payload.version <= (documentVersions.get(message.payload.uri) ?? -1)
+        message.payload.version <= (documentVersions.versions.get(message.payload.uri) ?? -1)
       ) {
         return false;
       }
@@ -230,8 +247,8 @@ async function handleEditorMessage(
         text: message.payload.text,
         ...(message.payload.version === undefined ? {} : { version: message.payload.version })
       });
-      if (message.payload.version !== undefined) {
-        documentVersions.set(message.payload.uri, message.payload.version);
+      if (message.payload.version !== undefined && epoch === documentVersions.epoch) {
+        documentVersions.versions.set(message.payload.uri, message.payload.version);
       }
       return true;
     case "restart-service":
@@ -255,13 +272,14 @@ async function dispatchEditorMessage(
   options: EditorPlatformCustomEditorHostOptions,
   endpoint: EditorPlatformEndpoint<EditorToHostMessage, HostToEditorMessage>,
   message: EditorToHostMessage,
-  documentVersions: Map<string, number>,
-  isDisposed: () => boolean
+  documentVersions: DocumentVersionState,
+  epoch: number,
+  isCurrent: () => boolean
 ): Promise<void> {
   const command = editorCommandRequest(message);
   try {
-    const handled = await handleEditorMessage(options, message, documentVersions);
-    if (command && !isDisposed()) {
+    const handled = await handleEditorMessage(options, message, documentVersions, epoch);
+    if (command && isCurrent()) {
       endpoint.postMessage(platformMessage("command-result", {
         command: command.type,
         handled,
@@ -270,7 +288,7 @@ async function dispatchEditorMessage(
       } satisfies EditorCommandResult));
     }
   } catch (error) {
-    if (command && !isDisposed()) {
+    if (command && isCurrent()) {
       endpoint.postMessage(platformMessage("command-result", {
         command: command.type,
         message: error instanceof Error ? error.message : String(error),

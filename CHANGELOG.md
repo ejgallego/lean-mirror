@@ -9,6 +9,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- `detectLeanLineEnding()` lets hosts persist documents with their original CRLF or LF ending, following VS Code's majority rule; the workspace example keeps each file's ending and stays clean after edit-and-undo.
 - A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
 
 - Initial Lean 4 CodeMirror 6 package built on top of `@codemirror/lsp-client`
@@ -39,6 +40,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document and ranges whose start follows their end are still rejected; ordering is checked before clamping.
+- `createLeanLspClient()` and session clients default to a 20-second request timeout instead of the upstream 3 seconds; pass `timeout` to override it.
 - Direct clients now support one connection. Recreate them after disconnect or use `LeanEditorSession.reconnect()`; this prevents queued upstream operations from crossing connection generations.
 
 - Primary CI uses Rust 1.99.0 and its rust-analyzer; Rust 1.89.0 produced conflicting same-version diagnostic pushes during workspace loading.
@@ -70,6 +73,10 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
+- The private VS Code adapter no longer drops every document change after a webview reload. Each `ready` starts a new webview epoch: earlier queued commands do not run, and earlier handlers do not reply into the reloaded webview.
+- `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.
+- Disposing a Lean infoview host now removes only the element it mounted, leaves other container content intact, allows a new infoview in the same container, and stops forwarding server events to the detached infoview. The infoview's React tree is still not unmounted, because `@leanprover/infoview` exposes no unmount API.
 - Retired client requests and asynchronous workspace edits stop at the connection lifetime; throwing or reentrant session observers no longer skip detach or start retired transports.
 - Display requests activate retained editor views, and late loaders cannot rewind document versions.
 - Browser/backend embedded Lean text and mappings now use one renderer, including imports, comma-separated labels, CRLF, and Unicode.
@@ -101,6 +108,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - Sanitized all custom LSP hover HTML with a conservative allowlist.
 - Restricted the demo backend to loopback by default, added browser-origin checks, bounded HTTP and WebSocket payloads, and capped concurrent LSP processes.
+- The loopback-bound demo backend rejects HTTP requests and WebSocket upgrades whose `Host` header is not loopback, closing DNS-rebinding reads that carry no `Origin` header.
 
 ### Removed
 

@@ -107,20 +107,31 @@ function collectEditGroups(edit: WorkspaceEdit): EditGroup[] | LeanWorkspaceEdit
   return groups;
 }
 
-function positionToOffset(doc: Text, position: Position): number | null {
+/**
+ * Validate a position against `doc`. Following the LSP specification, a
+ * character past the end of its line is clamped to the line end. Positions on
+ * a line past the end of the document are rejected rather than clamped, since
+ * that usually means the edit targets different text.
+ */
+function clampPosition(doc: Text, position: Position): Position | null {
   if (
     !Number.isInteger(position.line) ||
     !Number.isInteger(position.character) ||
     position.line < 0 ||
+    position.character < 0 ||
     position.line >= doc.lines
   ) {
     return null;
   }
-  const line = doc.line(position.line + 1);
-  if (position.character < 0 || position.character > line.length) {
-    return null;
-  }
-  return line.from + position.character;
+  const lineLength = doc.line(position.line + 1).length;
+  return position.character > lineLength
+    ? { line: position.line, character: lineLength }
+    : position;
+}
+
+function positionToOffset(doc: Text, position: Position): number | null {
+  const clamped = clampPosition(doc, position);
+  return clamped ? doc.line(clamped.line + 1).from + clamped.character : null;
 }
 
 function mappingStartDocument(mapping: WorkspaceMapping, uri: string): Text | null {
@@ -139,11 +150,12 @@ function mappedPosition(
 ): number | null {
   if (mapping?.getMapping(file.uri)) {
     const startDoc = mappingStartDocument(mapping, file.uri);
-    if (startDoc && positionToOffset(startDoc, position) === null) {
+    const start = startDoc ? clampPosition(startDoc, position) : position;
+    if (!start) {
       return null;
     }
     try {
-      const offset = mapping.mapPosition(file.uri, position, assoc);
+      const offset = mapping.mapPosition(file.uri, start, assoc);
       return Number.isInteger(offset) && offset >= 0 && offset <= currentDoc.length
         ? offset
         : null;
@@ -177,8 +189,11 @@ function prepareChanges(
   const currentDoc = file.getView()?.state.doc ?? file.doc;
   const positioned: PositionedChange[] = [];
   for (const [sourceIndex, edit] of group.edits.entries()) {
-    const from = mappedPosition(mapping, file, currentDoc, edit.range.start, 1);
-    const to = mappedPosition(mapping, file, currentDoc, edit.range.end, -1);
+    // Check the server's own ordering before clamping can collapse a reversed range.
+    const { start, end } = edit.range;
+    const reversed = start.line > end.line || (start.line === end.line && start.character > end.character);
+    const from = reversed ? null : mappedPosition(mapping, file, currentDoc, start, 1);
+    const to = reversed ? null : mappedPosition(mapping, file, currentDoc, end, -1);
     if (from === null || to === null || from > to) {
       return failed(
         `Workspace edit for ${group.uri} contains an invalid or stale range.`,
@@ -270,7 +285,7 @@ export async function applyLeanWorkspaceEdit(
   const prepared: PreparedGroup[] = [];
   for (const group of collected) {
     const file = files.get(group.uri);
-    if (!file) {
+    if (!file || client.workspace.getFile(group.uri) !== file) {
       return failed(`Workspace document ${group.uri} is unavailable.`, group.index);
     }
     const result = prepareChanges(group, file, options.mapping);

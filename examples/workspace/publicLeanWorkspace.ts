@@ -2,8 +2,8 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   createLeanEditorSession, createLeanWorkspace, createWebSocketTransport,
-  lean4, leanFallbackHighlightStyle, waitForWebSocketOpen,
-  type LeanEditorSession, type LeanEditorSessionState, type LeanWorkspace,
+  detectLeanLineEnding, lean4, leanFallbackHighlightStyle, waitForWebSocketOpen,
+  type LeanEditorSession, type LeanLineEnding, type LeanEditorSessionState, type LeanWorkspace,
 } from "codemirror-lean4-lsp";
 import {
   createLeanInfoviewHost, leanInfoviewClientNotifications, type LeanInfoviewHost,
@@ -47,6 +47,8 @@ export interface MountedLeanWorkspace {
   dispose(): void;
 }
 interface DocumentEntry extends WorkspaceDocument {
+  /** Detected from the loaded text and kept on save, as VS Code does. */
+  lineEnding: LeanLineEnding;
   savedText: string;
   view?: EditorView;
   panel?: HTMLElement;
@@ -61,7 +63,11 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   const documents = new Map<string, DocumentEntry>();
   for (const document of options.documents) {
     if (documents.has(document.uri)) throw new Error("Duplicate workspace document URI.");
-    documents.set(document.uri, { ...document, savedText: document.text, saving: false });
+    // Compare and save text in the file's chosen ending. A mixed-ending file is
+    // normalized only when it is saved after an edit; edit-then-undo stays clean.
+    const lineEnding = detectLeanLineEnding(document.text);
+    const text = document.text.replace(/\r\n?|\n/g, lineEnding);
+    documents.set(document.uri, { ...document, lineEnding, text, savedText: text, saving: false });
   }
   let activeUri = first.uri;
   let infoview: LeanInfoviewHost | null = null;
@@ -80,7 +86,6 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
   const session = createLeanEditorSession({
     client: {
       rootUri: options.rootUri,
-      timeout: 10_000,
       features: { semanticTokens: true },
       extensions: [leanInfoviewClientNotifications(() => infoview)],
       ...(options.sanitizeHTML ? { sanitizeHTML: options.sanitizeHTML } : {}),
@@ -105,7 +110,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
         onDocumentChange(uri, file) {
           const entry = documents.get(uri);
           if (entry) {
-            entry.text = file.doc.toString();
+            entry.text = file.doc.sliceString(0, file.doc.length, entry.lineEnding);
             emitDocument(entry);
           }
         },
@@ -133,7 +138,7 @@ export async function mountLeanWorkspace(options: MountLeanWorkspaceOptions): Pr
             ...(infoview ? [infoview.editorExtension()] : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
-                entry.text = update.state.doc.toString();
+                entry.text = update.state.doc.sliceString(0, update.state.doc.length, entry.lineEnding);
                 delete entry.error;
                 emitDocument(entry);
               }

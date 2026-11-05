@@ -116,6 +116,57 @@ test("keeps local edits when another client changes the disk revision", async ({
   expect(saved.text).not.toContain("-- local edit kept");
 });
 
+test("keeps a CRLF file's line endings when saving edits", async ({ page, request }) => {
+  const main = [...original.keys()].find((uri) => uri.endsWith("/Main.lean"))!;
+  const snapshot = await (await request.get(backend + "/lean-document?uri=" + encodeURIComponent(main))).json();
+  const crlf = (snapshot.text as string).replace(/\r?\n/g, "\r\n");
+  expect((await request.post(backend + "/lean-document", { data: { ...snapshot, text: crlf } })).ok()).toBe(true);
+
+  await page.goto(pagePath);
+  await expect(page.locator("#connection-status")).toHaveText("Ready");
+  const content = page.locator("#workspace-editor .workspace-editor-panel:not([hidden]) .cm-content");
+  await content.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\n-- crlf edit\n-- second line");
+  await page.getByRole("button", { name: "Save all" }).click();
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+
+  const saved = (await (await request.get(backend + "/lean-document?uri=" + encodeURIComponent(main))).json()).text as string;
+  expect(saved.startsWith(crlf.replace(/(\r\n)+$/, ""))).toBe(true);
+  expect(saved).toContain("\r\n-- crlf edit\r\n-- second line");
+  expect(saved.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
+});
+
+test("normalizes a mixed-ending file only when an edit is saved", async ({ page, request }) => {
+  const main = [...original.keys()].find((uri) => uri.endsWith("/Main.lean"))!;
+  const snapshot = await (await request.get(backend + "/lean-document?uri=" + encodeURIComponent(main))).json();
+  // The first break stays LF and every later one becomes CRLF: a CRLF majority.
+  const lines = (snapshot.text as string).replace(/\r\n/g, "\n").split("\n");
+  const mixed = lines[0] + "\n" + lines.slice(1).join("\r\n");
+  expect((await request.post(backend + "/lean-document", { data: { ...snapshot, text: mixed } })).ok()).toBe(true);
+  const read = async () => (await (await request.get(backend + "/lean-document?uri=" + encodeURIComponent(main))).json()).text as string;
+
+  await page.goto(pagePath);
+  await expect(page.locator("#connection-status")).toHaveText("Ready");
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+  const content = page.locator("#workspace-editor .workspace-editor-panel:not([hidden]) .cm-content");
+  await content.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("x");
+  await expect(page.locator("#save-status")).toHaveText("Unsaved changes");
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+  await expect(page.getByRole("button", { name: "Save all" })).toBeDisabled();
+  expect(await read()).toBe(mixed);
+
+  await page.keyboard.type("-- normalized");
+  await page.getByRole("button", { name: "Save all" }).click();
+  await expect(page.locator("#save-status")).toHaveText("All changes saved");
+  const saved = await read();
+  expect(saved).toContain("-- normalized");
+  expect(saved.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
+});
+
 test("keeps edits made while a save response is in flight dirty until they are saved", async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });

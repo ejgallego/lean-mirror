@@ -76,6 +76,10 @@ export {
 } from "./transport.js";
 export { leanUtilities, type LeanUtilityOptions } from "./utilities.js";
 export {
+  detectLeanLineEnding,
+  type LeanLineEnding,
+} from "./lineEndings.js";
+export {
   LeanWorkspace,
   LeanWorkspaceFile,
   createLeanWorkspace,

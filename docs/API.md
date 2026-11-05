@@ -38,6 +38,8 @@ Import these from `codemirror-lean4-lsp`:
 - `leanJumpToTypeDefinition`
 - `leanJumpToImplementation`
 - `leanJumpToDefinitionKeymap`
+- `detectLeanLineEnding`
+- `LeanLineEnding`
 - `createWebSocketTransport`
 - `waitForWebSocketOpen`
 - `createMessagePortTransport`
@@ -45,6 +47,11 @@ Import these from `codemirror-lean4-lsp`:
 These exports are the current experimental package surface. During `0.x`, they may be renamed,
 changed, or removed without aliases or a deprecation window. Pin an exact package version for
 experiments that need reproducibility.
+
+`createLeanLspClient()` defaults the request `timeout` to 20 seconds instead of the upstream
+3 seconds, because Lean answers many requests only after elaborating up to the requested
+position. A timed-out request rejects locally; Lean may still finish the work. Pass `timeout`
+to choose another bound.
 
 `createWebSocketTransport()` reports sends attempted while a socket is still connecting and
 ignores terminal sends during teardown. Await `waitForWebSocketOpen()` before connecting an
@@ -80,6 +87,12 @@ document changes into the workspace cache. A direct client supports one
 connection; recreate it after disconnect, or use `LeanEditorSession.reconnect()`
 for fresh generations with host-managed text retention.
 
+Loaded strings split lines like CodeMirror (`\r\n`, `\r`, or `\n`), and
+documents always join lines with `\n`. Hosts that persist text should keep each
+file's ending: `detectLeanLineEnding(loadedText)` applies VS Code's majority rule
+([`PieceTreeTextBufferBuilder`](https://github.com/microsoft/vscode/blob/main/src/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.ts)),
+and `doc.sliceString(0, doc.length, ending)` serializes a document with it.
+
 `displayDocument` is an activation request even when a document already has a
 retained editor view. Hosts should activate that view rather than creating a duplicate.
 
@@ -101,7 +114,9 @@ advertise an LSP formatter. A custom Lean server that implements
 boundary. It loads every target through the host workspace, validates all
 versions and UTF-16 ranges before dispatching any transaction, applies both
 `changes` and text-only `documentChanges`, and synchronizes LSP-open targets by
-default. Pass the `WorkspaceMapping` that surrounded the originating request so
+default. As the LSP specification requires, a character past the end of its line
+is clamped to the line end. A line past the end of the document, overlapping
+ranges, or a start after its end (checked before clamping) reject the whole edit. Pass the `WorkspaceMapping` that surrounded the originating request so
 edits remain correct if local changes occur while the server is answering:
 
 ```ts
@@ -244,6 +259,15 @@ server notifications through `host.forwardServerNotification()`.
 The host's `editorExtension()` only tracks cursor, focus, and document changes;
 it can be mounted into any DOM container, including the generic information
 slot returned by `renderEditorPlatformWorkspaceShell()`.
+
+The host renders the infoview into a child element it creates inside
+`container`. `dispose()` removes only that element, rejects later infoview
+requests, and stops forwarding events, so other container content is kept and a
+new host can mount into the same container. It does not unmount the infoview's
+React tree: `@leanprover/infoview` (0.13.0, and 0.14.0) exposes no unmount API,
+so React effect cleanups, including those of user widgets, do not run. Prefer
+one long-lived infoview host per page area over repeatedly creating and
+disposing hosts.
 
 ## Official CodeMirror passthrough
 

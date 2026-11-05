@@ -53,7 +53,8 @@ export interface LeanWorkspaceOptions {
 }
 
 function toText(doc: string | Text): Text {
-  return typeof doc === "string" ? Text.of(doc.split(/\r?\n/u)) : doc;
+  // Split like CodeMirror's default so loaded text equals an editor view's doc.
+  return typeof doc === "string" ? Text.of(doc.split(/\r\n?|\n/u)) : doc;
 }
 
 function normalizeLoadedDocument(
@@ -189,6 +190,8 @@ export class LeanWorkspace extends Workspace {
     changes: ChangeSet;
   }>();
   private readonly pendingLoads = new Map<string, Promise<LeanWorkspaceFile | null>>();
+  /** Lease acquisitions still loading their document; they count as use. */
+  private readonly pendingAcquisitions = new Map<string, number>();
 
   constructor(
     client: LSPClient,
@@ -229,6 +232,10 @@ export class LeanWorkspace extends Workspace {
 
   private isOpen(file: LeanWorkspaceFile): boolean {
     return file.hasOpenView() || file.serverOpen;
+  }
+
+  private inUse(file: LeanWorkspaceFile): boolean {
+    return this.isOpen(file) || this.pendingAcquisitions.has(file.uri);
   }
 
   private absorbUnsynchronizedChanges(): void {
@@ -361,7 +368,15 @@ export class LeanWorkspace extends Workspace {
    * server to process this document.
    */
   async acquireServerDocument(uri: string): Promise<LeanServerDocumentLease | null> {
-    const file = await this.ensureLoadedFile(uri);
+    this.pendingAcquisitions.set(uri, (this.pendingAcquisitions.get(uri) ?? 0) + 1);
+    let file: LeanWorkspaceFile | null;
+    try {
+      file = await this.ensureLoadedFile(uri);
+    } finally {
+      const remaining = (this.pendingAcquisitions.get(uri) ?? 1) - 1;
+      if (remaining > 0) this.pendingAcquisitions.set(uri, remaining);
+      else this.pendingAcquisitions.delete(uri);
+    }
     if (!file) {
       return null;
     }
@@ -399,7 +414,8 @@ export class LeanWorkspace extends Workspace {
    * Remove an unowned document from the workspace cache.
    *
    * In-flight loading and host change callbacks finish before an otherwise
-   * unloadable document is removed.
+   * unloadable document is removed. A lease acquisition that is still loading
+   * the document makes it `"in-use"`.
    */
   async unloadDocument(uri: string): Promise<LeanWorkspaceUnloadResult> {
     await this.pendingLoads.get(uri);
@@ -407,7 +423,7 @@ export class LeanWorkspace extends Workspace {
     if (!file) {
       return "not-loaded";
     }
-    if (this.isOpen(file)) {
+    if (this.inUse(file)) {
       return "in-use";
     }
     while (this.pendingDocumentChanges.get(uri)?.size) {
@@ -416,7 +432,7 @@ export class LeanWorkspace extends Workspace {
     if (this.getFile(uri) !== file) {
       return "not-loaded";
     }
-    if (this.isOpen(file)) {
+    if (this.inUse(file)) {
       return "in-use";
     }
     this.pendingUpdates.delete(uri);

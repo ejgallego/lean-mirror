@@ -14,6 +14,7 @@ export function parseAllowedOrigins(
   value: string | undefined,
   defaults: readonly string[],
 ): Set<string>;
+export function requestHostAllowed(hostHeader: string | undefined, allowRemote: boolean): boolean;
 export function requestOriginAllowed(origin: string | undefined, allowedOrigins: ReadonlySet<string>): boolean;
 export function readBoundedJsonBody(
   req: AsyncIterable<string | Uint8Array>,

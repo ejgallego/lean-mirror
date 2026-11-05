@@ -1,7 +1,7 @@
 import { CompletionContext } from "@codemirror/autocomplete";
 import { diagnosticCount } from "@codemirror/lint";
 import { serverCompletionSource } from "@codemirror/lsp-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   findReferences,
@@ -55,6 +55,33 @@ describe("leanLspExtensions", () => {
 });
 
 describe("lean4", () => {
+  it("waits longer than the upstream default before timing out Lean requests", async () => {
+    vi.useFakeTimers();
+    try {
+      const outcome = async (timeout?: number) => {
+        const client = createLeanLspClient(timeout === undefined ? {} : { timeout });
+        const transport = new MockTransport();
+        transport.onRequest("initialize", () => ({ capabilities: {} }));
+        client.connect(transport);
+        await vi.advanceTimersByTimeAsync(0);
+        let settled = "pending";
+        void client.request("$/lean/plainGoal", {}).then(
+          () => { settled = "resolved"; },
+          (error: Error) => { settled = error.message; },
+        );
+        await vi.advanceTimersByTimeAsync(3_100);
+        const early = settled;
+        await vi.advanceTimersByTimeAsync(17_000);
+        client.disconnect();
+        return [early, settled];
+      };
+      expect(await outcome()).toEqual(["pending", "Request timed out"]);
+      expect(await outcome(1_000)).toEqual(["Request timed out", "Request timed out"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects ambiguous direct-client and session ownership", () => {
     expect(() => lean4({
       client: createLeanLspClient(),

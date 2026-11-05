@@ -464,4 +464,41 @@ describe("Lean infoview host", () => {
     harness.view.destroy();
     harness.client.disconnect();
   });
+
+  it("disposes only its own mount and stops forwarding events", async () => {
+    const container = document.createElement("div");
+    const hostContent = document.createElement("p");
+    hostContent.textContent = "host-owned";
+    container.append(hostContent);
+    const first = await createHarness(container);
+    const firstMount = container.querySelector("[data-lean-infoview='mounted']");
+    expect(firstMount).not.toBeNull();
+    const firstApi = first.editorApi;
+    await firstApi.subscribeServerNotifications("textDocument/publishDiagnostics");
+
+    first.host.dispose();
+    first.host.dispose();
+    expect(firstMount?.isConnected).toBe(false);
+    expect(container.contains(hostContent)).toBe(true);
+
+    first.host.forwardServerNotification("textDocument/publishDiagnostics", { uri: MAIN_URI });
+    first.host.serverRestarted();
+    first.host.serverStopped({ message: "stopped", reason: "test" });
+    expect(infoviewMock.serverNotifications).toEqual([]);
+    await expect(firstApi.createRpcSession(MAIN_URI)).rejects.toMatchObject({ name: "AbortError" });
+
+    // A later host can reuse the same container without sharing the old mount.
+    infoviewMock.editorApi = null;
+    const second = await createHarness(container);
+    const mounts = container.querySelectorAll("[data-lean-infoview='mounted']");
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).not.toBe(firstMount);
+    expect(container.contains(hostContent)).toBe(true);
+
+    second.host.dispose();
+    for (const harness of [first, second]) {
+      harness.view.destroy();
+      harness.client.disconnect();
+    }
+  });
 });
