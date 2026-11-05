@@ -9,6 +9,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- The infoview host mounts through `mountInfoview()` when the installed `@leanprover/infoview` provides it, so `dispose()` unmounts the React tree; older releases keep the detach-only fallback.
 - An optional webview `session` in the private editor-platform protocol (`ready`, commands, and `command-result`). The VS Code adapter drops commands from any session other than the current one, including late messages from a replaced webview.
 - `detectLeanLineEnding()` lets hosts persist documents with their original CRLF or LF ending, following VS Code's majority rule; the workspace example keeps each file's ending and stays clean after edit-and-undo.
 - A public-API multi-file workspace example with definition navigation, per-file undo history, revision-checked saves, automatic Lean reconnection, and matching source/packed-browser scenarios.
@@ -41,6 +42,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Raised the CodeMirror dependency floors to the current releases (`@codemirror/state` 6.7.6, `view` 6.43.15, `language` 6.13.1, `commands` 6.11.1, `search` 6.7.2, `autocomplete` 6.20.4, `@lezer/highlight` 1.2.5). `@codemirror/lsp-client` stays pinned at 6.3.0, the latest release.
 - `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document and ranges whose start follows their end are still rejected; ordering is checked before clamping.
 - `createLeanLspClient()` and session clients default to a 20-second request timeout instead of the upstream 3 seconds; pass `timeout` to override it.
 - Direct clients now support one connection. Recreate them after disconnect or use `LeanEditorSession.reconnect()`; this prevents queued upstream operations from crossing connection generations.
