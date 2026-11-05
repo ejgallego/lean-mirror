@@ -62,6 +62,36 @@ describe("platform protocol messages", () => {
     });
   });
 
+  test("accepts an optional webview session on ready, commands, and results", () => {
+    const session = "webview-2";
+    for (const message of [
+      platformMessage("ready", {}),
+      platformMessage("ready", { session }),
+      platformMessage("open-document", { session, uri: "file:///Main.lean" }),
+      platformMessage("document-changed", { session, uri: "file:///Main.lean", text: "x", version: 1 }),
+      platformMessage("restart-service", { session, serviceId: "lean" }),
+      platformMessage("set-active-document", { session, uri: "file:///Main.lean" })
+    ]) {
+      expect(isEditorToHostMessage(message)).toBe(true);
+    }
+    expect(isHostToEditorMessage(platformMessage("command-result", {
+      command: "open-document", handled: true, ok: true, requestId: 1, session
+    } satisfies EditorCommandResult))).toBe(true);
+
+    for (const invalid of [
+      platformMessage("ready", { session: "" }),
+      platformMessage("ready", { session: 2 }),
+      platformMessage("ready", { session, extra: true }),
+      platformMessage("open-document", { session: "", uri: "file:///Main.lean" }),
+      platformMessage("document-changed", { session: null, uri: "file:///Main.lean", text: "x" })
+    ]) {
+      expect(isEditorToHostMessage(invalid)).toBe(false);
+    }
+    expect(isHostToEditorMessage(platformMessage("command-result", {
+      command: "open-document", handled: true, ok: true, requestId: 1, session: 3
+    }))).toBe(false);
+  });
+
   test("rejects unrelated messages", () => {
     expect(isEditorPlatformMessage({ type: "ready" })).toBe(false);
     expect(isEditorPlatformMessage({ protocol: "editor-platform", version: 2, type: "ready" })).toBe(false);
