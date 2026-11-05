@@ -22,6 +22,8 @@ const HELPER_URI = "file:///Helper.lean";
 const infoviewMock = vi.hoisted(() => ({
   clientNotifications: [] as Array<{ method: string; params: unknown }>,
   editorApi: null as unknown,
+  // Set by a test to model an @leanprover/infoview release with mountInfoview().
+  mountInfoview: undefined as unknown,
   serverNotifications: [] as Array<{ method: string; params: unknown }>,
 }));
 
@@ -29,6 +31,9 @@ vi.mock("@leanprover/infoview", () => {
   const complete = async (): Promise<void> => {};
   return {
     defaultInfoviewConfig: {},
+    get mountInfoview() {
+      return infoviewMock.mountInfoview;
+    },
     renderInfoview(editorApi: unknown, container: HTMLElement) {
       infoviewMock.editorApi = editorApi;
       const mounted = document.createElement("div");
@@ -59,6 +64,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   infoviewMock.clientNotifications.length = 0;
   infoviewMock.editorApi = null;
+  infoviewMock.mountInfoview = undefined;
   infoviewMock.serverNotifications.length = 0;
   document.body.innerHTML = "";
 });
@@ -401,6 +407,30 @@ describe("Lean infoview host", () => {
     harness.client.disconnect();
   });
 
+  it.each(["serverRestarted", "dispose"] as const)("aborts a pending RPC connection on %s without creating a keep-alive timer", async (retirement) => {
+    const harness = await createHarness();
+    const setInterval = vi.spyOn(window, "setInterval");
+    let reply!: (value: { sessionId: string }) => void;
+    harness.transport.onRequest(
+      "$/lean/rpc/connect",
+      () => new Promise<{ sessionId: string }>((resolve) => { reply = resolve; }),
+    );
+
+    const session = harness.editorApi.createRpcSession(MAIN_URI);
+    await waitFor(() => harness.transport.requests("$/lean/rpc/connect").length === 1);
+    if (retirement === "serverRestarted") harness.host.serverRestarted();
+    else harness.host.dispose();
+
+    await expect(session).rejects.toMatchObject({ name: "AbortError" });
+    reply({ sessionId: "late" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(setInterval).not.toHaveBeenCalled();
+
+    harness.host.dispose();
+    harness.view.destroy();
+    harness.client.disconnect();
+  });
+
   it("owns Lean RPC keep-alive timers until close or host teardown", async () => {
     const harness = await createHarness();
     const setInterval = vi.spyOn(window, "setInterval");
@@ -500,5 +530,35 @@ describe("Lean infoview host", () => {
       harness.view.destroy();
       harness.client.disconnect();
     }
+  });
+
+  it("unmounts through mountInfoview() when the installed infoview provides it", async () => {
+    const container = document.createElement("div");
+    const dispose = vi.fn();
+    let mountedInto: HTMLElement | null = null;
+    infoviewMock.mountInfoview = (editorApi: unknown, element: HTMLElement) => {
+      mountedInto = element;
+      infoviewMock.editorApi = editorApi;
+      const complete = async (): Promise<void> => {};
+      return {
+        api: {
+          changedCursorLocation: complete, changedInfoviewConfig: complete,
+          initialize: complete, serverRestarted: complete, serverStopped: complete,
+          gotServerNotification: complete, sentClientNotification: complete,
+        },
+        dispose,
+      };
+    };
+    const harness = await createHarness(container);
+    expect(mountedInto).not.toBeNull();
+    expect(container.contains(mountedInto)).toBe(true);
+
+    harness.host.dispose();
+    harness.host.dispose();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(container.contains(mountedInto)).toBe(false);
+
+    harness.view.destroy();
+    harness.client.disconnect();
   });
 });
