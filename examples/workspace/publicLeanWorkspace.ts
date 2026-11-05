@@ -22,10 +22,10 @@ export interface WorkspaceDocumentState {
   saving: boolean;
   error?: string;
 }
-/** Whether Lean is still processing a document; independent of the connection. */
+/** Lean's processing outcome for a document; independent of the connection. */
 export interface WorkspaceCheckingState {
   uri: string;
-  checking: boolean;
+  phase: "checking" | "checked" | "failed";
 }
 export interface MountLeanWorkspaceOptions {
   documents: readonly WorkspaceDocument[];
@@ -103,7 +103,7 @@ export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedL
   let activeUri = first.uri;
   let socket: WebSocket | null = null;
   let disposed = false;
-  let reconnecting: Promise<void> | null = null;
+  let connecting: Promise<void> | null = null;
   let saving: Promise<void> | null = null;
 
   function emitDocument(entry: DocumentEntry): void {
@@ -117,7 +117,10 @@ export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedL
   const fileProgress = leanFileProgress({
     onUpdate(update) {
       if (!disposed && update.uri && documents.has(update.uri)) {
-        options.onCheckingState?.({ uri: update.uri, checking: update.state?.isProcessing ?? false });
+        options.onCheckingState?.({
+          uri: update.uri,
+          phase: update.state?.hasFatalError ? "failed" : update.state?.isProcessing ? "checking" : "checked",
+        });
       }
     },
   });
@@ -217,7 +220,7 @@ export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedL
       });
       await connection.initialized;
       next.addEventListener("close", () => {
-        if (!disposed && socket === next && !reconnecting) {
+        if (!disposed && socket === next && !connecting) {
           void reconnect("Lean server connection closed.").catch(() => undefined);
         }
       }, { once: true });
@@ -249,19 +252,24 @@ export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedL
     throw lastError;
   }
 
+  /** Startup and reconnect share one task, including its pending socket and retries. */
+  function startConnecting(): Promise<void> {
+    const task = connectWithRetries();
+    connecting = task;
+    void task.finally(() => {
+      if (connecting === task) connecting = null;
+    }).catch(() => undefined);
+    return task;
+  }
+
   function reconnect(reason = "Reconnect requested"): Promise<void> {
     if (disposed) return Promise.reject(workspaceDisposedError());
-    if (reconnecting) return reconnecting;
+    if (connecting) return connecting;
     options.onReconnectStart?.(reason);
     infoview.serverStopped({ message: "Lean is reconnecting.", reason });
     // Detach old plugins and RPC work immediately; editor documents and history stay mounted.
     session.disconnect();
-    const task = connectWithRetries();
-    reconnecting = task;
-    void task.finally(() => {
-      if (reconnecting === task) reconnecting = null;
-    }).catch(() => undefined);
-    return task;
+    return startConnecting();
   }
 
   function saveAll(): Promise<void> {
@@ -314,7 +322,7 @@ export function mountLeanWorkspace(options: MountLeanWorkspaceOptions): MountedL
   options.signal?.addEventListener("abort", dispose, { once: true });
   showDocument(activeUri);
   for (const entry of documents.values()) emitDocument(entry);
-  const ready = connectWithRetries();
+  const ready = startConnecting();
   // Callers may ignore `ready`; failures are also reported through onError.
   void ready.catch(() => undefined);
 

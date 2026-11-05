@@ -77,6 +77,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- The workspace example shares pending startup with reconnect requests, so disposal closes the connection and rejects every waiter. Fatal Lean progress now shows a failed check and recovers after correcting the document.
 - Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
 - The private VS Code adapter no longer drops every document change after a webview reload. Each `ready` starts a new webview epoch: earlier queued commands do not run, and earlier handlers do not reply into the reloaded webview.
 - `LeanWorkspace.unloadDocument()` reports `"in-use"` while a server-document lease is still loading that URI, and `applyLeanWorkspaceEdit()` fails instead of reporting success when a target is unloaded during its load.

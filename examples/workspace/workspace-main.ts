@@ -8,7 +8,7 @@ const element = <T extends HTMLElement>(selector: string): T => {
   return value;
 };
 const states = new Map<string, WorkspaceDocumentState>();
-const checking = new Set<string>();
+const checking = new Map<string, "checking" | "failed">();
 let workspace: MountedLeanWorkspace | null = null;
 const status = element("#connection-status");
 const checkingStatus = element("#checking-status");
@@ -23,7 +23,7 @@ async function snapshot(uri: string): Promise<WorkspaceDocument> {
   return readSnapshot(await response.json());
 }
 const fileName = (uri: string): string => uri.split("/").at(-1) ?? uri;
-function showChecking(text: string, phase: "waiting" | "checking" | "checked"): void {
+function showChecking(text: string, phase: "waiting" | "checking" | "checked" | "failed"): void {
   checkingStatus.textContent = text;
   checkingStatus.dataset.phase = phase;
 }
@@ -81,10 +81,12 @@ async function start(): Promise<void> {
           [...states.values()].some((entry) => entry.dirty) ? "Unsaved changes" : "All changes saved");
     },
     onCheckingState(state) {
-      if (state.checking) checking.add(state.uri);
-      else checking.delete(state.uri);
+      if (state.phase === "checked") checking.delete(state.uri);
+      else checking.set(state.uri, state.phase);
       // Connection readiness is separate: a ready transport may still be elaborating.
-      if (checking.size > 0) showChecking("Checking " + [...checking].map(fileName).join(", ") + "…", "checking");
+      const failed = [...checking].filter(([, phase]) => phase === "failed").map(([uri]) => fileName(uri));
+      if (failed.length > 0) showChecking("Checking failed: " + failed.join(", "), "failed");
+      else if (checking.size > 0) showChecking("Checking " + [...checking.keys()].map(fileName).join(", ") + "…", "checking");
       else showChecking("Checked", "checked");
     },
     onSessionState(state) {

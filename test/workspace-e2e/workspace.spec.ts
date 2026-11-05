@@ -113,6 +113,28 @@ test("reports Lean checking separately from the connection", async ({ page }) =>
   await expect(page.locator("#connection-status")).toHaveText("Ready");
 });
 
+test("reports fatal checking and recovers after correcting a missing import", async ({ page }) => {
+  await page.goto(pagePath);
+  const checking = page.locator("#checking-status");
+  const connection = page.locator("#connection-status");
+  await expect(connection).toHaveText("Ready");
+  await expect(checking).toHaveText("Checked");
+  const content = page.locator("#workspace-editor .workspace-editor-panel:not([hidden]) .cm-content");
+  await content.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.insertText("import ReviewDefinitelyMissingModule\n");
+  await expect(checking).toHaveAttribute("data-phase", "failed");
+  await expect(checking).toHaveText("Checking failed: Main.lean");
+  await expect(connection).toHaveText("Ready");
+
+  await content.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.insertText("#check Nat\n");
+  await expect(checking).toHaveText("Checked");
+  await expect(content.locator("..").locator(".cm-lintRange-error")).toHaveCount(0);
+  await expect(connection).toHaveText("Ready");
+});
+
 test("keeps local edits when another client changes the disk revision", async ({ page, request }) => {
   await page.goto(pagePath);
   await expect(page.locator("#connection-status")).toHaveText("Ready");

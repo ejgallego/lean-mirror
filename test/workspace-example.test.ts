@@ -25,13 +25,26 @@ vi.mock("@leanprover/infoview", () => {
 /** A WebSocket that never opens until the test closes it. */
 class PendingWebSocket extends EventTarget {
   static readonly instances: PendingWebSocket[] = [];
+  readonly sent: Array<{ id?: number; method?: string }> = [];
   readyState = 0;
   constructor(readonly url: string) {
     super();
     PendingWebSocket.instances.push(this);
   }
-  send(): void {
-    throw new Error("A pending socket must not send.");
+  send(data: string): void {
+    if (this.readyState !== 1) throw new Error("A pending socket must not send.");
+    this.sent.push(JSON.parse(data));
+  }
+  open(): void {
+    this.readyState = 1;
+    this.dispatchEvent(new Event("open"));
+  }
+  initialize(): void {
+    const request = this.sent.find(message => message.method === "initialize");
+    if (!request) throw new Error("Expected an initialize request.");
+    this.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { capabilities: {} } }),
+    }));
   }
   close(): void {
     if (this.readyState === 3) return;
@@ -118,5 +131,44 @@ describe("workspace example host lifecycle", () => {
     expect(() => mountLeanWorkspace(options)).toThrow(expect.objectContaining({ name: "AbortError" }));
     expect(PendingWebSocket.instances).toHaveLength(0);
     expect(editorContainer.childElementCount).toBe(0);
+  });
+
+  it.each(["dispose", "signal"] as const)("shares pending startup with reconnect and cancels through %s", async (via) => {
+    const controller = new AbortController();
+    const { options } = mountOptions({ signal: controller.signal });
+    const workspace = mountLeanWorkspace(options);
+    const retry = workspace.reconnect();
+    void retry.catch(() => undefined);
+    try {
+      expect(PendingWebSocket.instances).toHaveLength(1);
+      if (via === "dispose") workspace.dispose();
+      else controller.abort();
+      expect(PendingWebSocket.instances.every(socket => socket.readyState === 3)).toBe(true);
+      await expect(workspace.ready).rejects.toMatchObject({ name: "AbortError" });
+      await expect(retry).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      workspace.dispose();
+      for (const socket of PendingWebSocket.instances) socket.close();
+    }
+  });
+
+  it("shares initialization with reconnect until the first connection is ready", async () => {
+    const { options } = mountOptions();
+    const workspace = mountLeanWorkspace(options);
+    const socket = PendingWebSocket.instances[0]!;
+    try {
+      socket.open();
+      await vi.waitFor(() => expect(socket.sent.some(message => message.method === "initialize")).toBe(true));
+      expect(workspace.session.state.phase).toBe("initializing");
+      const retry = workspace.reconnect();
+      void retry.catch(() => undefined);
+      expect(PendingWebSocket.instances).toHaveLength(1);
+      socket.initialize();
+      await Promise.all([workspace.ready, retry]);
+      expect(workspace.session.state).toMatchObject({ phase: "ready", generation: 1 });
+      expect(PendingWebSocket.instances).toHaveLength(1);
+    } finally {
+      workspace.dispose();
+    }
   });
 });
