@@ -17,6 +17,7 @@ import type {
   WorkspaceEdit,
 } from "vscode-languageserver-protocol";
 import { captureClientOperation } from "./clientLifetime.js";
+import { mappingStartDocument } from "./lspClientInternals.js";
 
 export interface LeanWorkspaceEditOptions {
   /**
@@ -132,13 +133,6 @@ function clampPosition(doc: Text, position: Position): Position | null {
 function positionToOffset(doc: Text, position: Position): number | null {
   const clamped = clampPosition(doc, position);
   return clamped ? doc.line(clamped.line + 1).from + clamped.character : null;
-}
-
-function mappingStartDocument(mapping: WorkspaceMapping, uri: string): Text | null {
-  const startDocs = (
-    mapping as unknown as { startDocs?: Map<string, Text> }
-  ).startDocs;
-  return startDocs instanceof Map ? startDocs.get(uri) ?? null : null;
 }
 
 function mappedPosition(

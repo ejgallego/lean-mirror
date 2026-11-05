@@ -10,8 +10,9 @@ generations, editor bindings, and document synchronization.
   top-level export. The `/codemirror` entry passes through official upstream APIs.
 - Keep React and `@leanprover/infoview` outside the core entry's dependency graph.
 - `@codemirror/lsp-client` is pinned because workspace mapping uses guarded
-  internal registries. An upgrade must exercise late-loaded files and edits made
-  while requests are in flight.
+  internal registries, all read in `src/lspClientInternals.ts`. An upgrade must
+  pass its canary `test/lsp-client-internals.test.ts` and exercise late-loaded
+  files and edits made while requests are in flight.
 - The private platform packages are shared with `verso-mirror`. Keep editor and
   process-specific policy in the hosts. Use `docs/editor-platform.md` when
   changing that shared boundary.
