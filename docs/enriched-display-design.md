@@ -4,6 +4,11 @@ Status: proposal, 2026-11-06. The [use cases](enriched-display-use-cases.md) gov
 the design. No wire API, upstream Lean feature, mathematical translator, or new
 shared package described here is implemented by this document.
 
+The [first native worker experiment](reviews/2026-11-06-snapshot-display.md) now
+verifies the syntax-outline path, configurable command selection and partial
+progress. Its endpoint is an isolated probe, not the proposed public contract.
+Declaration ownership and contextual statement details are the next experiment.
+
 ## Information flow
 
 ```mermaid

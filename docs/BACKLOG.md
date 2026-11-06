@@ -9,8 +9,11 @@ proposals; the items below record existing implementation follow-ups.
 The [use cases](enriched-display-use-cases.md) make enriched display a central
 product direction. Follow the [design sequence](enriched-display-design.md):
 
-- Select a real Lean declaration fixture and a Verso structural consumer fixture.
-- Probe snapshot metadata for statement/proof/documentation boundaries and partial analysis.
+- The [first native worker probe](reviews/2026-11-06-snapshot-display.md) verifies
+  syntax boundaries, request-local policies, original-source ranges and partial
+  analysis on a Lean declaration fixture.
+- Resolve declaration ownership and contextual statement details, including
+  private/generated names and mutual commands; add a real Verso consumer fixture.
 - Design a versioned information contract and configurable backend summary policies.
 - Build one enriched display slice with source reveal and dynamic expansion;
   verify faithful rendering, current revisions, source preservation and recovery.
