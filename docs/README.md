@@ -1,6 +1,8 @@
 # Docs
 
 - [PROJECT_GOALS.md](./PROJECT_GOALS.md): working recap of project goals, user workflows, boundaries, and proposed next slices
+- [enriched-display-use-cases.md](./enriched-display-use-cases.md): theorem math, inline documentation, configurable summaries and expansion
+- [enriched-display-design.md](./enriched-display-design.md): proposed snapshot information contract and Lean/Verso integration
 - [DEVELOPMENT.md](./DEVELOPMENT.md): setup, verification matrix, and takeover baseline
 - [API.md](./API.md): experimental top-level API and the explicit CodeMirror passthrough subpath
 - [RELEASING.md](./RELEASING.md): release and packaging verification flow

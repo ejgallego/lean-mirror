@@ -4,6 +4,20 @@ Use the [project goals and use cases](PROJECT_GOALS.md) to choose a concrete
 authoring workflow before expanding infrastructure. Its next slices are
 proposals; the items below record existing implementation follow-ups.
 
+## Enriched document display
+
+The [use cases](enriched-display-use-cases.md) make enriched display a central
+product direction. Follow the [design sequence](enriched-display-design.md):
+
+- Select a real Lean declaration fixture and a Verso structural consumer fixture.
+- Probe snapshot metadata for statement/proof/documentation boundaries and partial analysis.
+- Design a versioned information contract and configurable backend summary policies.
+- Build one enriched display slice with source reveal and dynamic expansion;
+  verify faithful rendering, current revisions, source preservation and recovery.
+
+Infoview ownership integration can proceed in parallel when an upstream build
+is available. A VS Code host is optional for these workflows.
+
 ## Real Lean server coverage
 
 - Expand real Lean-server coverage beyond the current single-file and multi-file workspace experiments when a concrete host workflow exposes a new risk. Current real-server paths cover hover, references, rename, rendered semantic tokens, file progress, versioned diagnostic recovery, cross-file close/unload/reopen behavior, and an isolated packed browser consumer with infoview reconnection.

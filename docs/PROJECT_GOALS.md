@@ -7,15 +7,17 @@ slice, rather than a commitment to implement every candidate below.
 ## Purpose
 
 Make Lean checking and Verso authoring available inside applications where
-people work with code, proofs, and technical documents. The editors should give
-users useful feedback while preserving their work through incomplete syntax,
+people work with code, proofs, and technical documents. Enrich Lean source with
+mathematical theorem statements, inline documentation, and dynamically expandable
+summaries, driven by structural information from actual Lean snapshots. The
+editors should preserve users' work through incomplete syntax,
 slow checking, server restarts, and changes to generated artifacts.
 
 The two editor projects address complementary tasks:
 
 | Component | User task or responsibility | Reusable result |
 | --- | --- | --- |
-| `lean-mirror` | Edit Lean source inside a browser application, including projects with several files | Lean support for CodeMirror, client generations, document synchronization, navigation, edits, and an optional official infoview |
+| `lean-mirror` | Edit and read Lean source inside a browser application, including projects with several files | Lean support for CodeMirror, navigation, edits, client lifetimes, and an optional official infoview; snapshot-driven enriched display is the next product goal |
 | `verso-mirror` | Edit a Verso document through structured authoring while retaining its Lean source | Verso-specific projection, editing, source preservation, and Lean-backed analysis |
 | Private `editor-platform` packages | Present document/service state, diagnostics and logs, and exchange host commands | Small support APIs shared by the two editors |
 | `vscode-lean4` / official infoview | Supply upstream editor integration and the infoview components reused by `lean-mirror` | An upstream integration boundary; a separate VS Code host for these editors remains a possible application |
@@ -26,6 +28,25 @@ a Verso code block is a possible future use case that would need its own design
 and acceptance criteria.
 
 ## Workflows that should drive development
+
+### Enriched Lean document display
+
+A reader sees mathematical theorem statements rendered with KaTeX, documentation
+inline, and a configurable selection of core lemmas. Supporting declarations,
+proofs and source expand on demand. An author moves from that reading view into
+source editing without rewriting the underlying file.
+
+Lean provides the structural information from its worker snapshots through pull
+requests or subscriptions. Backend selection is configurable: annotations and
+pins, structural filters, and dependency/relevance policies are useful options.
+The editor preserves source access, revision correctness and reader expansion.
+This information boundary overlaps with Verso's need for structured worker data.
+
+The [use-case document](enriched-display-use-cases.md) defines the requirements;
+the [design exploration](enriched-display-design.md) develops the backend/editor
+contract, rendering questions and a proposed implementation sequence. Enriched
+display is a goal; the general mathematical translator and protocol remain to be
+designed and validated.
 
 ### Browser Lean editing
 
@@ -107,24 +128,20 @@ shared parser, new transport, or a general-purpose IDE framework.
 
 ## Proposed next slices
 
-1. **Complete the actual infoview lifetime integration.** Work on the assumption
-   that upstream ownership/disposal support will land shortly. The local adapter
-   already detects `mountInfoview()` when available; its owning path currently
-   has mock coverage and the installed renderer uses the documented fallback.
-   Test an actual candidate or released upstream build before raising the
-   dependency floor or removing compatibility code. Acceptance: mount, operate,
-   dispose, and remount through public package entries; React effect cleanups run;
-   owned requests and timers retire; the production bundle uses the owning API.
-   The exact upstream release and availability remain assumptions to verify.
-2. **Choose and improve one real authoring session.** Use a real document or
-   consumer beyond the small demonstration fixtures. A candidate Lean scenario
-   is a multi-file proof edit with infoview actions, a save, a server restart,
-   and reopening the saved result. A candidate Verso scenario is an edit to prose
-   and a structured directive, an incomplete intermediate form, and byte-for-byte
-   preservation of untouched source after analysis catches up. Record
-   friction before adding general abstractions. Acceptance should cover source
-   preservation, selection/undo, current diagnostics, and understandable status.
-   Verso implementation changes are coordinated in its repository.
+1. **Design and demonstrate snapshot-driven enriched display.** Choose the real
+   Lean and Verso fixtures in the [use cases](enriched-display-use-cases.md), probe
+   available worker metadata, and design the common information boundary. Build
+   a first slice with a supported mathematical statement form, inline docs,
+   configurable backend selection and dynamic source/proof expansion. Validate
+   source preservation, stale-result rejection, partial checking, selection/undo
+   and error visibility through a real authoring sequence.
+2. **Complete the actual infoview lifetime integration in parallel.** Assume
+   upstream ownership/disposal support will land shortly. The local adapter
+   already detects `mountInfoview()` when available; validate a real candidate or
+   released build before changing the dependency floor or compatibility code.
+   Acceptance: mount, operate, dispose, and remount through public entries; React
+   effect cleanups run; owned requests/timers retire; the production bundle uses
+   the owning API. Release availability remains an assumption to verify.
 3. **Keep maintenance bounded.** Triage the inherited development dependency
    audit findings by the affected execution path, update dependencies with
    relevant verification, and reconcile stale backlog entries. Broader extraction
@@ -136,9 +153,12 @@ No frontend editing-model replacement or new host is implied by this recap.
 
 ## Discussion with the vscode-lean4 maintainer
 
-The immediate upstream request is a supported infoview lifetime boundary that
-browser hosts can consume. Useful points to settle with Marc are:
+The next discussion should cover the Lean–editor structural information boundary
+as well as the infoview lifetime API. Useful points to settle with Marc and,
+where appropriate, the Lean and Verso maintainers are:
 
+- supported snapshot-summary access and progress/invalidation delivery, including
+  declaration and documentation metadata, partial results and revision identity;
 - the mount handle and disposal contract, including repeated disposal and widget
   effect cleanup;
 - notification, RPC, and cancellation responsibilities during server restart;
