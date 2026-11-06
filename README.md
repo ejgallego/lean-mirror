@@ -2,6 +2,9 @@
 
 Lean 4 language support for CodeMirror 6, built around the official `@codemirror/lsp-client`.
 
+See the [project goals and use cases](docs/PROJECT_GOALS.md) for how this toolkit,
+`verso-mirror`, the shared platform, and upstream infoview work fit together.
+
 The top-level package export is intentionally Lean-focused. If you want raw `@codemirror/lsp-client` building blocks, use the explicit `codemirror-lean4-lsp/codemirror` subpath.
 
 This package stays intentionally thin:
