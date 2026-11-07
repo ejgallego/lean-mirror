@@ -4,6 +4,12 @@ Working recap, 2026-11-06. This document separates existing responsibilities
 from proposed priorities. It is a starting point for choosing the next product
 slice, rather than a commitment to implement every candidate below.
 
+The enriched-display workflow is under review as of 2026-11-07. Its snapshot
+basis and configurable backend selection are agreed; the reading-first
+presentation below is provisional. The side-by-side experiment demonstrates
+extraction and does not define the target authoring experience. See the
+[use-case interpretation note](enriched-display-use-cases.md).
+
 ## Purpose
 
 Make Lean checking and Verso authoring available inside applications where

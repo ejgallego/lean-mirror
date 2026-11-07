@@ -6,7 +6,13 @@ import {
   highlightActiveLine,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { leanFallbackLanguageSupport } from "../../../src/language.ts";
+import {
+  createLeanEditorSession,
+  createLeanWorkspace,
+  createWebSocketTransport,
+  waitForWebSocketOpen,
+  lean4,
+} from "../../../src/index.ts";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
@@ -18,45 +24,47 @@ let socket,
   editor,
   session,
   ready = false,
-  version = 1,
+  editSequence = 0,
   generation = 0,
-  nextId = 0;
+  leanSession;
 let timer, currentRequest;
-const pending = new Map();
 function element(tag, text, className) {
   const el = document.createElement(tag);
   if (text !== undefined) el.textContent = text;
   if (className) el.className = className;
   return el;
 }
-function send(message) {
-  socket.send(JSON.stringify({ jsonrpc: "2.0", ...message }));
-}
-function request(method, params) {
-  const id = ++nextId;
-  const promise = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      pending.delete(id);
-      if (socket.readyState === WebSocket.OPEN)
-        send({ method: "$/cancelRequest", params: { id } });
-      reject(new Error("Lean did not respond. Try Refresh view."));
-    }, 15000);
-    pending.set(id, { resolve, reject, timeout });
-    send({ id, method, params });
-  });
-  return { id, promise };
-}
 function cancelCurrent() {
-  if (!currentRequest) return;
-  const id = currentRequest.id;
-  const p = pending.get(id);
-  if (p) {
-    send({ method: "$/cancelRequest", params: { id } });
-    pending.delete(id);
-    clearTimeout(p.timeout);
-    p.reject(new Error("Superseded"));
-  }
+  if (currentRequest)
+    currentRequest.client.cancelRequest(currentRequest.params);
   currentRequest = undefined;
+}
+function showDiagnostics(client, params) {
+  const file = client.workspace.getFile(session.uri);
+  if (
+    params.uri !== session.uri ||
+    !file ||
+    params.version !== file.version ||
+    !editor ||
+    !file.doc.eq(editor.state.doc)
+  )
+    return false;
+  const panel = $("#diagnostics");
+  panel.replaceChildren(
+    ...params.diagnostics.map((d) =>
+      element(
+        "p",
+        `Line ${d.range.start.line + 1}: ${d.message}`,
+        d.severity === 1 ? "error" : "message",
+      ),
+    ),
+  );
+  if (!params.diagnostics.length)
+    panel.append(
+      element("p", `No diagnostics reported for revision ${params.version}.`),
+    );
+  panel.dataset.version = String(params.version);
+  return false; // Also let the library update editor diagnostics.
 }
 function invalidate(message) {
   generation++;
@@ -68,9 +76,7 @@ function invalidate(message) {
 }
 function schedule() {
   invalidate("Updating the document view…");
-  status.textContent = ready
-    ? `Reading revision ${version}…`
-    : "Waiting for Lean…";
+  status.textContent = ready ? "Updating Lean…" : "Waiting for Lean…";
   if (ready) timer = setTimeout(() => refresh(generation), 200);
 }
 function render(response, source) {
@@ -144,8 +150,14 @@ function render(response, source) {
 }
 async function refresh(ticket) {
   if (!ready || ticket !== generation) return;
+  const client = leanSession.client;
+  client.sync();
+  const file = client.workspace.getFile(session.uri);
+  if (!file) return;
   const source = editor.state.doc.toString(),
-    capturedVersion = version;
+    capturedVersion = file.version,
+    capturedEditSequence = editSequence;
+  $("#revision").textContent = `Revision ${capturedVersion}`;
   const selectedPolicy = policy.value,
     selectedNames = names.value
       .split(",")
@@ -154,15 +166,24 @@ async function refresh(ticket) {
   try {
     for (let attempt = 0; attempt < 20 && ticket === generation; attempt++) {
       status.textContent = `Reading revision ${capturedVersion}…`;
-      currentRequest = request("$/leanMirror/displayProbe", {
+      const params = {
         textDocument: { uri: session.uri, version: capturedVersion },
         source,
         waitMs: 1000,
         policy: selectedPolicy,
         names: selectedNames,
-      });
-      const response = await currentRequest.promise;
-      if (ticket !== generation || !ready || capturedVersion !== version)
+      };
+      currentRequest = { client, params };
+      const response = await client.request(
+        "$/leanMirror/displayProbe",
+        params,
+      );
+      if (
+        ticket !== generation ||
+        !ready ||
+        capturedEditSequence !== editSequence ||
+        client !== leanSession.client
+      )
         return;
       currentRequest = undefined;
       if (response.version !== capturedVersion)
@@ -198,11 +219,6 @@ function disconnected() {
   delete outline.dataset.snapshotStatus;
   generation++;
   clearTimeout(timer);
-  for (const p of pending.values()) {
-    clearTimeout(p.timeout);
-    p.reject(new Error("Disconnected"));
-  }
-  pending.clear();
   currentRequest = undefined;
   outline.replaceChildren(
     element(
@@ -212,11 +228,26 @@ function disconnected() {
     ),
   );
   status.textContent = "Disconnected";
+  $("#diagnostics").replaceChildren(
+    element("p", "Lean disconnected; diagnostics unavailable."),
+  );
+  delete $("#diagnostics").dataset.version;
 }
 async function start() {
   const response = await fetch("/session");
   if (!response.ok) throw new Error("Cannot load demo session");
   session = await response.json();
+  leanSession = createLeanEditorSession({
+    client: {
+      rootUri: session.rootUri,
+      workspace: createLeanWorkspace({
+        displayDocument: async (uri) => (uri === session.uri ? editor : null),
+      }),
+      notificationHandlers: {
+        "textDocument/publishDiagnostics": showDiagnostics,
+      },
+    },
+  });
   editor = new EditorView({
     parent: $("#editor"),
     state: EditorState.create({
@@ -226,69 +257,27 @@ async function start() {
         highlightActiveLine(),
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        leanFallbackLanguageSupport(),
+        ...lean4({ session: leanSession, uri: session.uri }),
         EditorView.contentAttributes.of({ "aria-label": "Lean source" }),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
-          version++;
-          $("#revision").textContent = `Revision ${version}`;
-          if (ready)
-            send({
-              method: "textDocument/didChange",
-              params: {
-                textDocument: { uri: session.uri, version },
-                contentChanges: [{ text: editor.state.doc.toString() }],
-              },
-            });
+          editSequence++;
+          $("#revision").textContent = "Edited · synchronizing";
+          $("#diagnostics").replaceChildren(
+            element("p", "Waiting for diagnostics for this edit…"),
+          );
+          delete $("#diagnostics").dataset.version;
           schedule();
         }),
       ],
     }),
   });
   socket = new WebSocket(`ws://${location.host}/lsp`);
-  socket.addEventListener("message", (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.method) {
-      if (msg.id !== undefined)
-        send({
-          id: msg.id,
-          error: { code: -32601, message: "Unsupported client method" },
-        });
-      return;
-    }
-    const p = pending.get(msg.id);
-    if (!p) return;
-    pending.delete(msg.id);
-    clearTimeout(p.timeout);
-    msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
-  });
   socket.addEventListener("close", disconnected);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener(
-      "error",
-      () => reject(new Error("Cannot connect to Lean")),
-      { once: true },
-    );
-  });
-  await request("initialize", {
-    processId: null,
-    rootUri: session.rootUri,
-    capabilities: {},
-    initializationOptions: { hasWidgets: false },
-  }).promise;
-  send({ method: "initialized", params: {} });
-  send({
-    method: "textDocument/didOpen",
-    params: {
-      textDocument: {
-        uri: session.uri,
-        version,
-        languageId: "lean4",
-        text: editor.state.doc.toString(),
-      },
-    },
-  });
+  await waitForWebSocketOpen(socket);
+  await leanSession.connect(createWebSocketTransport(socket), {
+    disposeTransport: () => socket.close(),
+  }).initialized;
   ready = true;
   schedule();
 }
@@ -299,8 +288,9 @@ policy.addEventListener("change", () => {
 names.addEventListener("input", schedule);
 $("#refresh").addEventListener("click", schedule);
 window.addEventListener("pagehide", () => {
-  socket?.close();
   editor?.destroy();
+  leanSession?.dispose();
+  socket?.close();
 });
 start().catch((error) => {
   status.textContent = error.message;

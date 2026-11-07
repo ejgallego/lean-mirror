@@ -26,10 +26,14 @@ The server listens only on loopback. Stop it with Ctrl-C.
 
 Each browser connection owns a separate Lean server session (maximum four).
 The host reuses `demo/server/lspProcessBridge.mjs` for framing, bounded queues and
-shutdown. The small browser protocol client is experiment-local; it is not a new
-shared transport. Reload after a disconnection to create a fresh session.
+shutdown. The browser uses the existing lean-mirror editor session, document
+synchronization, diagnostics, hover and completion integration. Snapshot requests
+use that same client and its synchronized document version. Reload after a
+disconnection to create a fresh session.
 
-Statements remain original Lean syntax; contextual parameters, proof validity,
+A proof-only edit may leave the outline unchanged, but Lean diagnostics appear
+below the source and as editor underlines. Statements remain original Lean syntax;
+contextual parameters, an independent proof-validity verdict,
 KaTeX translation and structured documentation rendering are not implemented.
 Documentation is displayed as text. Selection remains at command granularity.
 Partial snapshots trigger at most 20 bounded pulls, then require manual refresh.
@@ -44,8 +48,8 @@ PLAYWRIGHT_BROWSERS_PATH=/path/to/installed/playwright-browsers \
 
 Omit the environment variable when using Playwright's default browser location.
 The test checks real worker output, selection policies, expansion, source
-navigation, edits/undo, narrow-screen overflow and preservation of the on-disk
-fixture. It writes ignored desktop/mobile screenshots. This test is separate
+navigation, edits/undo, proof errors and recovery, Lean hover, narrow-screen
+overflow and preservation of the on-disk fixture. It writes ignored desktop/mobile screenshots. This test is separate
 from the native protocol checks below and is not part of default CI.
 
 ## Run

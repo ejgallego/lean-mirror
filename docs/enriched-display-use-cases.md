@@ -5,6 +5,20 @@ Working requirements, 2026-11-06. This is a central product direction for
 `verso-mirror`. The companion [design exploration](enriched-display-design.md)
 records candidate mechanisms and questions to resolve before implementation.
 
+**Interpretation under review (2026-11-07).** The agreed direction is enriched
+Lean document display using actual snapshot structure: mathematical theorem
+statements, inline documentation, and dynamically expandable summaries with
+configurable backend selection. The reading-first workflow and detailed
+acceptance scenarios below are proposals, not settled product requirements.
+The experiment's separate outline pane, command cards, name filter and default
+proof collapsing are prototype choices. They do not settle where enrichment
+belongs or how it should interact with editing.
+
+Ordinary Lean feedback remains a baseline: changing a proof must still expose
+diagnostics and support normal editor interaction, even when the displayed
+statement does not change. The next design discussion should settle the primary
+editing workflow and placement of enrichment before expanding the prototype UI.
+
 ## Goal and governing constraint
 
 Let a reader understand and navigate a Lean development as a mathematical

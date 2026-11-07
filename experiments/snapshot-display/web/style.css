@@ -326,3 +326,21 @@ footer {
     flex-direction: column;
   }
 }
+
+#diagnostics {
+  max-height: 150px;
+  overflow: auto;
+  padding: 8px 25px;
+  border-top: 1px solid #dce3d9;
+  font:
+    12px/1.5 ui-monospace,
+    monospace;
+}
+#diagnostics p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#diagnostics .error {
+  color: #a43629;
+}
