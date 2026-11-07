@@ -3,7 +3,50 @@
 This isolated Lean 4.34.1 experiment extracts display information from the real
 file worker. It implements the first backend experiment in the
 [enriched display design](../../docs/enriched-display-design.md); it is not a
-public library API or a display renderer.
+public library API. An optional browser demo presents the extracted source
+statements and documentation alongside an editable CodeMirror document.
+
+## Browser demo
+
+Install the repository's npm dependencies if needed, then from the repository root:
+
+```sh
+(cd experiments/snapshot-display && lake build DisplayProbe:shared)
+node experiments/snapshot-display/serve.mjs
+```
+
+Open **http://127.0.0.1:5281**. Use `SNAPSHOT_DEMO_PORT` to choose another port.
+The server listens only on loopback. Stop it with Ctrl-C.
+
+- Switch between theorems, all commands, or comma-separated written names.
+- Expand source/proof details or locate a command in the source editor.
+- Expand the other commands without changing the backend selection policy.
+- Edit or undo in the source editor; the outline is invalidated immediately and
+  refreshed from the worker for the new revision. Edits are in memory only.
+
+Each browser connection owns a separate Lean server session (maximum four).
+The host reuses `demo/server/lspProcessBridge.mjs` for framing, bounded queues and
+shutdown. The small browser protocol client is experiment-local; it is not a new
+shared transport. Reload after a disconnection to create a fresh session.
+
+Statements remain original Lean syntax; contextual parameters, proof validity,
+KaTeX translation and structured documentation rendering are not implemented.
+Documentation is displayed as text. Selection remains at command granularity.
+Partial snapshots trigger at most 20 bounded pulls, then require manual refresh.
+Reader expansion resets when a new summary arrives.
+
+With the server running, verify browser behavior from the repository root:
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=/path/to/installed/playwright-browsers \
+  node experiments/snapshot-display/test-browser.mjs
+```
+
+Omit the environment variable when using Playwright's default browser location.
+The test checks real worker output, selection policies, expansion, source
+navigation, edits/undo, narrow-screen overflow and preservation of the on-disk
+fixture. It writes ignored desktop/mobile screenshots. This test is separate
+from the native protocol checks below and is not part of default CI.
 
 ## Run
 

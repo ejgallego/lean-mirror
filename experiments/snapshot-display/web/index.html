@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Lean · Document view</title>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">λ <span>lean / mirror</span></a
+      ><span class="badge">EXPERIMENT 01</span>
+    </header>
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">FROM SOURCE TO STRUCTURE</p>
+          <h1>A clearer view of the proof.</h1>
+          <p class="lede">
+            Read the statements. Explore the details. Keep the source within
+            reach.
+          </p>
+        </div>
+        <div class="connection">
+          <span id="status" role="status">Connecting to Lean…</span
+          ><button id="refresh" type="button">Refresh view ↻</button>
+        </div>
+      </section>
+      <section class="workspace">
+        <div class="source-pane">
+          <div class="pane-heading">
+            <div>
+              <span class="eyebrow">01 / SOURCE</span>
+              <h2>Fixture.lean</h2>
+            </div>
+            <span id="revision">Revision 1</span>
+          </div>
+          <div id="editor"></div>
+          <p class="source-note">
+            Edits stay in this tab. The file on disk is unchanged.
+          </p>
+        </div>
+        <div class="reader-pane">
+          <div class="pane-heading">
+            <div>
+              <span class="eyebrow">02 / DOCUMENT</span>
+              <h2>The mathematical outline</h2>
+            </div>
+            <span class="live">LIVE SNAPSHOTS</span>
+          </div>
+          <div class="controls">
+            <label
+              >Show
+              <select id="policy">
+                <option value="theorems">Theorems</option>
+                <option value="all">All commands</option>
+                <option value="names">Named declarations</option>
+              </select></label
+            ><label id="names-label" hidden
+              >Names
+              <input
+                id="names"
+                value="identity_eq"
+                placeholder="identity_eq, local_eq"
+            /></label>
+          </div>
+          <p class="scope">
+            Original Lean statements · proof status not assessed
+          </p>
+          <div id="outline" aria-live="polite">
+            <p class="empty">Waiting for the first worker snapshot…</p>
+          </div>
+        </div>
+      </section>
+      <footer>
+        <span>Structure from Lean’s file worker. No second parser.</span
+        ><span>Snapshot display / research preview</span>
+      </footer>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
