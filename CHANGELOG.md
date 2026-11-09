@@ -77,6 +77,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- Reconnecting cancels pending completions before detaching their editor state, and retired requests carry the LSP cancellation code. The infoview rejects new RPCs while stopped, including while an old client still exists.
+
 - The full demo preserves Rust source and per-file undo history across file switches, reconnects rust-analyzer after transport loss, isolates recreated Rust widget sessions, and rejects conflicting Rust-driver disk saves.
 
 - The workspace example shares pending startup with reconnect requests, so disposal closes the connection and rejects every waiter. Fatal Lean progress now shows a failed check and recovers after correcting the document.

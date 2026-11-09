@@ -105,13 +105,14 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   let config: InfoviewConfig = { ...defaultInfoviewConfig };
   let initialized = false;
   let disposed = false;
+  let serverAvailable = true;
   // One scope per server generation. Retiring it aborts every operation that
   // captured its signal: pending requests, RPC connects, and delayed edits.
   let scope = new AbortController();
   let infoviewApi: InfoviewApi;
 
   function currentClient(): LSPClient {
-    if (disposed) throw requestAbortedError();
+    if (disposed || !serverAvailable) throw requestAbortedError();
     const client = options.client();
     if (!client) {
       throw new Error("Lean infoview requires an active client generation.");
@@ -171,6 +172,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   }
 
   function captureOperation(): () => boolean {
+    if (!serverAvailable) return () => false;
     const client = options.client();
     if (!client) return () => false;
     const current = captureClientOperation(client);
@@ -358,7 +360,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
   void infoviewApi.changedInfoviewConfig(config);
 
   function setCursorLocation(location?: lsp.Location): void {
-    if (disposed) {
+    if (disposed || !serverAvailable) {
       return;
     }
     if (!initialized && location) {
@@ -393,7 +395,9 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     },
     serverRestarted(initializeResult) {
       if (disposed) return;
+      serverAvailable = false;
       closeRpcSessions();
+      serverAvailable = true;
       const client = options.client();
       const result: lsp.InitializeResult<LeanServerCapabilities> = {
         ...initializeResult,
@@ -408,6 +412,7 @@ export function createLeanInfoviewHost(options: LeanInfoviewHostOptions): LeanIn
     },
     serverStopped(reason) {
       if (disposed) return;
+      serverAvailable = false;
       closeRpcSessions();
       void infoviewApi.serverStopped(reason);
     },

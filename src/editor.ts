@@ -48,6 +48,10 @@ export function leanEditorSessionBinding(
       if (destroyed || nextClient === client) {
         return;
       }
+      // An explicit selection transaction aborts upstream completion contexts
+      // while their state field is still installed. Closing the popup alone
+      // leaves running queries alive across extension reconfiguration.
+      view.dispatch({ selection: view.state.selection });
       client = nextClient;
       view.dispatch({
         effects: clientCompartment.reconfigure(clientExtension(client)),
