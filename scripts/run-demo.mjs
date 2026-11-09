@@ -1,14 +1,18 @@
 import { spawn } from "node:child_process";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
 import { readDemoConfig } from "./demo-config.mjs";
+import { resolveRosettaSource } from "../demo/server/rosetta.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const demo = readDemoConfig(process.env);
+const rosettaSource = await resolveRosettaSource();
+const rosettaModules = resolve(rosettaSource, "Rosetta");
+const rosettaConfigFiles = ["Rosetta.lean", "lakefile.toml", "lean-toolchain"].map(name => resolve(rosettaSource, name));
 const defaultBackendReadyTimeoutMs =
-  process.env.LEAN_DEMO_ANNEAL_MANIFEST || process.env.LEAN_DEMO_LEAN_ROOT ? "300000" : "60000";
+  process.env.LEAN_DEMO_LEAN_ONLY === "1" ? "60000" : "300000";
 const backendReadyTimeoutMs = Number.parseInt(
   process.env.DEMO_BACKEND_READY_TIMEOUT_MS ?? defaultBackendReadyTimeoutMs,
   10,
@@ -38,6 +42,8 @@ function shortPath(path) {
 }
 
 function shouldRestartBridges(path) {
+  const absolute = resolve(path);
+  if (rosettaConfigFiles.includes(absolute) || absolute.startsWith(rosettaModules + sep)) return true;
   const file = shortPath(path);
   if (
     file.startsWith("demo/rust-blocks/") ||
@@ -57,6 +63,7 @@ function shouldRestartBridges(path) {
     file === "demo/index.html" ||
     file === "demo/server.mjs" ||
     file.startsWith("demo/server/") ||
+    file.startsWith("demo/rosetta/") ||
     file.startsWith("demo/shared/") ||
     file.startsWith("demo/src/") ||
     file.startsWith("demo/workspace/") ||
@@ -265,9 +272,12 @@ viteServer = await createServer({
 });
 
 viteServer.watcher.add([
+  rosettaModules,
+  ...rosettaConfigFiles,
   resolve(rootDir, "demo/externalGeneration.mjs"),
   resolve(rootDir, "demo/server.mjs"),
   resolve(rootDir, "demo/server"),
+  resolve(rootDir, "demo/rosetta"),
   resolve(rootDir, "demo/shared"),
   resolve(rootDir, "demo/index.html"),
   resolve(rootDir, "demo/src"),

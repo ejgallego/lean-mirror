@@ -1,0 +1,10 @@
+name = "lean_mirror_rosetta_host"
+defaultTargets = ["rosetta-bridge"]
+
+[[require]]
+name = "rosetta"
+path = "rosetta"
+
+[[lean_exe]]
+name = "rosetta-bridge"
+root = "RosettaBridge"

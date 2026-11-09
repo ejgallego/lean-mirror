@@ -48,7 +48,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-analyzer --component rust-src
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-analyzer --component rust-src --component rustfmt
           rustup default "$RUSTUP_TOOLCHAIN"
           rustc --version
           rust-analyzer --version

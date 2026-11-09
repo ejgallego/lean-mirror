@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
+import { prepareRosetta } from "./server/rosetta.mjs";
 import { createLeanDocumentStore } from "./server/leanDocuments.mjs";
 import { handleLeanDocumentRequest } from "./server/leanDocumentHttp.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
@@ -67,7 +68,19 @@ const demoWorkspace = createDemoWorkspace(__dirname, {
   },
 });
 let prepareError = null;
-const preparePromise = demoWorkspace.prepare().catch((error) => {
+let rosettaBinary = null;
+function preparationStatus() {
+  const status = demoWorkspace.readPreparationStatus();
+  if (prepareError) return { ...status, phase: "failed", message: prepareError.message };
+  if (status.phase === "ready" && process.env.LEAN_DEMO_LEAN_ONLY !== "1" && !rosettaBinary) {
+    return { ...status, phase: "preparing", message: "Building the Rosetta Rust host." };
+  }
+  return status;
+}
+const preparePromise = Promise.all([
+  demoWorkspace.prepare(),
+  process.env.LEAN_DEMO_LEAN_ONLY === "1" ? null : prepareRosetta().then(path => { rosettaBinary = path; }),
+]).catch((error) => {
   prepareError = error;
 });
 
@@ -130,7 +143,7 @@ async function handleHttpRequest(req, res) {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
-    res.end(JSON.stringify(demoWorkspace.readPreparationStatus()));
+    res.end(JSON.stringify(preparationStatus()));
     return;
   }
   if (req.url === DEMO_ENDPOINTS.session) {
@@ -359,7 +372,7 @@ function rejectUpgrade(socket, status, message) {
   socket.destroy();
 }
 
-function attachSpawnedLsp(connection, command, args, cwd) {
+function attachSpawnedLsp(connection, command, args, cwd, limits = lspRelayLimits) {
   activeLspProcesses += 1;
   let released = false;
   const release = () => {
@@ -378,7 +391,7 @@ function attachSpawnedLsp(connection, command, args, cwd) {
   child.once("error", release);
   child.once("error", () => connection.close());
   pipeServerStderr(child.stderr);
-  attachLspProcess(connection, child, lspRelayLimits);
+  attachLspProcess(connection, child, limits);
 }
 
 wsServer.on("connection", (socket) => {
@@ -417,8 +430,15 @@ httpServer.on("upgrade", (req, socket, head) => {
       return;
     }
     const { rootPath } = demoWorkspace.rustBlockPaths(block);
+    if (!rosettaBinary) {
+      rejectUpgrade(socket, "503 Service Unavailable", "Rosetta is not ready");
+      return;
+    }
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      attachSpawnedLsp(connection, "rust-analyzer", [], rootPath);
+      // Rosetta owns a process group and needs time to join its IO workers.
+      attachSpawnedLsp(connection, rosettaBinary, [rootPath], rootPath, {
+        ...lspRelayLimits, killDelayMs: 2000,
+      });
     });
     return;
   }
