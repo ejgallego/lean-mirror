@@ -199,6 +199,7 @@ async function handleHttpRequest(req, res) {
     );
     res.end(
       JSON.stringify({
+        key: session.key,
         documentUri: session.documentUri,
         rootUri: session.rootUri,
         websocketUrl: `ws://${host}:${port}/rust-lsp?block=${encodeURIComponent(session.slug)}`,
@@ -218,7 +219,12 @@ async function handleHttpRequest(req, res) {
       "Invalid rust-document payload",
     );
     if (!payload) return;
-    await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
+    const saved = await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
+    if (!saved) {
+      res.writeHead(409, withCorsHeaders(req));
+      res.end("Rust widget version was superseded");
+      return;
+    }
     res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
@@ -324,6 +330,11 @@ async function handleHttpRequest(req, res) {
 
 const httpServer = createServer((req, res) => {
   void handleHttpRequest(req, res).catch((error) => {
+    if (error.code === "ERR_LEAN_DOCUMENT_CONFLICT") {
+      res.writeHead(409, withCorsHeaders(req));
+      res.end(error.message);
+      return;
+    }
     console.error("[demo] request failed", error);
     res.writeHead(
       500,

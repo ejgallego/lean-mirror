@@ -50,8 +50,9 @@ describe("demo protocol", () => {
       key: "block",
       code: "fn main() {}",
     });
-    expect(parseRustSession({ documentUri: "file:///tmp/lib.rs", rootUri: "file:///tmp", websocketUrl: "ws://x" }))
+    expect(parseRustSession({ key: "session", documentUri: "file:///tmp/lib.rs", rootUri: "file:///tmp", websocketUrl: "ws://x" }))
       .toEqual({
+        key: "session",
         documentUri: "file:///tmp/lib.rs",
         rootUri: "file:///tmp",
         websocketUrl: "ws://x",
@@ -62,18 +63,21 @@ describe("demo protocol", () => {
       version: 2,
     });
     expect(parseRustMainUpdateRequest({
+      diskRevision: "disk",
       code: "fn changed() {}",
       leanDocument: "#check Nat",
       revision: 4,
       uri: "file:///workspace/Main.rs",
     })).toEqual({
+      diskRevision: "disk",
       code: "fn changed() {}",
       leanDocument: "#check Nat",
       revision: 4,
       uri: "file:///workspace/Main.rs",
     });
-    expect(parseRustMainUpdateResult({ leanDocumentUri: "file:///workspace/RustSnippets.lean", revision: 4 }))
+    expect(parseRustMainUpdateResult({ diskRevision: "disk", leanDocumentUri: "file:///workspace/RustSnippets.lean", revision: 4 }))
       .toEqual({
+        diskRevision: "disk",
         leanDocumentUri: "file:///workspace/RustSnippets.lean",
         revision: 4,
       });
@@ -83,7 +87,7 @@ describe("demo protocol", () => {
     expect(() => parseDemoSession({ rootUri: "file:///workspace" })).toThrow(/documentUri/);
     expect(() => parseUpdateRustDocumentRequest({ key: "block", code: "new", version: Number.NaN }))
       .toThrow(/version/);
-    expect(() => parseRustMainUpdateResult({ leanDocumentUri: "file:///workspace/RustSnippets.lean", revision: "4" }))
+    expect(() => parseRustMainUpdateResult({ diskRevision: "disk", leanDocumentUri: "file:///workspace/RustSnippets.lean", revision: "4" }))
       .toThrow(/revision/);
   });
 

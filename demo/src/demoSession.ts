@@ -106,7 +106,7 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         method: "POST",
       });
       if (!response.ok) {
-        throw new Error(`Rust main update failed with ${response.status}`);
+        throw new Error(await response.text() || `Rust main update failed with ${response.status}`);
       }
       return parseRustMainUpdateResult(await response.json());
     },

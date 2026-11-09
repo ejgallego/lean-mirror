@@ -202,7 +202,7 @@ function createRustInlineHandle(
   let nestedView: EditorView | null = null;
   let socket: WebSocket | null = null;
   let client: LSPClient | null = null;
-  let sessionInfo: { documentUri: string } | null = null;
+  let sessionInfo: { documentUri: string; key: string } | null = null;
 
   function canRequestHover(): boolean {
     return (
@@ -279,7 +279,7 @@ function createRustInlineHandle(
   }
 
   async function requestDiagnostics(
-    session: { documentUri: string },
+    session: { documentUri: string; key: string },
     epoch: number,
     expectedVersion: number,
     attempt = 0,
@@ -320,7 +320,7 @@ function createRustInlineHandle(
   }
 
   async function persistDocument(
-    session: { documentUri: string },
+    session: { documentUri: string; key: string },
     expectedVersion: number,
   ): Promise<void> {
     if (!client || destroyed) {
@@ -334,7 +334,7 @@ function createRustInlineHandle(
     if (destroyed) {
       return;
     }
-    await sessionApi.updateRustDocument(options.block.key, code, expectedVersion);
+    await sessionApi.updateRustDocument(session.key, code, expectedVersion);
     if (destroyed || expectedVersion !== currentDocVersion) {
       return;
     }
@@ -354,7 +354,7 @@ function createRustInlineHandle(
     }, 900);
   }
 
-  function schedulePersist(session: { documentUri: string }, expectedVersion: number): void {
+  function schedulePersist(session: { documentUri: string; key: string }, expectedVersion: number): void {
     if (persistTimer) {
       clearTimeout(persistTimer);
     }

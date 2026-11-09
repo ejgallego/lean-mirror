@@ -1,4 +1,4 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
 import { rust } from "@codemirror/lang-rust";
@@ -74,6 +74,8 @@ export interface DemoRuntime {
 }
 
 export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
+  const documentStates = new Map<string, EditorState>();
+  const rustBinding = new Compartment();
   let currentView: EditorView | null = null;
   let currentLanguageId: string | null = null;
   let currentUri: string | null = null;
@@ -87,6 +89,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustSocket: WebSocket | null = null;
   let detachLeanSocketListeners: (() => void) | null = null;
   let leanReconnectPromise: Promise<void> | null = null;
+  let rustReconnectPromise: Promise<void> | null = null;
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +98,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustMainPersistTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainAutoRegenerateTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainRevision = 0;
+  let rustMainDiskRevision = "";
   let rustMainQueue = Promise.resolve();
   let lastEmbeddedLeanDocument: EmbeddedLeanDocument | null = null;
   let lastRustMainSourceSent: string | null = null;
@@ -579,12 +583,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           const result = await rustRuntime.trackRequest(
             "rust-main/update",
             () => options.sessionApi.updateRustMainDocument({
+              diskRevision: rustMainDiskRevision,
               code: source,
               leanDocument,
               revision,
               uri,
             }),
           );
+          rustMainDiskRevision = result.diskRevision;
           if (disposed || result.stale || revision !== rustMainRevision) {
             return;
           }
@@ -653,6 +659,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       const request = rustRuntime.beginRequest("rust-main/regenerate");
       await options.sessionApi
         .regenerateRustMainDocument({
+          diskRevision: rustMainDiskRevision,
           code: source,
           leanDocument: embeddedLeanDocument.doc,
           revision,
@@ -715,6 +722,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
     const languageId = languageIdForUri(session, uri);
     client?.sync();
+    rustClient?.sync();
+    if (currentView && currentUri) documentStates.set(currentUri, currentView.state);
     currentView?.destroy();
     embeddedEditors.close();
     options.ui.editorHost.replaceChildren();
@@ -729,9 +738,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             ...leanUtilities({
               lineWrapping: true,
             }),
-            ...(rustClient && uri === session.rustMainDocumentUri
-              ? [rustClient.plugin(uri, "rust")]
-              : []),
+            rustBinding.of(rustClient && uri === session.rustMainDocumentUri
+              ? rustClient.plugin(uri, "rust") : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
                 rustMainDiagnosticGate.beginEdit();
@@ -757,7 +765,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
     const view = new EditorView({
       parent: options.ui.editorHost,
-      state: EditorState.create({
+      state: documentStates.get(uri) ?? EditorState.create({
         doc,
         extensions: [
           ...languageExtensions,
@@ -829,6 +837,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   options.ui.setStatus("Loading session");
   const session = await fetchSessionWithPreparationProgress();
+  rustMainDiskRevision = session.rustMainDiskRevision ?? "";
   if (session.preparationStatus) {
     logPreparationStatus(session.preparationStatus);
   }
@@ -1060,9 +1069,23 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   });
   await activateLeanInfoviewGeneration();
 
-  if (session.rustMainWebsocketUrl) {
+  function rebindRust(client: LSPClient | null): void {
+    const uri = session.rustMainDocumentUri;
+    if (!uri) return;
+    const effect = rustBinding.reconfigure(client ? client.plugin(uri, "rust") : []);
+    if (currentUri === uri && currentView) currentView.dispatch({ effects: effect });
+    else {
+      const state = documentStates.get(uri);
+      if (state) documentStates.set(uri, state.update({ effects: effect }).state);
+    }
+  }
+
+  async function connectRustGeneration(): Promise<void> {
+    if (!session.rustMainWebsocketUrl) return;
     rustRuntime.connecting();
-    rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
+    const nextSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
+    if (disposed) { nextSocket.close(); return; }
+    rustSocket = nextSocket;
     rustRuntime.initializing();
     rustClient = new LSPClient({
       extensions: [
@@ -1098,15 +1121,60 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     });
     rustClient.connect(rustProgress.wrapTransport(createWebSocketTransport(rustSocket)));
     await rustClient.initializing;
+    if (disposed) { rustClient?.disconnect(); nextSocket.close(); return; }
+    rebindRust(rustClient);
+    const interrupted = () => {
+      if (!disposed && rustSocket === nextSocket) void reconnectRust();
+    };
+    nextSocket.addEventListener("close", interrupted, { once: true });
+    nextSocket.addEventListener("error", interrupted, { once: true });
     rustRuntime.ready();
+    notifyRustMainSaved();
     options.ui.logEvent("rust-analyzer initialized.");
-  } else {
+  }
+
+  function reconnectRust(): Promise<void> {
+    if (rustReconnectPromise) return rustReconnectPromise;
+    rustRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
+    rustMainDiagnosticGate.beginEdit();
+    rebindRust(null);
+    rustClient?.disconnect();
+    rustSocket?.close();
+    rustSocket = null;
+    rustClient = null;
+    rustProgress.clear();
+    rustReconnectPromise = (async () => {
+      for (let attempt = 0; attempt < 3 && !disposed; attempt++) {
+        try {
+          await connectRustGeneration();
+          if (session.rustMainDocumentUri) {
+            rustMainDiagnosticGate.recordSync((rustClient as LSPClient | null)?.workspace.getFile(session.rustMainDocumentUri)?.version);
+          }
+          options.ui.logEvent("Rust server reconnected; editor state preserved.");
+          return;
+        } catch (error) {
+          (rustClient as LSPClient | null)?.disconnect();
+          (rustSocket as WebSocket | null)?.close();
+          if (attempt === 2) {
+            rustRuntime.recordConnectionStatus({ phase: "failed", message: String(error) });
+            options.ui.logEvent(`Rust reconnect failed: ${String(error)}`);
+          } else await delay(250 * (attempt + 1));
+        }
+      }
+    })().finally(() => { rustReconnectPromise = null; });
+    return rustReconnectPromise;
+  }
+
+  if (session.rustMainWebsocketUrl) await connectRustGeneration();
+  else {
     rustRuntime.stopped();
   }
 
   const openDocument = async (uri: string): Promise<void> => {
-    const file = await workspace?.requestFile(uri);
-    const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
+    const retained = documentStates.get(uri);
+    const file = languageIdForUri(session, uri) === "rust"
+      ? rustClient?.workspace.getFile(uri) : await workspace?.requestFile(uri);
+    const doc = retained?.doc.toString() ?? file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
     await mountDocument(uri, doc);
     options.ui.logEvent(`Opened ${uri.split("/").at(-1) ?? uri}`);
   };

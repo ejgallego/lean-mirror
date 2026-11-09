@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -12,6 +13,7 @@ import {
   registerAnnealGeneration,
 } from "../externalGeneration.mjs";
 import { ensureEmbeddedLeanArtifacts } from "./embeddedLeanDocument.mjs";
+import { createLeanDocumentStore } from "./leanDocuments.mjs";
 import {
   parseExternalAnnealArgs,
   resolveExternalExamplePresets,
@@ -70,6 +72,15 @@ export function createDemoWorkspace(demoDir, options = {}) {
   let rustMainUpdateQueue = Promise.resolve();
   let preparationStatus = createPreparationStatus("idle", "Waiting to prepare demo workspace.");
   const rustBlockUpdateStates = new Map();
+  const rustSourceStores = new Map();
+  function rustSourceStore() {
+    let store = rustSourceStores.get(rustMainPath);
+    if (!store) {
+      store = createLeanDocumentStore([rustMainPath]);
+      rustSourceStores.set(rustMainPath, store);
+    }
+    return store;
+  }
 
   function setPreparationStatus(phase, message, detail) {
     preparationStatus = createPreparationStatus(phase, message, detail);
@@ -144,6 +155,9 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function ensureRustBlockWorkspace(key, code) {
+    // A recreated widget owns a new session and version sequence. Late saves
+    // from a retired widget must never target its replacement's workspace.
+    key = `${key}:${randomUUID()}`;
     const { documentPath, rootPath, slug } = rustBlockPaths(key);
     const crateName = "widget";
     await mkdir(join(rootPath, "src"), { recursive: true });
@@ -165,6 +179,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     );
     await writeFile(documentPath, code, "utf8");
     return {
+      key,
       documentPath,
       documentUri: pathToFileURL(documentPath).toString(),
       rootPath,
@@ -210,9 +225,12 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function refreshRustMainArtifacts(payload) {
-    await writeFile(rustMainPath, payload.code, "utf8");
+    const saved = await rustSourceStore().save({
+      uri: rustMainUri, text: payload.code, revision: payload.diskRevision,
+    });
     await writeFile(embeddedLeanPath, payload.leanDocument, "utf8");
     return {
+      diskRevision: saved.revision,
       leanDocumentUri: embeddedLeanUri,
       revision: payload.revision,
     };
@@ -355,7 +373,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function readSessionPayload({ websocketUrl, rustMainWebsocketUrl }) {
-    const initialDoc = await readFile(rustMainPath, "utf8");
+    const snapshot = await rustSourceStore().read(rustMainUri);
+    const initialDoc = snapshot.text;
     const descriptor = demoDescriptor();
     return {
       activeExampleId: descriptor.activeExampleId,
@@ -376,6 +395,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
       initialDoc,
       rustRootUri,
       rustMainDocumentUri: rustMainUri,
+      rustMainDiskRevision: snapshot.revision,
       rustMainWebsocketUrl,
       websocketUrl,
     };
@@ -391,7 +411,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     const job = rustMainUpdateQueue.then(async () => {
       try {
         setPreparationStatus("preparing", "Saving Rust source before regeneration.");
-        await writeFile(rustMainPath, payload.code, "utf8");
+        await rustSourceStore().save({ uri: rustMainUri, text: payload.code, revision: payload.diskRevision });
         await configureExternalWorkspace();
         await ensureEmbeddedLeanArtifacts(embeddedLeanPath, currentEmbeddedLeanContext());
         setPreparationStatus("ready", "Demo workspace ready.");

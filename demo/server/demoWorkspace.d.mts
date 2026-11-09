@@ -26,6 +26,7 @@ export interface DemoSessionUrls {
 }
 
 export interface RustBlockSession {
+  key: string;
   documentPath: string;
   documentUri: string;
   rootPath: string;

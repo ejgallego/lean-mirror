@@ -33,7 +33,7 @@ test.beforeEach(async ({ page, request }) => {
       readFile(new URL("../../demo/baseline/RustSnippets.lean", import.meta.url), "utf8"),
     ]);
     const restored = await request.post(backend + "/rust-main", {
-      data: { uri: session.rustMainDocumentUri, code, leanDocument, revision: 0 },
+      data: { uri: session.rustMainDocumentUri, diskRevision: session.rustMainDiskRevision, code, leanDocument, revision: 0 },
     });
     expect(restored.ok()).toBe(true);
   }
@@ -487,6 +487,48 @@ test("demo marks extracted Lean state fresh only when host Rust matches startup 
 
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("MissingLeanName", "Nat.succ"))).toBe(true);
   await expect(page.locator("#extraction-state")).toHaveText("Fresh");
+});
+
+
+test("demo keeps saved Rust text and both undo histories across file switches", async ({ page }) => {
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await openDocument(page, "Main.lean");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("#check Nat.succ", "#check Nat.pred"))).toBe(true);
+  await openDocument(page, "Main.rs");
+  const saved = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await saved;
+  await openDocument(page, "Main.lean");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("#check Nat.pred");
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("#check Nat.succ");
+  await openDocument(page, "Main.rs");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a - b");
+  expect(await readFile(new URL("../../demo/workspace/Main.rs", import.meta.url), "utf8")).toContain("a - b");
+  const undone = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+  await undone;
+});
+
+test("demo recovers Rust after a dropped connection without losing edits", async ({ page }) => {
+  let route: import("@playwright/test").WebSocketRoute | undefined;
+  let connections = 0;
+  await page.routeWebSocket(/\/rust-main-lsp$/, (socket) => {
+    route = socket;
+    connections++;
+    socket.connectToServer();
+  });
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  const saved = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await saved;
+  await route!.close({ code: 1011, reason: "test interruption" });
+  await expect.poll(() => connections).toBe(2);
+  await expect(page.locator("#events")).toContainText("Rust server reconnected; editor state preserved.");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a - b");
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
 });
 
 test("external demo switches prepared examples and preserves embedded Lean diagnostics", async ({ page }) => {

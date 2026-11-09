@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -218,21 +219,28 @@ describe("demo workspace backend", () => {
     const { workspace } = await createFixture();
     const session = await workspace.createRustBlockSession("Rust Demo Widget", "pub fn old() {}\n");
 
-    expect(session.slug).toBe("rust-demo-widget");
+    expect(session.slug).toMatch(/^rust-demo-widget-/);
     expect(await readFile(session.documentPath, "utf8")).toBe("pub fn old() {}\n");
 
     await Promise.all([
-      workspace.updateRustBlockDocument("Rust Demo Widget", "pub fn stale() {}\n", 1),
-      workspace.updateRustBlockDocument("Rust Demo Widget", "pub fn fresh() {}\n", 2),
+      workspace.updateRustBlockDocument(session.key, "pub fn stale() {}\n", 1),
+      workspace.updateRustBlockDocument(session.key, "pub fn fresh() {}\n", 2),
     ]);
 
     expect(await readFile(session.documentPath, "utf8")).toBe("pub fn fresh() {}\n");
+    const replacement = await workspace.createRustBlockSession("Rust Demo Widget", "pub fn fresh() {}\n");
+    expect(replacement.key).not.toBe(session.key);
+    expect(await workspace.updateRustBlockDocument(replacement.key, "pub fn edited() {}\n", 1)).toBe(true);
+    await workspace.updateRustBlockDocument(session.key, "pub fn retired() {}\n", 3);
+    expect(await readFile(replacement.documentPath, "utf8")).toBe("pub fn edited() {}\n");
   });
 
   it("updates the Rust driver and generated Lean snippet document", async () => {
     const { workspace } = await createFixture();
 
+    const diskRevision = createHash("sha256").update("fn main() {}\n").digest("hex");
     const result = await workspace.updateRustMainDocument({
+      diskRevision,
       code: "fn changed() {}\n",
       leanDocument: "#check helperValue\n",
       revision: 12,
@@ -240,11 +248,18 @@ describe("demo workspace backend", () => {
     });
 
     expect(result).toEqual({
+      diskRevision: createHash("sha256").update("fn changed() {}\n").digest("hex"),
       leanDocumentUri: workspace.uris.embeddedLeanUri,
       revision: 12,
     });
     expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
     expect(await workspace.readDocument(workspace.uris.embeddedLeanUri)).toBe("#check helperValue\n");
+    await expect(workspace.updateRustMainDocument({
+      diskRevision, code: "fn stale() {}\n", leanDocument: "-- stale\n",
+      revision: 11, uri: workspace.uris.rustMainUri,
+    })).rejects.toMatchObject({ code: "ERR_LEAN_DOCUMENT_CONFLICT" });
+    expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
+
   });
 
   it("refreshes the embedded Lean document from Rust comments during preparation", async () => {

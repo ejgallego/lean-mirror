@@ -77,6 +77,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Fixed
 
+- The full demo preserves Rust source and per-file undo history across file switches, reconnects rust-analyzer after transport loss, isolates recreated Rust widget sessions, and rejects conflicting Rust-driver disk saves.
+
 - The workspace example shares pending startup with reconnect requests, so disposal closes the connection and rejects every waiter. Fatal Lean progress now shows a failed check and recovers after correcting the document.
 - Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
 - The private VS Code adapter no longer drops every document change after a webview reload. Each `ready` starts a new webview epoch: earlier queued commands do not run, and earlier handlers do not reply into the reloaded webview.
