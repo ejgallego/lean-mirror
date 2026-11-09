@@ -5,6 +5,7 @@ import { createEmbeddedRustAdapter } from "./embeddedRust.js";
 
 export function createDemoEmbeddedAdapters(
   sessionApi: DemoSessionApi,
+  rustInitiallyEditing = false,
 ): readonly AnyEmbeddedBlockEditorAdapter[] {
-  return [createEmbeddedRustAdapter(sessionApi), createEmbeddedLeanAdapter()];
+  return [createEmbeddedRustAdapter(sessionApi, rustInitiallyEditing), createEmbeddedLeanAdapter()];
 }

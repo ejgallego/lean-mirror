@@ -1,9 +1,12 @@
 name = "lean_mirror_demo"
 version = "0.1.0"
-defaultTargets = ["Helper"]
+defaultTargets = ["Helper", "RustComment"]
 
 [[lean_lib]]
 name = "Helper"
 
 [[lean_lib]]
 name = "RustSnippets"
+
+[[lean_lib]]
+name = "RustComment"

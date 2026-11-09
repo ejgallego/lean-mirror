@@ -19,11 +19,11 @@ Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
 rustup. Primary CI uses Rust 1.99.0:
 
 ```bash
-rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src
+rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src --component rustfmt
 ```
 
 Select that toolchain in your shell when matching CI. `npm run check:environment`
-requires matching root/demo Lean pins, Lean, Lake, and rust-analyzer on PATH, and
+requires matching root/demo Lean pins, Lean, Lake, rust-analyzer, and rustfmt on PATH, and
 checks Lean against the repository pin. `npm run ci` runs this prerequisite check
 first. Focused tests can still run without every integration prerequisite.
 
@@ -33,7 +33,7 @@ first. Focused tests can still run without every integration prerequisite.
 | --- | --- |
 | Library behavior | `npm run check`, affected `npm test -- test/name.test.ts`, `npm run test:consumer` |
 | Infoview, editor lifecycle, browser composition | Library checks plus `npm run test:e2e:minimal` |
-| Embedded Lean/Rust or demo backend | Affected unit tests plus `npm run test:e2e` |
+| Embedded Lean/Rust or demo backend | Affected unit tests, `npm run test:rosetta`, and `npm run test:e2e` |
 | Package metadata, exports, or assets | `npm run test:packed`, `npm run pack:check`; use `npm run test:packed:browser` for browser entry changes |
 | Shared editor platform | `npm run check:platform`, `npm run test:platform`, `npm run build:platform`, `npm run test:consumer:verso`; validate the real sibling as described below |
 | VS Code host adapter | `npm run check:vscode`, `npm run test:vscode`, `npm run build:vscode` |
@@ -126,3 +126,22 @@ external Anneal validation remain separate goals.
 Agent guidance stays short and records project-specific boundaries and completion
 criteria. Supporting documents are read when relevant to the task. This follows
 OpenAI's [guidance on revisiting skills and prompts for GPT-6 Astra](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra).
+
+## Rosetta demo host
+
+The default full demo opens Main.lean, with rendered Rust in a valid Verso
+comment and an Edit Rust / Preview Rust toggle. `?mode=rust` selects the retained
+Rust-driver workflow. The native Rosetta facade and its pinned core package use
+Lean 4.35 independently from the root/demo Lean 4.34.1 pins.
+
+`npm run test:rosetta` builds the facade in `.demo-cache/rosetta-host` and tests all
+six editor features against rust-analyzer, plus versioned Cargo error recovery,
+Unicode/CRLF input, and orderly shutdown. It is included in `npm run ci`.
+The ordinary browser suite additionally drives rename, definition, completion,
+formatting, diagnostics, previews, and transport recovery through CodeMirror.
+
+Select a development checkout with
+`npm run demo:rosetta:checkout -- /path/to/packages/rosetta`. Its source changes
+rebuild the host automatically. CI uses the bundled snapshot when no checkout
+is selected. See [the host guide](../demo/rosetta/README.md) for package provenance
+and overrides. Building the host never modifies an override checkout.

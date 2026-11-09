@@ -219,7 +219,7 @@ export function createEmbeddedEditorShell(
     const blocks = collectEmbeddedBlocks(source, adaptersRef).filter((block) =>
       block.key.startsWith(`${adapter.kind}:`),
     );
-    const labels = new Set(blocks.map((block) => block.label).filter((label): label is string => !!label));
+    const labels = new Set(blocks.flatMap(block => [block.label, block.title]).filter((label): label is string => !!label));
     const base = scaffold.baseLabel;
     if (!labels.has(base)) {
       return base;

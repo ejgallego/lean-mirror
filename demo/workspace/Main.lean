@@ -1,4 +1,7 @@
 import Helper
+import RustComment
+
+set_option doc.verso true
 
 #check Nat.succ
 #check helperValue
@@ -13,7 +16,9 @@ def twice (f : Nat -> Nat) (n : Nat) : Nat :=
 #eval twice Nat.succ helperValue
 
 /-!
-```rust demo-widget
+This Rust example is checked by Rosetta. Use *Edit Rust* to change it inline.
+
+```rust (name := demoWidget)
 fn add(a: i32, b: i32) -> i32 {
     a + b
 }
@@ -22,6 +27,8 @@ fn main() {
     println!("{}", add(20, 22));
 }
 ```
+
+Edits stay in this Lean document.
 -/
 
 -- Try typing:

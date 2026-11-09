@@ -318,7 +318,7 @@ composition and browser checks.
 The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
 demo workspace pin Lean 4.34.1; an elan installation selects and installs that
 toolchain automatically. `rust-analyzer` can be installed with
-`rustup component add rust-analyzer rust-src`. External Anneal mode also needs
+`rustup component add rust-analyzer rust-src rustfmt`. External Anneal mode also needs
 `cargo` and a checkout of the Rust project whose examples you want to open.
 
 If the Lean WebSocket closes, the demo starts a fresh client/server generation
@@ -332,11 +332,34 @@ npm install
 npm run demo
 ```
 
-Open `http://127.0.0.1:5173`. The all-in-one script starts:
+Open `http://127.0.0.1:5173`. The default is a Lean editor with Rust inside a
+real Verso doc comment. The Rust block starts as a rendered preview with Rosetta
+semantic colors, hovers, and diagnostics. **Edit Rust** opens an inline editor
+with completion, definition, rename, and formatting. **Preview Rust** returns to
+the rendered block. Both views edit the same Lean comment and preserve its prose.
+File switching preserves text, selection, and undo history; Rust and Lean can
+reconnect without discarding editor state.
+
+The Rust-driver experiment remains available at
+`http://127.0.0.1:5173/?mode=rust`, or through the `Main.rs` document button.
+The external Anneal wrapper still opens its Rust source by default.
+
+Rosetta is currently unpublished. This demo includes a pinned Apache-2.0 core
+snapshot and builds a small host with its separate Lean 4.35 toolchain under
+`.demo-cache/rosetta-host`. Elan selects that toolchain; the public library and
+Lean demo workspace stay on Lean 4.34.1. Override `LEAN_DEMO_ROSETTA_ROOT` to use a
+local Rosetta core checkout. For ongoing development, select it once with
+`npm run demo:rosetta:checkout -- /path/to/packages/rosetta`; the demo watches
+its Lean sources and rebuilds after edits. The ignored local selection takes
+precedence over the bundled CI fallback. See [the Rosetta host guide](demo/rosetta/README.md).
+The first launch can take longer while the host toolchain is installed.
+
+The all-in-one script starts:
 
 - a Vite frontend in `demo/`
 - a small WebSocket bridge that proxies browser JSON-RPC frames to `lake env lean --server`
-- a rust-analyzer bridge for the active Rust source
+- a Rosetta host that owns rust-analyzer sessions for embedded Rust
+- a direct rust-analyzer bridge for the separate Rust-driver mode
 - a multi-file editor demo that can switch between the default Lean files, the Rust source, and the synthesized Lean snippet document
 - a pure Rust-driver path where edits to `Main.rs` refresh `RustSnippets.lean` without importing generated Aeneas output
 

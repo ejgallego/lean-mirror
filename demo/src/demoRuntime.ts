@@ -838,6 +838,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setStatus("Loading session");
   const session = await fetchSessionWithPreparationProgress();
   rustMainDiskRevision = session.rustMainDiskRevision ?? "";
+  const leanDocumentUri = session.documents.find(uri => uri.endsWith("/Main.lean"));
+  const initialUri = new URLSearchParams(location.search).get("mode") !== "rust" && leanDocumentUri
+    ? leanDocumentUri : session.documentUri;
+  const initialDoc = initialUri === session.documentUri
+    ? session.initialDoc : await options.sessionApi.fetchDocument(initialUri);
   if (session.preparationStatus) {
     logPreparationStatus(session.preparationStatus);
   }
@@ -875,7 +880,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     options.switchExample,
   );
   options.ui.setRootUri(session.rootUri);
-  options.ui.setCurrentDocument(session.documentUri);
+  options.ui.setCurrentDocument(initialUri);
   syncRustMainExtractionState(session.initialDoc, { logTransition: false });
 
   options.ui.setStatus("Connecting to Lean");
@@ -921,6 +926,16 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           const file = await currentWorkspace.requestFile(uri);
           const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
           return mountDocument(uri, doc);
+        },
+        onDocumentChange(uri, file, update) {
+          // Hidden generated files and workspace edits also update any retained
+          // editor state, so reopening cannot reintroduce its older text.
+          const state = documentStates.get(uri);
+          if (!state || uri === currentUri) return;
+          const next = state.update(update).state;
+          documentStates.set(uri, next.doc.eq(file.doc) ? next : state.update({
+            changes: { from: 0, to: state.doc.length, insert: file.doc },
+          }).state);
         },
       }),
     },
@@ -1073,7 +1088,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     const uri = session.rustMainDocumentUri;
     if (!uri) return;
     const effect = rustBinding.reconfigure(client ? client.plugin(uri, "rust") : []);
-    if (currentUri === uri && currentView) currentView.dispatch({ effects: effect });
+    if (currentUri === uri && currentView) {
+      currentView.dispatch({ selection: currentView.state.selection });
+      currentView.dispatch({ effects: effect });
+    }
     else {
       const state = documentStates.get(uri);
       if (state) documentStates.set(uri, state.update({ effects: effect }).state);
@@ -1181,7 +1199,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);
-  await mountDocument(session.documentUri, session.initialDoc);
+  await mountDocument(initialUri, initialDoc);
   leanInfoview.updateCursorLocation();
 
   const handleBeforeUnload = () => {

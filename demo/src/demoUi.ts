@@ -131,7 +131,7 @@ export function createDemoUi(
     },
     labels: {
       editorDescription:
-        "Try hover, completion, go-to-definition, rename, diagnostics, Rust formatting, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
+        "Explore the Lean document, then use Edit Rust for hover, completion, definition, rename, formatting, and diagnostics inside its Verso comment.",
       infoAriaLabel: "Lean InfoView",
       infoTitle: "InfoView",
       secondaryTitle: "Runtime",
@@ -146,12 +146,12 @@ export function createDemoUi(
   if (header) {
     const titleEl = document.createElement("h1");
     titleEl.id = "demo-title";
-    titleEl.textContent = "Embedded Lean over Rust comments";
+    titleEl.textContent = "Rust inside a Lean document";
     const summaryEl = document.createElement("p");
     summaryEl.id = "demo-summary";
     summaryEl.className = "lede";
     summaryEl.textContent =
-      "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
+      "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support.";
     header.append(titleEl, summaryEl);
   }
 
@@ -282,9 +282,9 @@ export function queryDemoUi(
       demoProjectEl.textContent = project ?? "Lean 4 + CodeMirror 6";
       demoSummaryEl.textContent =
         summary ??
-        "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
-      demoTitleEl.textContent = title ?? "Embedded Lean over Rust comments";
-      document.title = title ?? "Anneal Embedded Lean Demo";
+        "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support.";
+      demoTitleEl.textContent = title ?? "Rust inside a Lean document";
+      document.title = title ?? "Rust inside a Lean document";
     },
     setActiveDocument(uri: string) {
       for (const button of documentsEl.querySelectorAll<HTMLButtonElement>("button")) {

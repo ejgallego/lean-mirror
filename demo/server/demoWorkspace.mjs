@@ -119,8 +119,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
       activeExampleLabel: "Default workspace",
       demoProject: "Lean 4 + CodeMirror 6",
       demoSummary:
-        "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.",
-      demoTitle: "Embedded Lean over Rust comments",
+        "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support. The Rust driver remains available in Open Documents.",
+      demoTitle: "Rust inside a Lean document",
     };
   }
 
@@ -190,7 +190,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
 
   async function updateRustBlockDocument(key, code) {
     const { documentPath } = rustBlockPaths(key);
-    await writeFile(documentPath, code, "utf8");
+    if (await readFile(documentPath, "utf8") !== code) await writeFile(documentPath, code, "utf8");
   }
 
   function currentEmbeddedLeanContext() {
@@ -616,7 +616,7 @@ async function ensureDemoArtifacts(workspaceDir, { externalMode }) {
   if (externalMode) {
     return;
   }
-  const result = await runCommand("lake", ["build", "Helper"], {
+  const result = await runCommand("lake", ["build"], {
     cwd: workspaceDir,
   });
   if (result.status !== 0) {

@@ -13,6 +13,7 @@ import {
   type RustMainUpdateResult,
   type RustSession,
 } from "../shared/demoProtocol.mjs";
+import { waitForWebSocketOpen } from "codemirror-lean4-lsp";
 
 export type {
   DemoExample,
@@ -126,14 +127,8 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
     },
     async connectWebSocket(url: string): Promise<WebSocket> {
       const socket = new WebSocket(url);
-      await new Promise<void>((resolve, reject) => {
-        socket.addEventListener("open", () => resolve(), { once: true });
-        socket.addEventListener(
-          "error",
-          () => reject(new Error("WebSocket connection failed.")),
-          { once: true },
-        );
-      });
+      try { await waitForWebSocketOpen(socket); }
+      catch (error) { socket.close(); throw error; }
       return socket;
     },
   };

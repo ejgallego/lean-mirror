@@ -3,6 +3,8 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { parseLineCommentFencedBlocks as parseSharedLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
 
 export interface EmbeddedBlock {
+  /** The replacement covers only a fence, preserving surrounding comment prose. */
+  fencedOnly?: boolean;
   code: string;
   from: number;
   key: string;
@@ -140,7 +142,7 @@ function embeddedBlockKey(
   return seen === 0 ? base : `${base}#${seen + 1}`;
 }
 
-// Demo-side heuristic: treat standalone Lean doc comments with a single fenced block as embeddable.
+// A source-envelope scanner for complete fenced blocks in Lean doc comments.
 export function parseVersoCommentBlocks(
   source: string,
   spec: Pick<VersoCommentSpec, "defaultTitle" | "kind">,
@@ -156,45 +158,35 @@ export function parseVersoCommentBlocks(
       continue;
     }
 
-    const headerLine = lines[index + 1];
-    const header = headerLine
-      ? new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text)
-      : null;
-    if (!header) {
-      continue;
-    }
-
-    const from = line.from;
-    const label = header[1]?.trim() || null;
-    const codeLines: string[] = [];
-
-    for (let inner = index + 2; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner];
-      if (!innerLine) {
-        break;
-      }
-      if (/^\s*```\s*$/.test(innerLine.text)) {
-        const closingLine = lines[inner + 1];
-        if (!closingLine || !/^\s*-\s*\/\s*$/.test(closingLine.text)) {
-          break;
-        }
+    let commentEnd = index + 1;
+    while (commentEnd < lines.length && !/^\s*-\/\s*$/.test(lines[commentEnd]!.text)) commentEnd++;
+    if (commentEnd === lines.length) continue;
+    for (let headerIndex = index + 1; headerIndex < commentEnd; headerIndex++) {
+      const headerLine = lines[headerIndex]!;
+      const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text);
+      if (!header) continue;
+      const label = header[1]?.trim() || null;
+      let fenceEnd = headerIndex + 1;
+      while (fenceEnd < commentEnd && !/^\s*```\s*$/.test(lines[fenceEnd]!.text)) fenceEnd++;
+      if (fenceEnd < commentEnd) {
+        const standalone = headerIndex === index + 1 && fenceEnd + 1 === commentEnd;
         ordinal += 1;
         const block: EmbeddedBlock = {
-          code: codeLines.join("\n"),
-          from,
+          ...(standalone ? {} : { fencedOnly: true }),
+          code: lines.slice(headerIndex + 1, fenceEnd).map(line => line.text).join("\n"),
+          from: standalone ? line.from : headerLine.from,
           key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
           ordinal,
           title: "",
-          to: closingLine.end,
+          to: lines[standalone ? commentEnd : fenceEnd]!.end,
         };
         block.title = spec.defaultTitle(block);
         blocks.push(block);
-        index = inner + 1;
-        break;
+        headerIndex = fenceEnd;
       }
-      codeLines.push(innerLine.text);
     }
+    index = commentEnd;
   }
 
   return blocks;
@@ -220,11 +212,11 @@ export function serializeVersoCommentBlock(
   code: string,
 ): string {
   return [
-    "/-!",
+    ...(block.fencedOnly ? [] : ["/-!"]),
     `\`\`\`${kind}${block.label ? ` ${block.label}` : ""}`,
     code,
     "```",
-    "-/",
+    ...(block.fencedOnly ? [] : ["-/"]),
   ].join("\n") + "\n";
 }
 

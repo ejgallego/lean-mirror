@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { rust } from "@codemirror/lang-rust";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import {
@@ -25,12 +25,13 @@ import {
 } from "./embeddedBlocks.js";
 import type { DemoSessionApi } from "./demoSession.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
+import { renderRustPreview, type RustPreviewToken } from "./rustPreview.js";
 
 export interface EmbeddedRustBlock extends EmbeddedBlock {}
 
 const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   defaultTitle(block) {
-    return block.label ?? `Rust Block ${block.ordinal}`;
+    return block.label?.match(/^\(name\s*:=\s*«?([^»)]*)»?\)$/)?.[1] ?? block.label ?? `Rust Block ${block.ordinal}`;
   },
   displayName: "Rust",
   editorExtensions(): Extension[] {
@@ -55,7 +56,11 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   hostLanguageIds: ["lean4"],
   kind: "rust",
   scaffold: {
-    baseLabel: "demo-widget",
+    baseLabel: "demoWidget",
+    createBlock(label) {
+      return { code: "", from: 0, to: 0, ordinal: 0, title: label,
+        key: `rust:${label}`, label: `(name := «${label}»)` };
+    },
     code() {
       return ['fn demo() {', '    println!("hello from Rust");', '}'].join("\n");
     },
@@ -152,7 +157,7 @@ function rustHoverTooltips(
         };
       })
       .catch((error: unknown) => {
-        if (isTransientRustHoverError(error)) {
+        if (!canRequest() || isTransientRustHoverError(error)) {
           return null;
         }
         throw error;
@@ -176,13 +181,30 @@ function rustClientExtensions(
 function createRustInlineHandle(
   sessionApi: DemoSessionApi,
   options: EmbeddedBlockInlineCreateOptions<EmbeddedRustBlock>,
+  initiallyEditing: boolean,
 ): EmbeddedBlockInlineHandle {
   const container = document.createElement("div");
   container.className = "cm-embedded-block-inline";
   const status = document.createElement("div");
   status.className = "cm-embedded-block-inline-status";
   status.textContent = "Connecting to rust-analyzer";
-  container.append(status);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  const preview = document.createElement("div");
+  const editorHost = document.createElement("div");
+  const diagnosticSummary = document.createElement("ul");
+  diagnosticSummary.className = "rosetta-diagnostics";
+  diagnosticSummary.setAttribute("aria-label", "Rust diagnostics");
+  let editing = initiallyEditing;
+  editorHost.hidden = !editing;
+  preview.hidden = editing;
+  toggle.textContent = editing ? "Preview Rust" : "Edit Rust";
+  container.append(toggle, status, preview, diagnosticSummary, editorHost);
+  const binding = new Compartment();
+  let previewEpoch = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 250;
+  let connectPromise: Promise<void> | null = null;
 
   let destroyed = false;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,8 +229,6 @@ function createRustInlineHandle(
   function canRequestHover(): boolean {
     return (
       !destroyed &&
-      persistTimer === null &&
-      pendingDiagnosticsVersion === null &&
       !syncingFromOuter &&
       client !== null
     );
@@ -255,6 +275,12 @@ function createRustInlineHandle(
       ),
     );
     options.outerView.requestMeasure();
+    diagnosticSummary.replaceChildren(...latestDiagnostics.map(diagnostic => {
+      const item = document.createElement("li");
+      item.textContent = diagnostic.message;
+      item.dataset.severity = severity(diagnostic.severity);
+      return item;
+    }));
   }
 
   function updateDiagnosticsForVersion(
@@ -262,7 +288,7 @@ function createRustInlineHandle(
     diagnostics: typeof latestDiagnostics,
     optionsForUpdate: { log: boolean },
   ): void {
-    if (version <= resolvedDiagnosticsVersion) {
+    if (version < resolvedDiagnosticsVersion) {
       return;
     }
     resolvedDiagnosticsVersion = version;
@@ -326,6 +352,7 @@ function createRustInlineHandle(
     if (!client || destroyed) {
       return;
     }
+    const activeClient = client;
     const code = latestCode;
     if (expectedVersion !== currentDocVersion) {
       return;
@@ -335,7 +362,7 @@ function createRustInlineHandle(
       return;
     }
     await sessionApi.updateRustDocument(session.key, code, expectedVersion);
-    if (destroyed || expectedVersion !== currentDocVersion) {
+    if (destroyed || expectedVersion !== currentDocVersion || client !== activeClient || sessionInfo?.key !== session.key) {
       return;
     }
     options.log(`Saved ${options.block.title}`);
@@ -373,97 +400,171 @@ function createRustInlineHandle(
     }, 350);
   }
 
-  void (async () => {
+  async function refreshPreview(): Promise<void> {
+    const epoch = ++previewEpoch;
+    const source = latestCode;
+    renderRustPreview(preview, source, [], async () => null);
+    const activeClient = client;
+    const activeSession = sessionInfo;
+    if (!activeClient || !activeSession || !nestedView) return;
+    activeClient.sync();
     try {
-      const session = await sessionApi.createRustSession(options.block.key, latestCode);
-      sessionInfo = session;
-      if (destroyed) {
-        return;
+      let tokens: RustPreviewToken[] = [];
+      // Semantic tokens may be empty while Cargo is loading the new crate.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        if (destroyed || epoch !== previewEpoch || source !== latestCode || client !== activeClient) return;
+        tokens = await activeClient.request<{ textDocument: { uri: string } }, RustPreviewToken[]>(
+          "rosetta/preview", { textDocument: { uri: activeSession.documentUri } },
+        );
+        if (tokens.length || !source.trim()) break;
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
-      client = new LSPClient({
-        extensions: rustClientExtensions(canRequestHover),
-        notificationHandlers: {
-          "textDocument/publishDiagnostics": (_client, params) => {
-            if (params?.uri !== session.documentUri) {
-              return false;
-            }
-            const version =
-              typeof params.version === "number"
-                ? params.version
-                : pendingDiagnosticsVersion ?? currentDocVersion;
-            if (version <= resolvedDiagnosticsVersion) {
-              return true;
-            }
-            if (
-              pendingDiagnosticsVersion !== null &&
-              version >= pendingDiagnosticsVersion
-            ) {
-              pendingDiagnosticsVersion = null;
-              diagnosticPullEpoch += 1;
-              if (diagnosticPullTimer) {
-                clearTimeout(diagnosticPullTimer);
-                diagnosticPullTimer = null;
-              }
-            }
-            updateDiagnosticsForVersion(version, Array.isArray(params.diagnostics) ? params.diagnostics : [], {
-              log: true,
-            });
-            return true;
-          },
-        },
-        rootUri: session.rootUri,
-        sanitizeHTML: sanitizeHtml,
-        timeout: 20_000,
+      if (destroyed || epoch !== previewEpoch || source !== latestCode || client !== activeClient) return;
+      renderRustPreview(preview, source, tokens, async position => {
+        if (source !== latestCode || activeClient !== client) return null;
+        try {
+          const result = await activeClient.request<lsp.HoverParams, lsp.Hover | null>("textDocument/hover", {
+            position, textDocument: { uri: activeSession.documentUri },
+          });
+          return result ? normalizeRustHover(result.contents)?.value ?? null : null;
+        } catch { return null; }
       });
-      socket = await sessionApi.connectWebSocket(session.websocketUrl);
-      if (destroyed) {
-        socket.close();
-        client.disconnect();
-        return;
-      }
-      client.connect(createWebSocketTransport(socket));
-      await client.initializing;
-      if (destroyed) {
-        client.disconnect();
-        socket.close();
-        return;
-      }
-      status.textContent = "rust-analyzer connected";
-      nestedView = new EditorView({
-        parent: container,
-        state: EditorState.create({
-          doc: latestCode,
-          extensions: [
-            ...baseRustAdapter.editorExtensions(),
-            syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-            client.plugin(session.documentUri, "rust"),
-            EditorView.updateListener.of((update) => {
-              if (!update.docChanged || syncingFromOuter) {
-                return;
-              }
-              currentDocVersion += 1;
-              latestCode = update.state.doc.toString();
-              options.syncOuter(latestCode);
-              schedulePersist(session, currentDocVersion);
-            }),
-          ],
-        }),
-      });
-      applyDiagnostics();
-      status.remove();
-      options.outerView.requestMeasure();
     } catch (error) {
-      if (destroyed) {
-        return;
-      }
-      status.textContent =
-        error instanceof Error ? `rust-analyzer failed: ${error.message}` : "rust-analyzer failed";
+      if (!destroyed && epoch === previewEpoch) options.log(`Rust preview analysis pending: ${String(error)}`);
     }
-  })();
+    options.outerView.requestMeasure();
+  }
+
+  nestedView = new EditorView({
+    parent: editorHost,
+    state: EditorState.create({
+      doc: latestCode,
+      extensions: [
+        ...baseRustAdapter.editorExtensions(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        binding.of([]),
+        EditorView.updateListener.of(update => {
+          if (!update.docChanged || syncingFromOuter) return;
+          currentDocVersion++;
+          latestCode = update.state.doc.toString();
+          options.syncOuter(latestCode);
+          if (sessionInfo) schedulePersist(sessionInfo, currentDocVersion);
+        }),
+      ],
+    }),
+  });
+  renderRustPreview(preview, latestCode, [], async () => null);
+  toggle.addEventListener("click", () => {
+    if (!client) void connect();
+    editing = !editing;
+    editorHost.hidden = !editing;
+    preview.hidden = editing;
+    toggle.textContent = editing ? "Preview Rust" : "Edit Rust";
+    if (editing) { nestedView?.requestMeasure(); nestedView?.focus(); }
+    else void refreshPreview();
+    options.outerView.requestMeasure();
+  });
+
+  function connect(): Promise<void> {
+    if (connectPromise || destroyed) return connectPromise ?? Promise.resolve();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    connectPromise = (async () => {
+      diagnosticPullEpoch++;
+      if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+      if (diagnosticPullTimer) { clearTimeout(diagnosticPullTimer); diagnosticPullTimer = null; }
+      const previousClient = client;
+      const previousSocket = socket;
+      client = null;
+      socket = null;
+      sessionInfo = null;
+      // Reset running completion contexts before removing their state field.
+      if (nestedView) nestedView.dispatch({ selection: nestedView.state.selection });
+      nestedView?.dispatch({ effects: binding.reconfigure([]) });
+      previousClient?.disconnect();
+      previousSocket?.close();
+      status.hidden = false;
+      status.textContent = "Connecting through Rosetta";
+      try {
+        const session = await sessionApi.createRustSession(options.block.key, latestCode);
+        if (destroyed) return;
+        const nextClient: LSPClient = new LSPClient({
+          extensions: rustClientExtensions(canRequestHover),
+          notificationHandlers: {
+            "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+              const file = nextClient.workspace.getFile(session.documentUri);
+              if (destroyed || client !== nextClient || !file || params.uri !== session.documentUri ||
+                  params.version !== file.version || file.doc.toString() !== latestCode) return true;
+              pendingDiagnosticsVersion = null;
+              diagnosticPullEpoch++;
+              if (diagnosticPullTimer) clearTimeout(diagnosticPullTimer);
+              updateDiagnosticsForVersion(currentDocVersion, [...params.diagnostics], { log: true });
+              return true;
+            },
+          },
+          rootUri: session.rootUri, sanitizeHTML: sanitizeHtml, timeout: 20_000,
+        });
+        const nextSocket = await sessionApi.connectWebSocket(session.websocketUrl);
+        if (destroyed) { nextSocket.close(); return; }
+        client = nextClient;
+        socket = nextSocket;
+        let timeout: ReturnType<typeof setTimeout>;
+        const closed = new Promise<never>((_resolve, reject) => {
+          nextSocket.addEventListener("close", () => reject(new Error("Rosetta connection closed")), { once: true });
+          nextSocket.addEventListener("error", () => reject(new Error("Rosetta connection failed")), { once: true });
+          timeout = setTimeout(() => reject(new Error("Rosetta initialization timed out")), 20_000);
+        });
+        try {
+          nextClient.connect(createWebSocketTransport(nextSocket));
+          await Promise.race([nextClient.initializing, closed]);
+        } finally { clearTimeout(timeout!); }
+        if (destroyed) { nextClient.disconnect(); nextSocket.close(); return; }
+        sessionInfo = session;
+        currentDocVersion = 1;
+        resolvedDiagnosticsVersion = 0;
+        pendingDiagnosticsVersion = null;
+        diagnosticPullEpoch++;
+        nestedView?.dispatch({ effects: binding.reconfigure(nextClient.plugin(session.documentUri, "rust")) });
+        const interrupted = () => {
+          if (!destroyed && socket === nextSocket) {
+            status.hidden = false;
+            status.textContent = "Reconnecting Rust through Rosetta";
+            scheduleReconnect();
+          }
+        };
+        nextSocket.addEventListener("close", interrupted, { once: true });
+        nextSocket.addEventListener("error", interrupted, { once: true });
+        status.hidden = true;
+        reconnectDelay = 250;
+        options.log("Rosetta Rust session ready.");
+        schedulePersist(session, currentDocVersion);
+        if (!editing) void refreshPreview();
+      } catch (error) {
+        if (destroyed) return;
+        client?.disconnect();
+        socket?.close();
+        client = null;
+        socket = null;
+        sessionInfo = null;
+        status.textContent = `Rosetta connection failed: ${String(error)}`;
+        options.log(status.textContent);
+        scheduleReconnect();
+      }
+    })().finally(() => { connectPromise = null; });
+    return connectPromise;
+  }
+  function scheduleReconnect(): void {
+    if (destroyed) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; void connect(); }, reconnectDelay);
+    reconnectDelay = Math.min(5000, reconnectDelay * 2);
+  }
+  void connect();
 
   return {
     destroy() {
       destroyed = true;
+      previewEpoch++;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (persistTimer) {
         clearTimeout(persistTimer);
       }
@@ -496,6 +597,7 @@ function createRustInlineHandle(
         currentDocVersion += 1;
         schedulePersist(sessionInfo, currentDocVersion);
       }
+      if (!editing) void refreshPreview();
       options.outerView.requestMeasure();
     },
   };
@@ -503,11 +605,12 @@ function createRustInlineHandle(
 
 export function createEmbeddedRustAdapter(
   sessionApi: DemoSessionApi,
+  initiallyEditing = false,
 ) {
   return {
     ...baseRustAdapter,
     createInlineHandle(options: EmbeddedBlockInlineCreateOptions<EmbeddedRustBlock>) {
-      return createRustInlineHandle(sessionApi, options);
+      return createRustInlineHandle(sessionApi, options, initiallyEditing);
     },
   };
 }
