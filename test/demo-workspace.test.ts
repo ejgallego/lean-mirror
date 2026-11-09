@@ -18,6 +18,7 @@ async function createFixture(): Promise<{ demoDir: string; workspace: DemoWorksp
   await writeFile(join(workspaceDir, "Main.rs"), "fn main() {}\n", "utf8");
   await writeFile(join(workspaceDir, "Main.lean"), "import Helper\n", "utf8");
   await writeFile(join(workspaceDir, "Helper.lean"), "def helperValue := 1\n", "utf8");
+  await writeFile(join(workspaceDir, "AeneasDemo.lean"), "def bump (x : Nat) := x + 1\n", "utf8");
   await writeFile(join(workspaceDir, "RustSnippets.lean"), "import Helper\n", "utf8");
   await writeFile(
     join(workspaceDir, "lakefile.toml"),
@@ -212,6 +213,7 @@ describe("demo workspace backend", () => {
       workspace.uris.embeddedLeanUri,
       workspace.uris.documentUri,
       workspace.uris.helperUri,
+      new URL("AeneasDemo.lean", workspace.uris.documentUri).href,
     ]);
   });
 

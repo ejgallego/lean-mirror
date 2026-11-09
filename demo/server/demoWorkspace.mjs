@@ -119,8 +119,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
       activeExampleLabel: "Default workspace",
       demoProject: "Lean 4 + CodeMirror 6",
       demoSummary:
-        "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline. The Rust driver remains available in Open Documents.",
-      demoTitle: "Rust inside a Lean document",
+        "A Rust docstring beside its hand-authored Aeneas-style Lean translation and checked proof. This is a static mock-up: Rust edits do not regenerate Lean.",
+      demoTitle: "Rust and Lean: an Aeneas mock-up",
     };
   }
 
@@ -139,6 +139,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     if (!externalMode) {
       documentMap.set(documentUri, "lean4");
       documentMap.set(helperUri, "lean4");
+      documentMap.set(pathToFileURL(join(defaultWorkspaceDir, "AeneasDemo.lean")).toString(), "lean4");
     }
     documents = [...documentMap.keys()];
     documentLanguageIds = Object.fromEntries(documentMap);

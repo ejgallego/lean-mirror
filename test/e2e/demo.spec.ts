@@ -658,7 +658,68 @@ test("external demo switches through all ready prepared examples", async ({ page
   }
 });
 
-test("Lean default shows editable raw Verso source with current Rust and Lean hovers", async ({ page }) => {
+test("static Aeneas mock-up pairs a Rust docstring with checked Lean without regeneration", async ({ page }) => {
+  let regenerationRequests = 0;
+  page.on("request", request => {
+    if (request.url().endsWith("/regenerate-rust-main")) regenerationRequests++;
+  });
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("AeneasDemo.lean");
+  await expect(page.locator("#extraction-state")).toHaveText("Static mock-up");
+  await expect(page.locator("#regenerate-workspace")).toBeDisabled();
+  const content = page.locator("#editor > .cm-editor .cm-content");
+  await expect(content).toContainText("pub fn bump(x: &mut u32)");
+  await expect(content).toContainText("Static mock-up:");
+  const before = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(before).toContain("-/\ndef bump (x : U32) : Result U32");
+  const tooltip = page.locator(".cm-tooltip .cm-lsp-hover-tooltip");
+  await hoverSourceText(page, "pub fn bump(", "bump");
+  await expect(tooltip).toContainText("fn bump");
+  await expect(tooltip).toContainText("mut u32");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "#check bump", "bump");
+  await expect(tooltip).toContainText("AeneasDemo.bump");
+  await page.mouse.move(10, 10);
+  await page.locator("#lean-infoview").getByText("All Messages", { exact: false }).first().click();
+  await expect(page.locator("#lean-infoview")).toContainText("Except.ok 42");
+  await expect(page.locator("#lean-infoview")).toContainText("integerOverflow");
+  await expect(content.locator("..").locator(".cm-lintRange-error")).toHaveCount(0);
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("*x += 1;", "*x += 2;"))).toBe(true);
+  const after = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(after.slice(after.indexOf("\ndef bump"))).toBe(before.slice(before.indexOf("\ndef bump")));
+  await expect(page.locator("#extraction-state")).toHaveText("Static mock-up");
+
+  await clickButtonByText(page, "Render Rust");
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  await page.locator(".cm-embedded-block-inline .cm-content").click();
+  const saved = page.waitForResponse(response => response.url().endsWith("/rust-document") &&
+    response.ok() && response.request().postDataJSON()?.code?.includes("*x += 3;"));
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("3");
+  await saved;
+  await clickButtonByText(page, "Show Verso source");
+  const inlineEdited = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(inlineEdited).toContain("*x += 3;");
+  expect(inlineEdited.slice(inlineEdited.indexOf("\ndef bump"))).toBe(before.slice(before.indexOf("\ndef bump")));
+
+  // Lean remains live and checked even though the source/translation pairing is static.
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("checkedAdd x 1", "checkedAdd x 2"))).toBe(true);
+  await content.click();
+  await page.keyboard.press("Control+End");
+  await expect(content.locator("..").locator(".cm-lintRange-error")).not.toHaveCount(0);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("checkedAdd x 2", "checkedAdd x 1"))).toBe(true);
+  await expect(content.locator("..").locator(".cm-lintRange-error")).toHaveCount(0);
+  expect(regenerationRequests).toBe(0);
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("Lean basic example shows editable raw Verso source with current Rust and Lean hovers", async ({ page }) => {
   const methods: string[] = [];
   await page.routeWebSocket(/\/rust-lsp\?/, route => {
     const server = route.connectToServer();
@@ -668,7 +729,7 @@ test("Lean default shows editable raw Verso source with current Rust and Lean ho
       server.send(raw);
     });
   });
-  await page.goto("/");
+  await page.goto("/?example=basic");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
@@ -715,7 +776,7 @@ test("rendered mode keeps Rosetta preview and all inline Rust editor features", 
       server.send(raw);
     });
   });
-  await page.goto("/?view=rendered");
+  await page.goto("/?example=basic&view=rendered");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.lean");
   const preview = page.getByLabel("Rust code preview");
@@ -780,7 +841,7 @@ test("inline Rust retries a failed Rosetta reconnect and preserves preview toggl
     if (connections === 2) { void route.close({ code: 1011, reason: "temporary outage" }); return; }
     route.connectToServer();
   });
-  await page.goto("/?view=rendered");
+  await page.goto("/?example=basic&view=rendered");
   await expect(page.getByLabel("Rust code preview").locator("[data-rosetta-token]").first()).toBeVisible();
   await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
   const content = page.locator(".cm-embedded-block-inline .cm-content");

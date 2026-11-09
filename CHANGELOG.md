@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- A static Aeneas-style `bump` example whose Rust Verso docstring is attached to its Lean translation, with a self-contained checked-arithmetic model, a proved increment specification, and success/overflow evaluations. Rust edits do not regenerate Lean.
+
 - A Lean-first full demo with real Verso Rust fences, Rosetta-backed rendered previews, an inline editing toggle, all six Rust editor features, and independent Rust session recovery. The Rust-driver and external Anneal experiments remain available.
 
 - The infoview host mounts through `mountInfoview()` when the installed `@leanprover/infoview` provides it, so `dispose()` unmounts the React tree; older releases keep the detach-only fallback.

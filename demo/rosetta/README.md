@@ -1,10 +1,20 @@
 # Rosetta in the Lean demo
 
-Run `npm run demo` and open the frontend. Main.lean imports RustComment and
+Run `npm run demo` and open the frontend. AeneasDemo.lean imports RustComment and
 uses `set_option doc.verso true`. A Rust fence such as
 `rust (name := demoWidget)` is therefore accepted by Lean's actual Verso
 doc-comment elaborator. The extension records ordinary code; elaboration never
 starts a language server.
+
+The default example is a static Aeneas-style mock-up: a Rust `bump(&mut u32)`
+docstring is attached to its corresponding Lean `bump` definition. The shape
+follows [Aeneas's mutable-input increment example](https://github.com/AeneasVerif/aeneas/blob/main/tests/lean/Tutorial/Tutorial.lean).
+`AeneasModel.lean` is a small hand-authored model, not the Aeneas runtime: `U32`
+uses Lean's `UInt32`, `Result` uses `Except`, and addition checks the overflow
+bound. The theorem proves a mathematical increment under that bound, without
+`sorry`. Rust edits update only the docstring and Rosetta overlay; they do not
+regenerate or validate correspondence with the Lean model. The UI labels the
+pair Static mock-up. `?example=basic` opens the original Main.lean example.
 
 The default shows the raw, editable Verso comment. Rust names have Rosetta
 hovers directly in that source; hover ranges map only to Rust body lines, with

@@ -58,7 +58,7 @@ The [save/recovery contract](workspace-persistence.md) describes retained disk
 versions and interruption handling.
 Run `npm run test:e2e:workspace` for these workflows; they also run against the
 isolated package in `npm run test:packed:browser`. Browser suites reset Main.lean,
-Helper.lean, Main.rs, and RustSnippets.lean from their committed baselines.
+Helper.lean, Main.rs, RustSnippets.lean, and AeneasDemo.lean from their committed baselines.
 
 The three external Anneal scenarios are deliberately skipped in ordinary demo
 CI. Run `npm run test:e2e:zerocopy-anneal` for work on generation, cache identity,
@@ -129,7 +129,13 @@ OpenAI's [guidance on revisiting skills and prompts for GPT-6 Astra](https://dev
 
 ## Rosetta demo host
 
-The default full demo opens Main.lean with raw, editable Verso source and Rust
+The default full demo opens AeneasDemo.lean, a hand-authored static Aeneas-style
+translation and proof with a Rust docstring attached to the Lean definition.
+`AeneasModel.lean` supplies a small checked-u32 model without an Aeneas dependency.
+`lake build AeneasDemo` in `demo/workspace` checks the model and proof.
+Rust edits do not regenerate Lean; browser coverage verifies that the translation
+is unchanged and that editing the Lean body still produces real proof errors.
+`?example=basic` selects the earlier Main.lean example. Both have raw Verso source and Rust
 LSP hovers. Render Rust in the gutter enables the preview and its Edit Rust /
 Preview Rust toggle; `?view=rendered` starts there. `?mode=rust` selects the retained
 Rust-driver workflow. The native Rosetta facade and its pinned core package use

@@ -442,6 +442,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   }
 
   function setRegenerateControlState(): void {
+    const staticMockup = currentUri?.endsWith("/AeneasDemo.lean") ?? false;
+    if (staticMockup) options.ui.setExtractionState("Static mock-up", "pending");
+    else if (rustMainExtractionFresh !== null && !rustMainRegenerationInFlight) {
+      options.ui.setExtractionState(rustMainExtractionFresh ? "Fresh" : "Stale", rustMainExtractionFresh ? "fresh" : "stale");
+    }
     const canRegenerate = canRegenerateCurrentRust();
     const autoQueued = Boolean(rustMainAutoRegenerateTimer);
     const enabled = regenerationMode === "manual" && canRegenerate;
@@ -454,7 +459,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       busy: rustMainRegenerationInFlight,
       enabled,
       label,
-      title: session.canRegenerate
+      title: staticMockup ? "Rust and Lean are paired by hand in this static mock-up." : session.canRegenerate
         ? "Regenerate the Anneal workspace from the current Rust source."
         : "Regeneration is only available for manifest-backed Anneal demos.",
     });
@@ -839,7 +844,10 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   options.ui.setStatus("Loading session");
   const session = await fetchSessionWithPreparationProgress();
   rustMainDiskRevision = session.rustMainDiskRevision ?? "";
-  const leanDocumentUri = session.documents.find(uri => uri.endsWith("/Main.lean"));
+  const preferredLeanFile = new URLSearchParams(location.search).get("example") === "basic"
+    ? "Main.lean" : "AeneasDemo.lean";
+  const leanDocumentUri = session.documents.find(uri => uri.endsWith(`/${preferredLeanFile}`)) ??
+    session.documents.find(uri => uri.endsWith("/Main.lean"));
   const initialUri = new URLSearchParams(location.search).get("mode") !== "rust" && leanDocumentUri
     ? leanDocumentUri : session.documentUri;
   const initialDoc = initialUri === session.documentUri
