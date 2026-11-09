@@ -12,11 +12,12 @@ selection. Supplied or mock mathematical content is sufficient while interaction
 and rendering are designed; author metadata and automatic presentation providers
 come later. A separate reading pane is not the default target.
 
-The detailed interactions below remain proposals. The
-[interaction design](enriched-display-design.md#interaction-proposal-for-review)
-compares in-place and margin-to-inline presentation and specifies source reveal,
-contribution focus, and pending/error states for review. Ordinary reactive Lean
-editing remains the baseline. The current task is design, before implementation.
+The [reviewed interaction design](enriched-display-design.md#interaction-proposal-for-review)
+selects in-place rendering for the first UI slice, with a three-way requested
+presentation control and retained original context lines. It defines whole-range
+source selection protection, whole-statement rendered selection, and explicit
+focus handoff. These are trial acceptance contracts, not implemented behavior.
+Ordinary reactive Lean editing remains the baseline; this revision updates design.
 
 ## Goal and governing constraint
 
@@ -80,6 +81,8 @@ Acceptance:
 - Moving, deleting, or editing a declaration does not leave another declaration
   displaying its documentation. Links reveal the correct target and source.
 - Toggling the display does not alter source bytes or enter the undo history.
+- Mixed source/rendered representations have distinct accessible labels and a
+  coherent reading order; hidden source is not announced again in Rendered.
 
 ## UC3: Read the core argument, then expand it
 
@@ -127,9 +130,27 @@ Acceptance:
   as permission to erase the draft or hide the rest of the file.
 - Source, diagnostics, and rendered mathematics can have different availability
   states. The UI exposes the distinctions needed to understand current feedback.
-- Keyboard movement, selection, copy, search, and source editing remain usable.
-  Default copy returns Lean source; copying a rendered mathematical form is a
-  separately named action.
+- Source selection protection covers every selected interval, including Select
+  All and secondary cursors. Selecting through a collapsed helper reveals it even
+  when neither endpoint enters it. Newly applied presentation cannot rehide it.
+- A local editing operation whose full footprint still reaches hidden source
+  first reveals without source or clipboard changes at any cursor. Boundary
+  Backspace/Delete obeys the same rule, including auto-repeat protection.
+- Exact source-text selections copy their source ranges. Rendered mathematics
+  supports visibly selected whole statements initially; default Copy and Copy
+  Lean statement use the exact statement range, excluding documentation/proof.
+  Copy rendered mathematics is separate. Partial rendered selection is deferred.
+- Return to display with current data remembers source selections, explicitly
+  transfers focus and ends source selection ownership before replacing the region.
+  Edit source restores the valid bookmark. Cross-region selections keep source
+  open; typing on a rendered control does not implicitly edit source.
+- Input and IME composition are never delayed or dropped for animation.
+- An earlier notation/section-context edit invalidates later mathematical output
+  even when the theorem's own text is unchanged. Marks can survive independently.
+- The actual CodeMirror CRLF/non-BMP path verifies ranges against the captured
+  editor string, including display, source reveal and edits/undo before a region.
+- Keyboard and screen-reader walkthroughs expose checking/admitted/incomplete or
+  unavailable status independently of successful mathematical rendering.
 - Closing a view or superseding a request releases its subscriptions and pending
   work. Expensive detail rendering is requested only when useful to the view.
 
@@ -174,8 +195,9 @@ latency. Numeric performance budgets follow initial measurements.
   reader-specific options configured? Configurability itself is agreed.
 - Which mathematical constructs have a faithful initial TeX representation?
 - Which documentation formats can the active Lean toolchain export structurally?
-- In the same editor, should Mixed presentation place rendered content directly
-  in the source flow or in a companion margin that moves inline?
-- Which explicit and caret-driven actions reveal source, and when may it collapse?
+- Which input/clipboard and accessibility mechanisms satisfy the reviewed
+  selection, mutation and focus contracts in the actual editor?
+- Does a later margin-to-inline approach pass real cursor/layout feasibility
+  checks? It is not the first-slice placement.
 - Which live snapshot publication API is suitable upstream? Pull versus broadcast
   is an implementation choice to evaluate against the same acceptance cases.

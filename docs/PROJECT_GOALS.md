@@ -7,8 +7,10 @@ slice, rather than a commitment to implement every candidate below.
 The enriched-display direction was clarified on 2026-11-09: one document
 component progressively shifts between source and enriched presentation. Manual
 contribution selection and supplied/mock rendering content support the first UI
-design work. The [interaction proposal](enriched-display-design.md) is under
-review before implementation; the two-pane experiment is supporting evidence.
+design work. The [reviewed interaction proposal](enriched-display-design.md)
+chooses in-place rendering, a three-way presentation control and original context
+lines for the first slice. Selection, hidden-source mutation and focus handoff
+are explicit acceptance gates; the two-pane experiment is supporting evidence.
 
 ## Purpose
 
@@ -135,12 +137,12 @@ shared parser, new transport, or a general-purpose IDE framework.
 
 ## Proposed next slices
 
-1. **Settle enriched-display interaction and rendering design.** Review the
-   same-editor presentation alternatives, source reveal behavior, manual
-   contribution focus and error/pending states. Use supplied or mock presentation
-   data. After agreement, implement one UI slice and validate source preservation,
-   selection/undo and ordinary Lean feedback. Let that experience inform the
-   later mathematical provider and shared information boundary.
+1. **Validate the reviewed in-place interaction in a real editor.** Use supplied
+   presentation data and manual contribution marks. Concentrate the first slice
+   on full-selection visibility, replacement boundaries, clipboard scope, focus
+   restoration, composition and ordinary Lean feedback. Include actual editor
+   CRLF/non-BMP coordinates, upstream context edits and screen-reader behavior.
+   Let that evidence inform the later mathematical provider and shared boundary.
 2. **Complete the actual infoview lifetime integration in parallel.** Assume
    upstream ownership/disposal support will land shortly. The local adapter
    already detects `mountInfoview()` when available; validate a real candidate or

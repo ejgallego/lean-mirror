@@ -1,8 +1,10 @@
 # Enriched display: initial design exploration
 
-Status: interaction proposal, 2026-11-09. The [use cases](enriched-display-use-cases.md)
+Status: reviewed interaction proposal, 2026-11-09. The [use cases](enriched-display-use-cases.md)
 govern the design. This document records proposals for review, not an implemented
-interaction contract. The existing two-pane demo remains an extraction experiment.
+interaction contract. This revision incorporates the review of `ab088042`: in-place
+layout is selected for the first slice, with the selection, mutation and focus
+contracts below as acceptance gates. The two-pane demo remains an extraction experiment.
 
 The agreed direction is one document component with a progressive shift between
 source and enriched presentation, within the source editor. The current priority
@@ -21,76 +23,168 @@ controls which regions receive emphasis or are collapsed. A user can inspect the
 main contributions as ordinary Lean source, or read the entire file with enriched
 presentation. Neither control changes the source or chooses mathematical meaning.
 
-Use three named anchors while comparing the interaction: **Source**, **Mixed**,
-and **Rendered**. A control may later interpolate between them; an arbitrary
-percentage is not a product requirement. Continuous refers first to keeping one
-document, location and editing context through the transition. Motion and the
-precise control remain design questions.
+Use a three-way control: **Source**, **Mixed**, and **Rendered**. It describes
+**requested presentation**; individual regions can remain source because they
+are being edited, lack a current presentation, or have unsupported structure.
+Show a local reason such as “Editing” or “Presentation unavailable” so the global
+control does not appear broken. A continuous slider can be explored later.
+Continuity initially means preserving one document, location and editing context.
 
 | Anchor | Documentation | Statements | Proofs and supporting material |
 | --- | --- | --- | --- |
 | Source | Original comments | Original Lean | Visible unless independently folded |
-| Mixed | Rendered beside its source location | Source with a supplied mathematical companion | Existing expansion choices retained |
+| Mixed | Rendered immediately below its source | Source with a mathematical companion immediately below it | Existing expansion choices retained |
 | Rendered | Rendered at its original position | Supplied presentation replaces the source visually | Proof disclosure; supporting material follows contribution focus |
 
 Source is the initial state for the first interaction trial, with Mixed one
 explicit action away. This is a proposed starting point, not a permanent default.
 Global presentation changes do not close an active edit or a user-opened proof.
-Returning to Source always restores source visibility, while contribution focus
-remains a separate, visibly active choice.
+Returning to Source restores source representation; contribution focus and user
+folds continue to control visibility as separate, visibly active choices.
 
-### Compare two placements
+### Placement selected for the first slice
 
-**In place:** rendered content is introduced immediately above/below its source
-region in Mixed, then occupies that region in Rendered. This is the simpler
-reference design and adapts naturally to narrow windows. Its cost is vertical
-movement while source and presentation coexist.
+**In place:** Mixed places the rendered companion immediately below its source
+region consistently throughout the file; Rendered occupies that region visually.
+Both retain source order, a single document scroll position, and a narrow-window
+baseline. Vertical movement must preserve the active declaration's screen anchor
+(or the top visible declaration when reading).
 
-**Margin to inline:** Mixed places a presentation companion to the right of its
-source region, in the same document flow. Moving toward Rendered lets it occupy
-the source column. This more directly explores the original right-to-left idea.
-Its costs are width, alignment for unequal source/rendered heights, and an
-additional narrow-window transition. At narrow widths the companion stacks.
+**Margin to inline is deferred pending a real-editor feasibility experiment.**
+Its costs include unequal heights, width and wrapping, and cursor geometry.
+In an [upstream block-wrapper discussion](https://discuss.codemirror.net/t/support-blockwrappers-altering-layout/9652),
+the maintainer states that lines and block widgets must remain vertically
+arranged. A flex/grid wrapper containing actual source lines and a companion is
+therefore not an established route. A visual sketch cannot establish feasibility;
+this does not rule out every possible margin implementation. Any later experiment
+must check unequal source/rendered heights, wrapping, click-to-caret placement,
+keyboard movement, resizing and narrow-window stacking before adoption.
 
-Both preserve declaration order and one document scroll position. Neither has
-an independently scrolling reader pane. The design comparison should use the
-same file, contribution choices, disclosure controls and editing behavior.
-No glyph crossfades or animated typing are required. Layout transitions should
-anchor the active declaration (or the top visible declaration when reading),
-respect reduced-motion preferences, and finish before resuming normal typing.
-The first implementation may use discrete transitions to establish these rules.
+The first slice can switch layout discretely. Any later motion respects reduced
+motion and never delays or drops input. Typing snaps a transition to its final
+layout, or defers it until editing/composition permits it. Never queue keystrokes
+behind animation or replace an active composition node to finish a transition.
 
 ### Local reveal and editing
 
 A rendered statement and its documentation expose a labeled **Edit source**
-action; proofs have a separate disclosure. The first design does not require an
-exact correspondence between a clicked mathematical symbol and a Lean token.
-A known source location or the start of the declaration is an honest initial
-caret target.
+action; proofs have a separate disclosure. There is no mathematical-symbol to
+Lean-token correspondence in the first slice. A known source location or the
+start of the selectable source region is the initial caret target.
 
-| Action | Proposed behavior |
+| Action | Required behavior for the trial |
 | --- | --- |
-| Edit source | Reveal that region, restore its last valid source selection or choose its start, focus the existing editor |
+| Edit source | Reveal the region, restore its valid remembered source selections or choose its start, and focus the existing editor |
 | Open proof | Reveal the proof in place without changing contribution membership |
-| Start typing or composing input | Keep the active source region visible; retain normal Lean feedback and undo |
+| Start typing or composing input | Keep the complete active source selections visible; preserve Lean feedback, input events and undo |
 | Move focus elsewhere | Leave deliberately revealed source open; do not collapse it on blur |
-| Return to display | End the local reveal override if a current presentation is available; otherwise retain source with an availability explanation |
-| Change the global presentation | Apply to eligible regions while preserving active selections, edits and explicit expansions |
-| Search, follow a reference, navigate to a diagnostic | Reveal the destination and necessary enclosing regions, even when contribution focus would hide it |
-| Close a region containing the caret/selection | Keep it open or require an explicit focus transfer; never hide the selection silently |
+| Return to display | Perform the explicit focus handoff below when presentation is current; otherwise retain source and explain why |
+| Change requested presentation | Preserve active selections, edits and explicit expansions; show local source exceptions |
+| Search, follow a reference, navigate to a diagnostic | Reveal the destination and enclosing regions before focusing source |
+| Select across hidden source / Select All | Reveal the entire selected intervals, for all source selections, before subsequent editing |
+| Backspace/Delete into hidden source | Reveal the affected regions and consume the first action without deleting anything |
+| Cut, paste, typing or another replacement still reaching hidden source | Reveal all affected ranges and consume the action without mutation or clipboard change; require a new editing action |
+| Close a region intersecting an active source selection | Keep it open until the selection is moved or an explicit focus handoff completes |
 
-Ordinary clicks select/focus rendered content or activate an explicit control;
-hover alone does not switch representation. Keyboard users can reach all reveal
-and disclosure controls. In source editing, moving a source caret into a hidden
-range should reveal that range before editing; no whole theorem becomes an
-accidentally deletable atomic object. Test arrows, Backspace/Delete, multi-range
-selection and input composition as dedicated interactions.
+#### Source selection and mutation contract
 
-Presentation changes stay out of source undo history. Undo of a source edit
-reveals its affected region if necessary. Proposed clipboard policy: a document
-selection copies underlying Lean source, including folded material; copying a
-rendered representation is a separately named action. This policy needs a user
-walkthrough, particularly for mixed selections and accessible text selection.
+Protection covers the **whole interval of every active source selection**, not
+just endpoints or the primary cursor. Empty selections protect their caret;
+nonempty selections reveal every intersected hidden region. Newly applied
+presentation/focus changes may not rehide those intervals. Select All in the
+source editor reveals the full selected document. This stronger trial rule also
+applies to source selections made for Copy; no copy-only hidden-selection mode
+is needed initially.
+
+Selection visibility alone is not a sufficient mutation guard. Before a local
+editing command commits changes, inspect its complete intended source footprint,
+including changes expanded by deletion semantics and all secondary selections.
+Use visibility before the command; expanding decorations in the same transaction
+as a deletion does not count as prior disclosure. If any change would reach hidden
+text, reveal the affected regions and consume that entire invocation. Do not partially mutate the other cursors, enqueue a
+replay, alter the clipboard for Cut, or create a source undo entry. A subsequent
+intentional action operates normally on visible source. Boundary Backspace/Delete
+uses the same rule; suppress the held key's auto-repeat until key release so a
+reveal-only action cannot immediately become an unseen deletion.
+
+This applies to keyboard, menu and native input paths (including cut, paste,
+replacement typing and drag/drop), not just a particular keymap. Composition
+starts with its target already revealed; if that cannot be established safely,
+keep that region in source rather than taking ownership of or discarding IME
+input. Undo/redo and explicit workspace/code-action edits reveal their affected
+regions before applying the authorized edit without introducing a second source
+history. This design does not add confirmation prompts to those operations.
+
+The installed CodeMirror commands and the
+[upstream deletion implementation](https://github.com/codemirror/commands/blob/main/src/commands.ts#L519-L555)
+construct changes from selections and may expand endpoints through atomic ranges.
+Consequently, cursor-motion hooks or `atomicRanges` alone cannot enforce this
+contract. Do not make a rendered theorem an atomic deletion unit. The eventual
+implementation must exercise the actual input/clipboard paths; this is a design
+requirement, not a claim that those guards exist today.
+
+#### Rendered selection and clipboard contract
+
+Use **whole-statement region selection** for rendered mathematics, visibly marked
+and labeled “Lean statement selected”. This is view selection, distinct from
+CodeMirror's active source-text selection. A pointer click or accessible region
+selection control selects the region; it does not enter source editing. Clipboard
+commands use the focused selection owner. Entering source clears the rendered
+selection, and a remembered bookmark never controls Copy. Arbitrary
+substring selection inside rendered mathematics and mixed source/widget text
+selection are deferred. Dragging over `a + b` must not show a partial native text
+selection that then silently copies a larger source range. Offer Edit source for
+exact source-text selection. Hover never changes representation.
+
+A statement region must have an exact source range covering its declaration
+modifiers/keyword, name, binders and type, excluding documentation, the value/proof
+separator and proof. The same scope is used by default Copy for that selected
+rendered region and by the explicit **Copy Lean statement** action. Do not silently
+fall back to copying the whole declaration. When that exact range is unavailable,
+leave the statement as source and omit/disable the scoped rendered-copy action.
+The UI trial may use explicitly supplied fixture ranges; the flattened snapshot
+regions alone are not a general ownership/mapping contract.
+
+**Copy rendered mathematics** is a separate action for the complete supplied
+mathematical representation, including its displayed binder context. It uses
+provider-supplied clipboard text, not incidental renderer DOM text. No automatic
+TeX-to-Lean or substring mapping is implied. Source selections copy exactly their
+selected Lean ranges with normal editor multiple-selection semantics. Material
+previously folded is included because source selection already revealed it.
+Rendered-region Copy can preserve the rendered view because it does not mutate
+source and its whole-region scope is visible. Cut/Delete/paste on a rendered
+selection reveal the source region and transfer the equivalent source selection
+without mutating it; the next intentional editing action operates on that source.
+
+#### Successful Return to display handoff
+
+Keep three concepts separate: a remembered source bookmark, active source
+selection(s), and keyboard focus ownership. When presentation is current:
+
+1. Remember every selection contained in the local edit region, including direction,
+   primary range and revision. If a selection crosses its boundary or another
+   active cursor lies elsewhere, leave it open and explain that the source
+   selection must first be narrowed; never silently discard the extra ranges.
+2. Transfer focus to the persistent declaration header's **Edit source** control.
+   End source-editing selection ownership and clear its active highlight. The
+   editor may retain a parked, collapsed boundary position, but it is not an
+   active hidden selection or the saved bookmark.
+3. Apply the rendered presentation and mark the whole statement as the view's
+   selected region. The focused control must survive the decoration change.
+4. On Edit source, reveal first, restore the valid bookmark, then focus the editor.
+   Map bookmarks only through known changes; if correspondence is uncertain,
+   reveal source and choose the region's start rather than a stale location.
+
+Check availability and the selection preconditions before beginning the handoff.
+If presentation is absent or stale, keep the source edit state and selection.
+Ordinary printable typing while the rendered control has focus does not insert,
+replace, or implicitly enter source. Enter/Space activates its Edit source action;
+normal navigation and accessibility commands remain available. Any later source
+focus must satisfy selection visibility before editing begins.
+
+Presentation changes stay out of source undo history. This explicit handoff is
+also how a user closes an edit with a caret still inside it; normal blur never
+performs that closure.
 
 ### Selecting the main contributions
 
@@ -105,8 +199,11 @@ marked contributions are emphasized. With it on, contiguous unmarked regions
 become small expansion rows at their original positions. Show the available
 count and enough labels to orient the reader; never collect all supporting
 material into an unrelated group at the end. Namespace/section context and
-required assumptions must remain discoverable. The design trial should compare
-compact context headers against retaining the original context lines.
+required assumptions remain available in the original source lines initially.
+Keep a visible namespace/section scaffold and retain scope declarations such as
+variables, assumptions, notation and opens. If the backend cannot establish which
+context is relevant, retain the enclosing context conservatively. Compact derived
+context headers are later work, not a prerequisite for contribution focus.
 
 Expanding a supporting region does not mark it as a contribution. Active edits,
 current selections and navigation targets override collapse temporarily. Incoming
@@ -149,30 +246,44 @@ illustrate the desired UX but must not claim this finer-grained correspondence
 already exists. Any source fallback must preserve the active cursor anchor; do
 not solve stale data by replacing the entire editor or resetting its scroll.
 
-### Design walkthroughs before implementation
+### Acceptance walkthroughs for the first live-editor slice
 
-Use one small file with documentation, explicit/contextual parameters, two marked
-contributions, several helpers, a long proof and one unsupported region. Prepare
-static current, pending and error states. The existing native fixture may supply
-ranges, but rendering data and contribution choices can be supplied by hand.
+Use a small file with documented contributions, helpers between contributions,
+contextual parameters, a long proof, unsupported syntax and an incomplete/admitted
+proof. Supply presentation data and contribution marks by hand where needed.
+These are required observations for the subsequent implementation, not completed
+tests of this documentation revision.
 
-1. Move Source → Mixed → Rendered with the same declaration in view. Compare
-   In place and Margin to inline, including a narrow window.
-2. Mark two contributions, focus them, expand a helper, then change presentation.
-   Contributions remain highlighted and the helper remains open.
-3. Reveal a theorem to edit, change a hypothesis, and inspect the pending state.
-   Focus, source, selection and Lean feedback remain usable.
-4. Return to display with missing mock presentation. The edited source stays
-   visible rather than displaying unrelated or stale mathematics.
-5. Navigate to an error in a collapsed helper, then undo an edit. Reveal the
-   affected source while retaining unrelated contribution choices.
-6. Walk the same flow with keyboard navigation, selection/copy and reduced motion.
+| Case | Required observation |
+| --- | --- |
+| Source → Mixed → Rendered in place, including a narrow window | Stable declaration anchor and source order; local editing/missing-data exceptions visibly explain requested versus actual presentation |
+| Mark contributions, focus them, expand a helper, change presentation | Membership, highlights and explicit expansion remain independent |
+| Select A through a collapsed helper to B; repeat via Select All and secondary ranges | All selected intervals reveal, including the helper even though neither endpoint is inside it |
+| Cut, Delete, replacement typing and paste across that selection | The complete scope is visible before mutation; if any hidden range remains, the first invocation only reveals and leaves source/clipboard unchanged |
+| Backspace/Delete at either replacement boundary, including a held key | First action only reveals; repeat cannot cause automatic deletion; a new intentional action edits normally |
+| One of several cursors reaches hidden source | The first protected command has no partial mutations at any other cursor |
+| Select rendered mathematics, try dragging over `a + b`, then Copy | Whole statement selected visibly; default/Copy Lean statement copies only its exact statement range; Copy rendered mathematics copies its supplied presentation; no false substring selection |
+| Return to display with current data and a caret inside source | Focus lands on the persistent Edit source control; no active selection is hidden; reopening restores the bookmark |
+| Return with a cross-region or external secondary selection | Source stays open and the selection-scope reason is visible |
+| Return with missing/stale presentation | Edited source and active selection remain available |
+| Navigate to an error in a collapsed helper; undo/redo a source edit | Affected source reveals; unrelated marks remain; presentation changes do not pollute source undo |
+| Start input or IME composition during a presentation transition | Input is never delayed, replayed or dropped for animation; composition retains its editable target |
+| Change earlier notation `local notation "𝓝" => Nat` to `Int`, or change a section parameter | An unchanged later theorem invalidates its mathematical presentation; contribution marks may survive independently |
+| Open actual CRLF/non-BMP source in CodeMirror, render and reveal regions, then edit/undo before them | Ranges index the captured editor string exactly; native substring tests alone do not satisfy this case |
+| Screen-reader walkthrough of Mixed and Rendered, including a collapsed admitted/incomplete proof | Coherent reading order, labeled representations and controls, and separately announced proof/checking status; no duplicate math from renderer internals |
 
-Decisions for this review: placement in Mixed; explicit reveal versus additional
-caret-driven reveal rules; how much context stays visible in contribution focus;
-and whether three presentation anchors express the intended continuous shift.
-Visual spacing and animation should follow these decisions. No editor, backend,
-transport or renderer implementation is authorized by this design document alone.
+In Mixed, label source and rendered representations distinctly and expose one
+accessible mathematical description rather than multiple renderer copies.
+In Rendered, hidden source must not be read a second time. Disclosure controls
+expose their expanded state; proof status comes from Lean when available, or is
+explicitly unavailable. A successful mathematical renderer never implies a
+checked proof. Verify this with an actual screen reader as well as keyboard use.
+
+The first-slice decisions are in-place placement, explicit Edit source with
+protected automatic reveal, retained original context lines, and a three-way
+requested-presentation control. Margin geometry, fine-grained math selection,
+compact context synthesis and animated interpolation remain separate follow-ups.
+The current change is documentation only; real-editor acceptance remains ahead.
 
 ## Information flow
 
@@ -240,10 +351,25 @@ These are required concepts, not finalized field names:
 | Policy identity/configuration and selection reasons | Explain and reproduce the chosen summary |
 | Bounded detail references tied to a summary revision | Load documentation, mathematical statements or dependencies on expansion |
 
-Use original-source UTF-16 ranges at the editor boundary, consistent with the
-existing Verso transport. Bind references to the captured revision and reject
-expired ones; never retain worker snapshots indefinitely just to keep UI handles
-alive. Details may be unavailable without invalidating the outline.
+Ranges are half-open UTF-16 code-unit offsets into the **exact captured source
+string associated with the request**, not an unspecified original file. The
+CodeMirror adapter captures its editor document and sends
+`editor.state.doc.toString()` with the corresponding synchronized revision. The
+returned offsets index that LF-based string directly. Persisted CRLF text or a
+differently normalized string requires an explicit mapping before reuse.
+For example, `b` starts at offset 3 in `a\r\nb` but offset 2 in `a\nb`.
+Non-BMP characters still occupy two UTF-16 code units in either string.
+
+The native probe accepts caller-supplied text and maps from Lean's canonical text
+back to that exact string; its CRLF support does not make those offsets directly
+usable in a normalized editor document. Source equivalence, coordinate basis and
+revision validity are distinct checks. This clarifies the existing browser
+experiment's choice, not a demonstrated defect in it. Verso's adapter must likewise
+name its exact captured string; sharing an encoding alone is insufficient.
+
+Bind references to the captured revision and reject expired ones; never retain
+worker snapshots indefinitely just to keep UI handles alive. Details may be
+unavailable without invalidating the outline.
 
 Request IDs correlate responses. Document revisions establish source identity.
 Analysis sequences order successive updates for the same revision. Selection
@@ -268,7 +394,13 @@ On an edit, invalidate affected displays and cancel obsolete work immediately.
 A stale response cannot regain authority merely because its ranges can be mapped
 through the edit. The simplest initial rule is whole-summary invalidation, with
 source fallback until matching information returns. Later incremental reuse
-requires a demonstrated correspondence contract.
+requires a demonstrated correspondence contract. Equality of a declaration's own
+text or identity does not establish semantic freshness: preceding notation,
+section variables, imports or options can change its interpretation. In particular,
+changing `𝓝` from `Nat` to `Int` invalidates a later unchanged theorem's previous
+natural-number presentation. Preserving a contribution mark/bookmark and reusing
+mathematical output are independent decisions; only the latter requires current
+semantic-context evidence.
 
 ## Configurable backend summarization
 
@@ -322,9 +454,12 @@ limits and trust options.
 Keep source in the existing CodeMirror document. Implement displays and folds
 as view state derived from accepted summaries; expansion preferences are separate
 from document edits and undo. Source reveal, keyboard navigation, search and
-diagnostic navigation must open the relevant regions. No current selection may
-be hidden by a newly applied summary. Measure decoration/widget churn and scroll
-stability before choosing fine-grained incremental updates.
+diagnostic navigation must open the relevant regions. Protection covers every
+interval in every active source selection, including Select All and secondary
+ranges, plus the intended mutation footprint. Apply the selection/mutation and
+explicit focus-handoff contracts above; retained source bookmarks and rendered
+region selections are not active hidden source selections. Measure decoration/widget
+churn and scroll stability before choosing fine-grained incremental updates.
 
 Use revision-local region identities first. Restoring expansion across revisions
 requires conservative correspondence using declaration identity and enclosing
@@ -347,9 +482,10 @@ normal LSP channel are separate coordinated changes.
 
 ## Design sequence and upstream discussion
 
-1. Review the interaction proposal and static alternatives above; settle placement,
-   source reveal, contribution focus, and pending/error behavior.
-2. Once agreed, implement one UI slice within the existing CodeMirror editor using
+1. Use the reviewed in-place, selection/mutation, clipboard and focus contracts
+   above as the baseline. Static alternatives are illustrative, not cursor/input
+   feasibility evidence.
+2. Implement the next UI slice within the existing CodeMirror editor using
    supplied presentation data and manual contribution marks. Preserve ordinary
    Lean feedback and validate the editing walkthroughs.
 3. Use the resulting UI requirements to refine declaration detail queries,
