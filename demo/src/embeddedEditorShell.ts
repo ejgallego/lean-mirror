@@ -22,6 +22,7 @@ export interface ActiveEmbeddedEditor {
 export interface EmbeddedEditorShell {
   close(): void;
   extensionsFor(adapters: readonly AnyEmbeddedBlockEditorAdapter[]): Extension[];
+  sourceBlockAt(state: EditorState, pos: number): EmbeddedBlock | null;
   setDiagnostics(kind: string, diagnostics: ReadonlyMap<string, readonly EmbeddedBlockDiagnostic[]>): void;
 }
 
@@ -65,6 +66,12 @@ export function createEmbeddedEditorShell(
       return next;
     },
   });
+  function adapterFor(block: EmbeddedBlock): AnyEmbeddedBlockEditorAdapter | undefined {
+    return adaptersRef.find(adapter => block.key.startsWith(`${adapter.kind}:`));
+  }
+  function sourceVisible(state: EditorState, block: EmbeddedBlock): boolean {
+    return (adapterFor(block)?.sourceInitiallyVisible ?? false) !== state.field(disabledState).has(block.key);
+  }
   const blocksState = StateField.define<EmbeddedBlock[]>({
     create(state) {
       return collectEmbeddedBlocks(state.doc.toString(), adaptersRef);
@@ -311,11 +318,14 @@ export function createEmbeddedEditorShell(
       if (!adapter) {
         return document.createElement("span");
       }
+      const rust = adapter.kind === "rust";
+      const label = rust ? (this.disabled ? "Render Rust" : "Show Verso source")
+        : (this.disabled ? "Enable widget" : "Disable widget");
       const button = createGutterButton(
         adapter,
-        this.disabled ? "Enable widget" : "Disable widget",
+        label,
         "cm-embedded-gutter-toggle",
-        this.disabled ? "Enable embedded widget" : "Disable embedded widget",
+        rust ? label : (this.disabled ? "Enable embedded widget" : "Disable embedded widget"),
       );
       button.dataset.state = this.disabled ? "disabled" : "enabled";
       button.addEventListener("click", (event) => {
@@ -494,6 +504,9 @@ export function createEmbeddedEditorShell(
   }
 
   return {
+    sourceBlockAt(state, pos) {
+      return state.field(blocksState).find(block => block.from <= pos && pos < block.to && sourceVisible(state, block)) ?? null;
+    },
     close() {
       for (const { handle } of activeHandles.values()) {
         handle.destroy();
@@ -513,7 +526,7 @@ export function createEmbeddedEditorShell(
           lineMarker(view, line) {
             const info = lineBlockInfo(view.state, line);
             if (info.kind === "block-start" && info.block) {
-              if (view.state.field(disabledState).has(info.block.key)) {
+              if (sourceVisible(view.state, info.block)) {
                 return new ToggleBlockMarker(info.block.key, true);
               }
               return null;
@@ -530,7 +543,7 @@ export function createEmbeddedEditorShell(
             }
             return new ToggleBlockMarker(
               widget.block.key,
-              view.state.field(disabledState).has(widget.block.key),
+              sourceVisible(view.state, widget.block),
             );
           },
           lineMarkerChange(update) {
@@ -563,9 +576,11 @@ export function createEmbeddedEditorShell(
         }),
         embeddedBlockSourceMode(adapters, {
           disabled(state, block) {
-            return state.field(disabledState).has(block.key);
+            return sourceVisible(state, block);
           },
+          readOnly(_state, block) { return adapterFor(block)?.sourceEditable !== true; },
         }),
+        ...adapters.flatMap(adapter => adapter.sourceExtensions ? [adapter.sourceExtensions(sourceVisible)] : []),
         ...adapters.map((adapter) => {
           const cached = adapterExtensions.get(adapter);
           if (cached) {
@@ -617,7 +632,7 @@ export function createEmbeddedEditorShell(
                 };
               },
               enabled(state, block) {
-                return !state.field(disabledState).has(block.key);
+                return !sourceVisible(state, block);
               },
             }),
           ];

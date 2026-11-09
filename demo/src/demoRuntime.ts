@@ -40,6 +40,7 @@ import {
   type EmbeddedLeanDocument,
 } from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
+import { filterLeanHovers, rustPositionAt } from "./rustSourceHover.js";
 import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
 import {
   createEmbeddedLeanLspFeatures,
@@ -890,6 +891,17 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       extensions: [
         leanProgress,
         leanInfoviewClientNotifications(() => leanInfoview),
+        filterLeanHovers(params => {
+          if (!currentView || params.textDocument.uri !== currentUri) return false;
+          const { line, character } = params.position;
+          const state = currentView.state;
+          if (line < 0 || line >= state.doc.lines) return false;
+          const sourceLine = state.doc.line(line + 1);
+          if (character < 0 || character > sourceLine.length) return false;
+          const pos = sourceLine.from + character;
+          const block = embeddedEditors.sourceBlockAt(state, pos);
+          return !!block?.key.startsWith("rust:") && rustPositionAt(block, pos) !== null;
+        }),
       ],
       features: {
         semanticTokens: true,

@@ -26,6 +26,10 @@ import {
 import type { DemoSessionApi } from "./demoSession.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
 import { renderRustPreview, type RustPreviewToken } from "./rustPreview.js";
+import { normalizeRustHover, rustHoverDom } from "./rustHover.js";
+import { rustSourceHover } from "./rustSourceHover.js";
+
+export type RustPresentation = "source" | "preview" | "editor";
 
 export interface EmbeddedRustBlock extends EmbeddedBlock {}
 
@@ -66,35 +70,6 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
     },
   },
 });
-
-function stripRustHoverPrefix(text: string): string {
-  return text.replace(/^(?:widget|embedded_[a-z0-9_]+)\r?\n\r?\n/, "");
-}
-
-function normalizeRustHover(
-  contents: string | lsp.MarkupContent | lsp.MarkedString | lsp.MarkedString[],
-): lsp.MarkupContent | null {
-  if (Array.isArray(contents)) {
-    const parts = contents
-      .map((item) => normalizeRustHover(item))
-      .filter((item): item is lsp.MarkupContent => item !== null)
-      .map((item) => item.value);
-    return parts.length > 0 ? { kind: "markdown", value: parts.join("\n\n") } : null;
-  }
-  if (typeof contents === "string") {
-    return { kind: "markdown", value: stripRustHoverPrefix(contents) };
-  }
-  if ("language" in contents) {
-    return {
-      kind: "markdown",
-      value: `\`\`\`${contents.language}\n${stripRustHoverPrefix(contents.value)}\n\`\`\``,
-    };
-  }
-  return {
-    kind: contents.kind,
-    value: stripRustHoverPrefix(contents.value),
-  };
-}
 
 function hoverErrorMessage(error: unknown): string | null {
   if (!error || typeof error !== "object") {
@@ -149,10 +124,7 @@ function rustHoverTooltips(
           end: result.range ? plugin.fromPosition(result.range.end) : pos,
           above: true,
           create() {
-            const dom = document.createElement("div");
-            dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
-            dom.innerHTML = sanitizeHtml(plugin.docToHTML(contents));
-            return { dom };
+            return { dom: rustHoverDom(view, contents) };
           },
         };
       })
@@ -605,12 +577,17 @@ function createRustInlineHandle(
 
 export function createEmbeddedRustAdapter(
   sessionApi: DemoSessionApi,
-  initiallyEditing = false,
+  presentation: RustPresentation = "source",
 ) {
   return {
     ...baseRustAdapter,
+    sourceInitiallyVisible: presentation === "source",
+    sourceEditable: true,
+    sourceExtensions(visible: (state: EditorState, block: EmbeddedRustBlock) => boolean) {
+      return rustSourceHover(sessionApi, baseRustAdapter.parseBlocks, visible);
+    },
     createInlineHandle(options: EmbeddedBlockInlineCreateOptions<EmbeddedRustBlock>) {
-      return createRustInlineHandle(sessionApi, options, initiallyEditing);
+      return createRustInlineHandle(sessionApi, options, presentation === "editor");
     },
   };
 }

@@ -6,12 +6,21 @@ uses `set_option doc.verso true`. A Rust fence such as
 doc-comment elaborator. The extension records ordinary code; elaboration never
 starts a language server.
 
-Rust initially appears as rendered code. Rosetta supplies semantic spans,
-hover results, and versioned diagnostics. Edit Rust reveals the inline
+The default shows the raw, editable Verso comment. Rust names have Rosetta
+hovers directly in that source; hover ranges map only to Rust body lines, with
+UTF-16 and CRLF positions preserved. A lazily opened server-document lease
+holds the Rust overlay without a hidden editor. Each host view owns at most one
+source-hover session, retired on a block switch, view close, or rendering toggle.
+Edits synchronize the overlay; old responses cannot appear after an edit.
+
+Render Rust in the gutter opens the retained rendered view. Rosetta supplies
+semantic spans, hover results, and versioned diagnostics. Edit Rust reveals the inline
 CodeMirror editor; Preview Rust returns to the rendered view. The same editor
 state survives those toggles and a Rosetta reconnection. Nested edits replace
 only their fence inside the authoritative Lean editor buffer, keeping the
-surrounding prose. Lean buffers remain in memory in this experiment; disk saves
+surrounding prose. Show Verso source in the gutter returns to raw editing, and
+`?view=rendered` starts with rendering enabled. The full six-feature Rust editing
+workflow remains in the inline editor. Lean buffers remain in memory; disk saves
 for Lean files are demonstrated by `npm run example:workspace`.
 
 ## Host boundary

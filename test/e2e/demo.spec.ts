@@ -86,6 +86,25 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
   );
 }
 
+async function hoverSourceText(page: Page, lineText: string, name: string) {
+  const line = page.locator("#editor > .cm-editor .cm-line").filter({ hasText: lineText }).first();
+  await line.scrollIntoViewIfNeeded();
+  const point = await line.evaluate((element, text) => {
+    const nodes = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = nodes.nextNode(); node; node = nodes.nextNode()) {
+      const index = node.textContent?.indexOf(text) ?? -1;
+      if (index < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + text.length);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }
+    throw new Error(`Missing source text ${text}`);
+  }, name);
+  await page.mouse.move(point.x, point.y);
+}
+
 function statusValue(page: Page, kind: string) {
   return page.locator(`[data-platform-status-part="value"][data-platform-status-kind="${kind}"]`);
 }
@@ -267,15 +286,16 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
-    await clickButtonByText(page, "Disable widget");
+    await clickButtonByText(page, "Show Verso source");
     await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
-    await expect.poll(() => hasButtonByText(page, "Enable widget")).toBe(true);
+    await expect.poll(() => hasButtonByText(page, "Render Rust")).toBe(true);
     await expect(page.locator(".cm-content")).toContainText("/-!");
     await expect(page.locator(".cm-content")).toContainText("```rust (name := demoWidget)");
-    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
-    await expect(page.locator(".cm-content")).toContainText("a + b");
+    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+    await expect(page.locator(".cm-content")).toContainText("a - b");
+    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a - b", "a + b"))).toBe(true);
 
-    await clickButtonByText(page, "Enable widget");
+    await clickButtonByText(page, "Render Rust");
   }
 
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
@@ -638,7 +658,54 @@ test("external demo switches through all ready prepared examples", async ({ page
   }
 });
 
-test("Lean default uses Rosetta preview and all inline Rust editor features", async ({ page }) => {
+test("Lean default shows editable raw Verso source with current Rust and Lean hovers", async ({ page }) => {
+  const methods: string[] = [];
+  await page.routeWebSocket(/\/rust-lsp\?/, route => {
+    const server = route.connectToServer();
+    route.onMessage(raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.method) methods.push(message.method);
+      server.send(raw);
+    });
+  });
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.lean");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+  const content = page.locator("#editor > .cm-editor .cm-content");
+  await expect(content).toContainText("/-!");
+  await expect(content).toContainText("```rust (name := demoWidget)");
+  const tooltip = page.locator(".cm-tooltip .cm-lsp-hover-tooltip");
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("fn add");
+  await expect(tooltip).toContainText("i32");
+  expect(methods).toContain("textDocument/hover");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText(
+    "fn add(a: i32, b: i32) -> i32", "fn add(a: i64, b: i64) -> i64",
+  ))).toBe(true);
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("i64");
+  expect(methods).toContain("textDocument/didChange");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "#check Nat.succ", "succ");
+  await expect(tooltip).toContainText("Nat.succ");
+  await clickButtonByText(page, "Render Rust");
+  await expect(page.getByLabel("Rust code preview")).toContainText("i64");
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  await expect(page.locator(".cm-embedded-block-inline .cm-content")).toContainText("i64");
+  await clickButtonByText(page, "Show Verso source");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+  await expect(content).toContainText("```rust (name := demoWidget)");
+  await expect(content).toContainText("i64");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("Edits stay in this Lean document.");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("i64");
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("rendered mode keeps Rosetta preview and all inline Rust editor features", async ({ page }) => {
   const methods = new Set<string>();
   await page.routeWebSocket(/\/rust-lsp\?/, route => {
     const server = route.connectToServer();
@@ -648,7 +715,7 @@ test("Lean default uses Rosetta preview and all inline Rust editor features", as
       server.send(raw);
     });
   });
-  await page.goto("/");
+  await page.goto("/?view=rendered");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.lean");
   const preview = page.getByLabel("Rust code preview");
@@ -713,7 +780,7 @@ test("inline Rust retries a failed Rosetta reconnect and preserves preview toggl
     if (connections === 2) { void route.close({ code: 1011, reason: "temporary outage" }); return; }
     route.connectToServer();
   });
-  await page.goto("/");
+  await page.goto("/?view=rendered");
   await expect(page.getByLabel("Rust code preview").locator("[data-rosetta-token]").first()).toBeVisible();
   await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
   const content = page.locator(".cm-embedded-block-inline .cm-content");

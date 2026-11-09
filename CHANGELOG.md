@@ -44,6 +44,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- The full demo starts with raw, editable Verso source and Rust LSP hovers. Gutter controls and `?view=rendered` retain the rendered preview and full inline editor.
+
 - The workspace example mounts editors immediately and returns a `ready` promise; `dispose()` or an `AbortSignal` cancels a pending startup. It reports Lean's file checking separately from the connection and tracks current and saved text as immutable documents.
 - Raised the CodeMirror dependency floors to the current releases (`@codemirror/state` 6.7.6, `view` 6.43.15, `language` 6.13.1, `commands` 6.11.1, `search` 6.7.2, `autocomplete` 6.20.4, `@lezer/highlight` 1.2.5). `@codemirror/lsp-client` stays pinned at 6.3.0, the latest release.
 - `applyLeanWorkspaceEdit()` clamps a character past the end of its line to the line end, as the LSP specification requires, instead of rejecting the edit. Lines past the end of the document and ranges whose start follows their end are still rejected; ordering is checked before clamping.

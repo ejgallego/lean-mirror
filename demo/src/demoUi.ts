@@ -131,7 +131,7 @@ export function createDemoUi(
     },
     labels: {
       editorDescription:
-        "Explore the Lean document, then use Edit Rust for hover, completion, definition, rename, formatting, and diagnostics inside its Verso comment.",
+        "Edit the raw Verso comment and hover over Rust names. Use Render Rust in the gutter to open the preview and inline editor.",
       infoAriaLabel: "Lean InfoView",
       infoTitle: "InfoView",
       secondaryTitle: "Runtime",
@@ -151,7 +151,7 @@ export function createDemoUi(
     summaryEl.id = "demo-summary";
     summaryEl.className = "lede";
     summaryEl.textContent =
-      "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support.";
+      "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline.";
     header.append(titleEl, summaryEl);
   }
 
@@ -282,7 +282,7 @@ export function queryDemoUi(
       demoProjectEl.textContent = project ?? "Lean 4 + CodeMirror 6";
       demoSummaryEl.textContent =
         summary ??
-        "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support.";
+        "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline.";
       demoTitleEl.textContent = title ?? "Rust inside a Lean document";
       document.title = title ?? "Rust inside a Lean document";
     },

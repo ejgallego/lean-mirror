@@ -332,11 +332,14 @@ npm install
 npm run demo
 ```
 
-Open `http://127.0.0.1:5173`. The default is a Lean editor with Rust inside a
-real Verso doc comment. The Rust block starts as a rendered preview with Rosetta
-semantic colors, hovers, and diagnostics. **Edit Rust** opens an inline editor
-with completion, definition, rename, and formatting. **Preview Rust** returns to
-the rendered block. Both views edit the same Lean comment and preserve its prose.
+Open `http://127.0.0.1:5173`. The default is a Lean editor showing the raw Verso
+doc comment, including its prose and Rust fences. The Rust source is editable,
+with Rosetta-backed hovers mapped into the comment. **Render Rust** in the gutter
+opens the retained preview with semantic colors, hovers, and diagnostics;
+**Edit Rust** reveals the full inline editor with completion, definition, rename,
+and formatting. **Preview Rust** returns to the preview; **Show Verso source**
+in the gutter returns to the raw document. All three presentations use the same
+Lean buffer and preserve its prose. `?view=rendered` starts with the preview.
 File switching preserves text, selection, and undo history; Rust and Lean can
 reconnect without discarding editor state.
 

@@ -119,7 +119,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
       activeExampleLabel: "Default workspace",
       demoProject: "Lean 4 + CodeMirror 6",
       demoSummary:
-        "Explore Rust inside a Verso comment, then select Edit Rust to work inline with Rosetta language support. The Rust driver remains available in Open Documents.",
+        "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline. The Rust driver remains available in Open Documents.",
       demoTitle: "Rust inside a Lean document",
     };
   }

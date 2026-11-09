@@ -129,15 +129,17 @@ OpenAI's [guidance on revisiting skills and prompts for GPT-6 Astra](https://dev
 
 ## Rosetta demo host
 
-The default full demo opens Main.lean, with rendered Rust in a valid Verso
-comment and an Edit Rust / Preview Rust toggle. `?mode=rust` selects the retained
+The default full demo opens Main.lean with raw, editable Verso source and Rust
+LSP hovers. Render Rust in the gutter enables the preview and its Edit Rust /
+Preview Rust toggle; `?view=rendered` starts there. `?mode=rust` selects the retained
 Rust-driver workflow. The native Rosetta facade and its pinned core package use
 Lean 4.35 independently from the root/demo Lean 4.34.1 pins.
 
 `npm run test:rosetta` builds the facade in `.demo-cache/rosetta-host` and tests all
 six editor features against rust-analyzer, plus versioned Cargo error recovery,
 Unicode/CRLF input, and orderly shutdown. It is included in `npm run ci`.
-The ordinary browser suite additionally drives rename, definition, completion,
+The ordinary browser suite additionally checks source hovers after edits and
+source/rendered round trips, then drives rename, definition, completion,
 formatting, diagnostics, previews, and transport recovery through CodeMirror.
 
 Select a development checkout with

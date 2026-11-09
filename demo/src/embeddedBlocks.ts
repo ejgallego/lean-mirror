@@ -3,6 +3,8 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { parseLineCommentFencedBlocks as parseSharedLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
 
 export interface EmbeddedBlock {
+  /** UTF-16 offsets of the embedded code lines in the host document. */
+  codeLineStarts?: readonly number[];
   /** The replacement covers only a fence, preserving surrounding comment prose. */
   fencedOnly?: boolean;
   code: string;
@@ -50,6 +52,9 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
   displayName?: string;
   hostLanguageIds?: readonly string[];
   kind: string;
+  sourceInitiallyVisible?: boolean;
+  sourceEditable?: boolean;
+  sourceExtensions?(visible: (state: EditorState, block: TBlock) => boolean): Extension;
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];
   scaffold?: EmbeddedBlockScaffold<TBlock>;
@@ -174,6 +179,7 @@ export function parseVersoCommentBlocks(
         const block: EmbeddedBlock = {
           ...(standalone ? {} : { fencedOnly: true }),
           code: lines.slice(headerIndex + 1, fenceEnd).map(line => line.text).join("\n"),
+          codeLineStarts: lines.slice(headerIndex + 1, fenceEnd).map(line => line.from),
           from: standalone ? line.from : headerLine.from,
           key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
@@ -525,6 +531,7 @@ export function embeddedBlockSourceMode(
   adapters: readonly AnyEmbeddedBlockEditorAdapter[],
   options: {
     disabled(state: EditorState, block: EmbeddedBlock): boolean;
+    readOnly?(state: EditorState, block: EmbeddedBlock): boolean;
   },
 ): Extension {
   return [
@@ -567,7 +574,8 @@ export function embeddedBlockSourceMode(
         return true;
       }
       return collectEmbeddedBlocks(transaction.startState.doc.toString(), adapters)
-        .filter((block) => options.disabled(transaction.startState, block))
+        .filter((block) => options.disabled(transaction.startState, block) &&
+          (options.readOnly?.(transaction.startState, block) ?? true))
         .flatMap((block) => [block.from, block.to]);
     }),
   ];
