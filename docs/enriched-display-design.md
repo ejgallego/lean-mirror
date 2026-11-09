@@ -4,7 +4,11 @@ Status: reviewed interaction proposal, 2026-11-09. The [use cases](enriched-disp
 govern the design. This document records proposals for review, not an implemented
 interaction contract. This revision incorporates the review of `ab088042`: in-place
 layout is selected for the first slice, with the selection, mutation and focus
-contracts below as acceptance gates. The two-pane demo remains an extraction experiment.
+contracts below as acceptance gates. The [first in-place trial](../experiments/snapshot-display/README.md)
+now exercises these interactions on real worker boundaries with supplied mathematics.
+It replaces the original two-pane demo. The full contract is not yet validated:
+real IME and screen-reader walkthroughs remain open; the trial's README records
+its narrower presentation and proof-disclosure scope.
 
 The agreed direction is one document component with a progressive shift between
 source and enriched presentation, within the source editor. The current priority

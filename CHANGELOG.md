@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- An opt-in in-place enriched-display experiment with Source/Mixed/Rendered modes, manual contribution focus, protected source editing, region-level clipboard actions, and live Lean feedback (`experiments/snapshot-display`).
+
 - The infoview host mounts through `mountInfoview()` when the installed `@leanprover/infoview` provides it, so `dispose()` unmounts the React tree; older releases keep the detach-only fallback.
 - An optional webview `session` in the private editor-platform protocol (`ready`, commands, and `command-result`). The VS Code adapter drops commands from any session other than the current one, including late messages from a replaced webview.
 - `detectLeanLineEnding()` lets hosts persist documents with their original CRLF or LF ending, following VS Code's majority rule; the workspace example keeps each file's ending and stays clean after edit-and-undo.

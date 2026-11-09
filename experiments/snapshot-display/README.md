@@ -1,56 +1,94 @@
-# Snapshot display feasibility probe
+# In-place snapshot display experiment
 
-This isolated Lean 4.34.1 experiment extracts display information from the real
-file worker. It implements the first backend experiment in the
-[enriched display design](../../docs/enriched-display-design.md); it is not a
-public library API. An optional browser demo presents the extracted source
-statements and documentation alongside an editable CodeMirror document.
+This isolated Lean 4.34.1 experiment combines real file-worker structure with the
+first in-place CodeMirror interaction slice from the
+[enriched display design](../../docs/enriched-display-design.md). It is an opt-in
+UI trial, outside the public library and shared platform APIs.
 
-## Browser demo
+## Try the browser demo
 
-Install the repository's npm dependencies if needed, then from the repository root:
+Install the repository's npm dependencies, then from the repository root:
 
 ```sh
 (cd experiments/snapshot-display && lake build DisplayProbe:shared)
 node experiments/snapshot-display/serve.mjs
 ```
 
-Open **http://127.0.0.1:5281**. Use `SNAPSHOT_DEMO_PORT` to choose another port.
+Open **http://127.0.0.1:5282**. Use `SNAPSHOT_DEMO_PORT` to choose another port.
 The server listens only on loopback. Stop it with Ctrl-C.
 
-- Switch between theorems, all commands, or comma-separated written names.
-- Expand source/proof details or locate a command in the source editor.
-- Expand the other commands without changing the backend selection policy.
-- Edit or undo in the source editor; the outline is invalidated immediately and
-  refreshed from the worker for the new revision. Edits are in memory only.
+1. Switch **Source → Mixed → Rendered**. Mixed puts the companion immediately
+   below its source; Rendered replaces the supported declaration in the same
+   editor. Original namespace, section, variable and notation lines remain.
+2. Turn on **Focus contributions**. Two statements are initially marked; use
+   **Mark contribution** to change membership. Supporting declarations collapse
+   to visible headers and can be opened individually.
+3. Use **Edit source**, move the caret, then **Return to display**. Focus lands on
+   the persistent Edit source button; activating it restores the source selection.
+   **Show proof with source** opens the whole declaration at its proof.
+4. Click a rendered equation to select its whole Lean statement. Default Copy
+   and **Copy Lean statement** exclude documentation and proof. **Copy rendered
+   mathematics** copies the supplied mathematical text and context. There is no
+   mathematical substring selection or inferred symbol-to-token correspondence.
+5. Select across a hidden helper, or Select All in the source editor. Every
+   selected interval reveals before ordinary editing, including secondary ranges.
+   A deletion at a replacement boundary first reveals without changing any
+   cursor's source; release and press again to edit. Presentation changes create
+   no source undo entries.
+6. Edit an earlier notation, or break a proof. The old presentations disappear
+   immediately. Real Lean diagnostics, source underlines and hover stay active;
+   **Reveal diagnostic** opens the affected source. Undo restores the fixture
+   presentations when the complete original text returns.
 
-Each browser connection owns a separate Lean server session (maximum four).
-The host reuses `demo/server/lspProcessBridge.mjs` for framing, bounded queues and
-shutdown. The browser uses the existing lean-mirror editor session, document
-synchronization, diagnostics, hover and completion integration. Snapshot requests
-use that same client and its synchronized document version. Reload after a
-disconnection to create a fresh session.
+Edits stay in the tab and never alter the fixture on disk. Each browser connection
+owns a separate Lean server session (maximum four). The host reuses
+`demo/server/lspProcessBridge.mjs`; the browser uses the existing lean-mirror
+session, synchronization and LSP integration. Snapshot requests use that same
+client and its captured document version. Reload after disconnection.
 
-A proof-only edit may leave the outline unchanged, but Lean diagnostics appear
-below the source and as editor underlines. Statements remain original Lean syntax;
-contextual parameters, an independent proof-validity verdict,
-KaTeX translation and structured documentation rendering are not implemented.
-Documentation is displayed as text. Selection remains at command granularity.
-Partial snapshots trigger at most 20 bounded pulls, then require manual refresh.
-Reader expansion resets when a new summary arrives.
+## Scope and remaining walkthroughs
 
-With the server running, verify browser behavior from the repository root:
+- Mathematics is supplied fixture text, rendered with ordinary HTML typography.
+  There is no Lean-to-TeX provider or KaTeX dependency yet. Supplied presentations
+  require the entire captured editor text to match the fixture; even a proof-only
+  edit withdraws them. The adapter captures CodeMirror's LF text, and all ranges
+  index that exact UTF-16 string. The native endpoint also accepts raw CRLF.
+- Only unambiguous, full-line declaration commands get controls. Unsupported and
+  ambiguous syntax stays source. Documentation is plain text. Mutual declarations
+  remain one source group. Module prose and separate proof-only disclosure are
+  follow-ups; the current proof action keeps declaration context visible.
+- Contribution marks and source bookmarks are in-memory preferences, matched by
+  written namespace/names and mapped command bounds. Partial results retain
+  pending preferences. Changed or ambiguous correspondence drops the preference
+  with a notice; it never authorizes reusing mathematical presentation.
+- Checking, diagnostics and supplied mathematics remain distinct. The UI says
+  whether diagnostics were reported and explicitly does not infer proof validity.
+  A completed structural snapshot is not a proof-success signal.
+- Partial snapshots trigger at most 20 bounded pulls, then require manual refresh.
+  The trial does not establish production performance or a large-file protocol.
+- Transitions are discrete. Keyboard/focus paths are automated, but a real IME
+  composition and actual screen-reader walkthrough remain required before calling
+  the full interaction contract validated. Mathematical selection is region-level.
+
+## Verify the interaction slice
+
+With the server running, from the repository root:
 
 ```sh
+node --test experiments/snapshot-display/test-enrichment.mjs
 PLAYWRIGHT_BROWSERS_PATH=/path/to/installed/playwright-browsers \
   node experiments/snapshot-display/test-browser.mjs
 ```
 
-Omit the environment variable when using Playwright's default browser location.
-The test checks real worker output, selection policies, expansion, source
-navigation, edits/undo, proof errors and recovery, Lean hover, narrow-screen
-overflow and preservation of the on-disk fixture. It writes ignored desktop/mobile screenshots. This test is separate
-from the native protocol checks below and is not part of default CI.
+Omit the environment variable when using Playwright's default browser location;
+set `SNAPSHOT_DEMO_URL` if using another port. The browser test uses real Lean and
+CodeMirror, checks full/multiple selections, clipboard scope, focus/bookmarks,
+boundary deletion and held keys, cut/delete/paste/typing and undo, upstream-context
+invalidation, proof errors and admitted-proof warnings, diagnostic navigation,
+hover, CRLF/non-BMP editor ranges and narrow layout. It leaves the fixture unchanged
+and writes ignored desktop/mobile screenshots. Transaction tests cover both
+boundary directions and cancellation of an entire multiple-cursor mutation.
+These opt-in tests are separate from the native checks and default CI.
 
 ## Run
 
@@ -129,9 +167,9 @@ Full source text, overlapping text regions and prefix-based offset conversion
 are intentionally simple and unsuitable as the final large-file protocol.
 
 No `infoTree` is forced, no helper process replays commands, no statement is
-translated to TeX, and no worker snapshot is retained beyond a request. The
-client would still need open-session/server-generation checks, result ordering,
-coverage/fallback handling and stale-display invalidation before using this
-information as an authoritative UI projection.
+translated to TeX, and no worker snapshot is retained beyond a request. The browser
+guards request generations, captured versions and edits, and
+withdraws all presentations on source changes. This is still an experiment, not
+a stable declaration-ownership or mathematical-presentation protocol.
 
 See the [findings and next slice](../../docs/reviews/2026-11-06-snapshot-display.md).

@@ -11,7 +11,7 @@ import {
 } from "../../demo/server/lspProcessBridge.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const port = Number(process.env.SNAPSHOT_DEMO_PORT ?? 5281);
+const port = Number(process.env.SNAPSHOT_DEMO_PORT ?? 5282);
 const origin = `http://127.0.0.1:${port}`;
 const plugin = resolve(
   root,

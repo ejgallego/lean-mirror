@@ -13,13 +13,19 @@ import {
   waitForWebSocketOpen,
   lean4,
 } from "../../../src/index.ts";
+import {
+  enrichment,
+  displayField,
+  displayEffect,
+  snapshotRegions,
+} from "./enrichment.js";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
 const status = $("#status"),
   outline = $("#outline");
-const policy = $("#policy"),
-  names = $("#names");
+const presentation = $("#presentation"),
+  focus = $("#focus-contributions");
 let socket,
   editor,
   session,
@@ -64,6 +70,37 @@ function showDiagnostics(client, params) {
       element("p", `No diagnostics reported for revision ${params.version}.`),
     );
   panel.dataset.version = String(params.version);
+  const pos = (p) => {
+    const line = editor.state.doc.line(
+      Math.min(p.line + 1, editor.state.doc.lines),
+    );
+    return line.from + Math.min(p.character, line.length);
+  };
+  editor.dispatch({
+    effects: displayEffect.of({
+      type: "diagnostics",
+      items: params.diagnostics.map((d) => ({
+        from: pos(d.range.start),
+        to: pos(d.range.end),
+        message: d.message,
+      })),
+    }),
+  });
+  for (const [index, node] of [...panel.children].entries()) {
+    const diagnostic = params.diagnostics[index];
+    if (!diagnostic) continue;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "Reveal diagnostic";
+    b.addEventListener("click", () => {
+      editor.dispatch({
+        selection: { anchor: pos(diagnostic.range.start) },
+        scrollIntoView: true,
+      });
+      editor.focus();
+    });
+    node.append(b);
+  }
   return false; // Also let the library update editor diagnostics.
 }
 function invalidate(message) {
@@ -80,71 +117,14 @@ function schedule() {
   if (ready) timer = setTimeout(() => refresh(generation), 200);
 }
 function render(response, source) {
-  const selected = [],
-    others = [];
-  for (const command of response.commands) {
-    // Zero-width end-of-input is not a reader-facing command.
-    if (command.range.start === command.range.stop) continue;
-    const regions = (suffix) =>
-      command.regions.filter((r) => r.kind.endsWith("." + suffix));
-    const ids = regions("declId");
-    const card = element("article", undefined, "card");
-    const heading = element("div", undefined, "card-top");
-    heading.append(
-      element(
-        "h3",
-        ids.map((r) => r.text).join(" · ") || command.kind.split(".").at(-1),
-      ),
-      element(
-        "span",
-        regions("theorem").length
-          ? "theorem"
-          : ids.length
-            ? "definition"
-            : "context",
-        "kind",
-      ),
-    );
-    card.append(heading);
-    for (const doc of [...regions("docComment"), ...regions("moduleDoc")])
-      card.append(element("p", doc.text.slice(3, -2).trim(), "doc"));
-    const signatures = [...regions("declSig"), ...regions("optDeclSig")];
-    if (ids.length === 1 && signatures.length === 1)
-      card.append(element("div", signatures[0].text, "statement"));
-    const actions = element("div", undefined, "actions");
-    const details = element("details");
-    details.append(
-      element("summary", "Expand source / proof"),
-      element("pre", source.slice(command.range.start, command.range.stop)),
-    );
-    const reveal = element("button", "Locate in source ↗");
-    reveal.type = "button";
-    reveal.addEventListener("click", () => {
-      editor.dispatch({
-        selection: { anchor: command.range.start, head: command.range.stop },
-        effects: EditorView.scrollIntoView(command.range.start, {
-          y: "center",
-        }),
-      });
-      editor.focus();
-    });
-    actions.append(details, reveal);
-    card.append(actions);
-    (command.selected ? selected : others).push(card);
-  }
-  outline.replaceChildren(...selected);
-  if (!selected.length)
-    outline.append(
-      element("p", "No matching commands in this snapshot.", "empty"),
-    );
-  if (others.length) {
-    const hidden = element("details", undefined, "other");
-    hidden.append(
-      element("summary", `Explore ${others.length} other commands`),
-      ...others,
-    );
-    outline.append(hidden);
-  }
+  editor.dispatch({
+    effects: displayEffect.of({
+      type: "snapshot",
+      regions: snapshotRegions(response, source, session.source),
+      complete: response.snapshotStatus === "complete",
+    }),
+  });
+  outline.textContent = `${response.commands.length} worker commands · ${response.snapshotStatus}`;
   outline.dataset.version = String(response.version);
   outline.dataset.snapshotStatus = response.snapshotStatus;
 }
@@ -158,11 +138,7 @@ async function refresh(ticket) {
     capturedVersion = file.version,
     capturedEditSequence = editSequence;
   $("#revision").textContent = `Revision ${capturedVersion}`;
-  const selectedPolicy = policy.value,
-    selectedNames = names.value
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
+
   try {
     for (let attempt = 0; attempt < 20 && ticket === generation; attempt++) {
       status.textContent = `Reading revision ${capturedVersion}…`;
@@ -170,8 +146,8 @@ async function refresh(ticket) {
         textDocument: { uri: session.uri, version: capturedVersion },
         source,
         waitMs: 1000,
-        policy: selectedPolicy,
-        names: selectedNames,
+        policy: "all",
+        names: [],
       };
       currentRequest = { client, params };
       const response = await client.request(
@@ -194,7 +170,7 @@ async function refresh(ticket) {
       ).length;
       status.textContent =
         response.snapshotStatus === "complete"
-          ? `Revision ${capturedVersion} · ${count} selected commands`
+          ? `Revision ${capturedVersion} · ${count} worker commands`
           : `Revision ${capturedVersion} · partial view`;
       if (response.snapshotStatus === "complete") return;
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -215,6 +191,7 @@ async function refresh(ticket) {
 }
 function disconnected() {
   ready = false;
+  editor?.dispatch({ effects: displayEffect.of({ type: "clear" }) });
   delete outline.dataset.version;
   delete outline.dataset.snapshotStatus;
   generation++;
@@ -254,12 +231,18 @@ async function start() {
       doc: session.source,
       extensions: [
         lineNumbers(),
+        EditorView.lineWrapping,
         highlightActiveLine(),
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         ...lean4({ session: leanSession, uri: session.uri }),
+        enrichment,
         EditorView.contentAttributes.of({ "aria-label": "Lean source" }),
         EditorView.updateListener.of((update) => {
+          const model = update.state.field(displayField);
+          $("#interaction-status").textContent = model.notice;
+          $("#contribution-count").textContent =
+            `${model.marks.size} contributions${model.focus && !model.marks.size ? " · none selected; turn focus off to show all" : ""}`;
           if (!update.docChanged) return;
           editSequence++;
           $("#revision").textContent = "Edited · synchronizing";
@@ -272,6 +255,7 @@ async function start() {
       ],
     }),
   });
+  session.source = editor.state.doc.toString(); // Bind supplied data to the exact LF editor text.
   socket = new WebSocket(`ws://${location.host}/lsp`);
   socket.addEventListener("close", disconnected);
   await waitForWebSocketOpen(socket);
@@ -281,14 +265,32 @@ async function start() {
   ready = true;
   schedule();
 }
-policy.addEventListener("change", () => {
-  $("#names-label").hidden = policy.value !== "names";
-  schedule();
-});
-names.addEventListener("input", schedule);
+presentation.addEventListener("change", () =>
+  editor?.dispatch({
+    effects: [
+      editor.scrollSnapshot(),
+      displayEffect.of({ type: "mode", mode: presentation.value }),
+    ],
+  }),
+);
+focus.addEventListener("change", () =>
+  editor?.dispatch({
+    effects: [
+      editor.scrollSnapshot(),
+      displayEffect.of({ type: "focus", value: focus.checked }),
+    ],
+  }),
+);
+export const getEditor = () => editor;
 $("#refresh").addEventListener("click", schedule);
 window.addEventListener("pagehide", () => {
+  ready = false;
+  generation++;
+  clearTimeout(timer);
+  cancelCurrent();
+  socket?.removeEventListener("close", disconnected);
   editor?.destroy();
+  editor = undefined;
   leanSession?.dispose();
   socket?.close();
 });
