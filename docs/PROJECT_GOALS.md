@@ -4,11 +4,11 @@ Working recap, 2026-11-06. This document separates existing responsibilities
 from proposed priorities. It is a starting point for choosing the next product
 slice, rather than a commitment to implement every candidate below.
 
-The enriched-display workflow is under review as of 2026-11-07. Its snapshot
-basis and configurable backend selection are agreed; the reading-first
-presentation below is provisional. The side-by-side experiment demonstrates
-extraction and does not define the target authoring experience. See the
-[use-case interpretation note](enriched-display-use-cases.md).
+The enriched-display direction was clarified on 2026-11-09: one document
+component progressively shifts between source and enriched presentation. Manual
+contribution selection and supplied/mock rendering content support the first UI
+design work. The [interaction proposal](enriched-display-design.md) is under
+review before implementation; the two-pane experiment is supporting evidence.
 
 ## Purpose
 
@@ -39,8 +39,9 @@ and acceptance criteria.
 
 A reader sees mathematical theorem statements rendered with KaTeX, documentation
 inline, and a configurable selection of core lemmas. Supporting declarations,
-proofs and source expand on demand. An author moves from that reading view into
-source editing without rewriting the underlying file.
+proofs and source expand on demand. The presentation changes within the same
+editor component, with source editing available in place and ordinary Lean
+feedback preserved.
 
 Lean provides the structural information from its worker snapshots through pull
 requests or subscriptions. Backend selection is configurable: annotations and
@@ -134,13 +135,12 @@ shared parser, new transport, or a general-purpose IDE framework.
 
 ## Proposed next slices
 
-1. **Design and demonstrate snapshot-driven enriched display.** Choose the real
-   Lean and Verso fixtures in the [use cases](enriched-display-use-cases.md), probe
-   available worker metadata, and design the common information boundary. Build
-   a first slice with a supported mathematical statement form, inline docs,
-   configurable backend selection and dynamic source/proof expansion. Validate
-   source preservation, stale-result rejection, partial checking, selection/undo
-   and error visibility through a real authoring sequence.
+1. **Settle enriched-display interaction and rendering design.** Review the
+   same-editor presentation alternatives, source reveal behavior, manual
+   contribution focus and error/pending states. Use supplied or mock presentation
+   data. After agreement, implement one UI slice and validate source preservation,
+   selection/undo and ordinary Lean feedback. Let that experience inform the
+   later mathematical provider and shared information boundary.
 2. **Complete the actual infoview lifetime integration in parallel.** Assume
    upstream ownership/disposal support will land shortly. The local adapter
    already detects `mountInfoview()` when available; validate a real candidate or

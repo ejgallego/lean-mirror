@@ -12,8 +12,11 @@ product direction. Follow the [design sequence](enriched-display-design.md):
 - The [first native worker probe](reviews/2026-11-06-snapshot-display.md) verifies
   syntax boundaries, request-local policies, original-source ranges and partial
   analysis on a Lean declaration fixture.
-- Resolve declaration ownership and contextual statement details, including
-  private/generated names and mutual commands; add a real Verso consumer fixture.
+- Current priority: review the same-editor interaction and rendering design,
+  using supplied/mock presentation data and manual contribution selection.
+  Implementation follows agreement on the editing walkthroughs.
+- Subsequently resolve declaration ownership and contextual statement details,
+  including private/generated names and mutual commands; add a real Verso fixture.
 - Design a versioned information contract and configurable backend summary policies.
 - Build one enriched display slice with source reveal and dynamic expansion;
   verify faithful rendering, current revisions, source preservation and recovery.

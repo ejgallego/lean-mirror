@@ -5,19 +5,18 @@ Working requirements, 2026-11-06. This is a central product direction for
 `verso-mirror`. The companion [design exploration](enriched-display-design.md)
 records candidate mechanisms and questions to resolve before implementation.
 
-**Interpretation under review (2026-11-07).** The agreed direction is enriched
-Lean document display using actual snapshot structure: mathematical theorem
-statements, inline documentation, and dynamically expandable summaries with
-configurable backend selection. The reading-first workflow and detailed
-acceptance scenarios below are proposals, not settled product requirements.
-The experiment's separate outline pane, command cards, name filter and default
-proof collapsing are prototype choices. They do not settle where enrichment
-belongs or how it should interact with editing.
+**Direction clarified (2026-11-09).** The target is a progressive shift from
+source toward enriched presentation within the same document component. Main
+contributions should be highlighted and filterable, initially through manual
+selection. Supplied or mock mathematical content is sufficient while interaction
+and rendering are designed; author metadata and automatic presentation providers
+come later. A separate reading pane is not the default target.
 
-Ordinary Lean feedback remains a baseline: changing a proof must still expose
-diagnostics and support normal editor interaction, even when the displayed
-statement does not change. The next design discussion should settle the primary
-editing workflow and placement of enrichment before expanding the prototype UI.
+The detailed interactions below remain proposals. The
+[interaction design](enriched-display-design.md#interaction-proposal-for-review)
+compares in-place and margin-to-inline presentation and specifies source reveal,
+contribution focus, and pending/error states for review. Ordinary reactive Lean
+editing remains the baseline. The current task is design, before implementation.
 
 ## Goal and governing constraint
 
@@ -89,7 +88,9 @@ and enough section/namespace context to navigate. Supporting declarations and
 proofs remain discoverable through expandable groups. The reader expands a
 lemma, its documentation, its proof, or supporting declarations as needed.
 
-“Core” is a configurable backend policy. Supported policy families should be
+For the first UI trial, contributions are selected by hand. Expansion and
+contribution membership are separate controls. Longer term, “core” is a
+configurable backend policy. Supported policy families should be
 able to express author annotations and reader pins, structural filters such as
 public theorem declarations, and dependency/relevance-based selection. These
 are distinct useful interpretations; no single ranking is built into the UI.
@@ -173,7 +174,8 @@ latency. Numeric performance budgets follow initial measurements.
   reader-specific options configured? Configurability itself is agreed.
 - Which mathematical constructs have a faithful initial TeX representation?
 - Which documentation formats can the active Lean toolchain export structurally?
-- Which presentation should be the initial default: source with inline additions,
-  a reading view with source expansion, or a user-selectable combination?
+- In the same editor, should Mixed presentation place rendered content directly
+  in the source flow or in a companion margin that moves inline?
+- Which explicit and caret-driven actions reveal source, and when may it collapse?
 - Which live snapshot publication API is suitable upstream? Pull versus broadcast
   is an implementation choice to evaluate against the same acceptance cases.
