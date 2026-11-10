@@ -60,8 +60,8 @@ is not needed for this Lean doc-comment host.
 
 `demo/server/rosetta.mjs` copies the core and facade into
 `.demo-cache/rosetta-host`, preserving unchanged file contents, and runs Lake
-there. The host uses the core package's Lean 4.35 toolchain; the surrounding
-Lean document uses the demo's Lean 4.34.1 toolchain. Elan selects each pin.
+there. The root project, demo workspace, and bundled core all use Lean 4.35.0.
+An override checkout supplies its own host toolchain pin, selected by elan.
 
 For Rosetta development, select a local checkout once:
 

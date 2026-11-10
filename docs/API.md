@@ -104,8 +104,7 @@ navigation and rename commands. Navigation accepts both LSP `Location` and
 Reference mappings also learn about files that `requestFile()` loads after the
 request starts.
 
-Document formatting is not enabled by default because Lean 4.34.1 does not
-advertise an LSP formatter. A custom Lean server that implements
+Document formatting is opt-in. A Lean server that implements
 `textDocument/formatting` can opt into the standard CodeMirror shortcut with
 `features: { formatKeymap: true }`. Hosts can also import `formatDocument` and
 `formatKeymap` directly from the `/codemirror` subpath.

@@ -46,6 +46,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Root validation and the demo workspace now pin Lean 4.35.0, matching the bundled Rosetta host.
+
 - The full demo starts with raw, editable Verso source and Rust LSP hovers. Gutter controls and `?view=rendered` retain the rendered preview and full inline editor.
 
 - The workspace example mounts editors immediately and returns a `ready` promise; `dispose()` or an `AbortSignal` cancels a pending startup. It reports Lean's file checking separately from the connection and tracks current and saved text as immutable documents.

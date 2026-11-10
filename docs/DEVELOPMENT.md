@@ -15,7 +15,7 @@ npm run check:environment
 ```
 
 Install elan so `lean` and `lake` select the checked-in `lean-toolchain`
-(`leanprover/lean4:v4.34.1`). Install rust-analyzer and Rust sources with
+(`leanprover/lean4:v4.35.0`). Install rust-analyzer and Rust sources with
 rustup. Primary CI uses Rust 1.99.0:
 
 ```bash
@@ -110,7 +110,7 @@ browser scenarios. The three external Anneal scenarios remain a separate gate.
 The updated GitHub workflow was checked with actionlint, and both hosted CI jobs
 passed in [takeover PR #4](https://github.com/ejgallego/lean-mirror/pull/4).
 
-The compatibility follow-up pins stable Lean 4.34.1 and CodeMirror LSP client
+The earlier compatibility follow-up pinned stable Lean 4.34.1 and CodeMirror LSP client
 6.3.0. Local validation passed the real-server and late-loaded-file mapping tests,
 ordinary and minimal browser scenarios, built-package consumers, and the isolated
 packed-browser scenario. The workspace mapping adapter remains unchanged because
@@ -138,8 +138,7 @@ is unchanged and that editing the Lean body still produces real proof errors.
 `?example=basic` selects the earlier Main.lean example. Both have raw Verso source and Rust
 LSP hovers. Render Rust in the gutter enables the preview and its Edit Rust /
 Preview Rust toggle; `?view=rendered` starts there. `?mode=rust` selects the retained
-Rust-driver workflow. The native Rosetta facade and its pinned core package use
-Lean 4.35 independently from the root/demo Lean 4.34.1 pins.
+Rust-driver workflow. The root project, demo workspace, and bundled Rosetta host all pin Lean 4.35.0.
 
 `npm run test:rosetta` builds the facade in `.demo-cache/rosetta-host` and tests all
 six editor features against rust-analyzer, plus versioned Cargo error recovery,
