@@ -1,0 +1,262 @@
+# Using the library
+
+## Install
+
+The package is not yet published on npm. Build and pack this checkout:
+
+```bash
+npm ci
+npm run build
+npm pack
+```
+
+In the consuming project, install the resulting tarball with
+`npm install /path/to/codemirror-lean4-lsp-0.1.0.tgz`.
+
+## Usage
+
+```ts
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import {
+  createLeanEditorSession,
+  createWebSocketTransport,
+  lean4,
+  leanFallbackHighlightStyle,
+  waitForWebSocketOpen,
+} from "codemirror-lean4-lsp";
+
+const socket = new WebSocket("ws://localhost:8080");
+const session = createLeanEditorSession({
+  client: {
+    features: {
+      semanticTokens: true,
+    },
+    rootUri: "file:///workspace",
+  },
+});
+
+await waitForWebSocketOpen(socket);
+const { initialized } = session.connect(createWebSocketTransport(socket), {
+  disposeTransport() {
+    socket.close();
+  },
+});
+await initialized;
+
+const state = EditorState.create({
+  doc: "#check Nat.succ\n",
+  extensions: lean4({
+    session,
+    highlightStyle: leanFallbackHighlightStyle,
+    uri: "file:///workspace/Main.lean",
+  }),
+});
+
+new EditorView({
+  state,
+  parent: document.querySelector("#editor")!,
+});
+```
+
+Semantic tokens are opt-in because they add a request after document changes and
+whenever Lean asks the client to refresh. The renderer discovers the server's
+legend, decodes LSP positions as UTF-16 offsets, and rejects results for older
+document versions or client generations. It maps token types to the active
+CodeMirror `HighlightStyle` and also adds stable classes such as
+`cm-lean-semantic-function` plus a `data-lean-semantic-token` attribute.
+
+Hosts can add their own classes without replacing the protocol or rendering
+layer:
+
+```ts
+const client = createLeanLspClient({
+  features: {
+    semanticTokens: {
+      className(token) {
+        return token.modifiers.includes("deprecated") ? "my-deprecated-token" : null;
+      },
+    },
+  },
+});
+```
+
+To observe Lean's per-file processing ranges, add the Lean progress extension to
+the session's client configuration. The session clears connection-scoped state
+when it disconnects, reconnects, or is disposed.
+
+```ts
+import { createLeanEditorSession, leanFileProgress } from "codemirror-lean4-lsp";
+
+const progress = leanFileProgress({
+  onUpdate(update) {
+    console.log(update.uri, update.state?.processing.length ?? 0);
+  },
+});
+
+const session = createLeanEditorSession({
+  client: {
+    extensions: [progress],
+  },
+});
+```
+
+`session.reconnect(transport)` creates a fresh client generation. Editor views
+configured through `lean4({ session, uri })` keep their CodeMirror state and
+replace only the LSP plugin after the new generation is ready. Use
+`createLeanLspClient()` directly only when the host already owns equivalent
+connection, editor rebinding, and extension cleanup.
+
+## Optional Lean infoview
+
+The official Lean infoview bridge is available from an optional browser-only
+subpath. Install the renderer peer and import its stylesheet explicitly:
+
+```bash
+npm install @leanprover/infoview react react-dom
+```
+
+```ts
+import type { EditorView } from "@codemirror/view";
+import {
+  createLeanEditorSession,
+  createLeanWorkspace,
+  type LeanWorkspace,
+} from "codemirror-lean4-lsp";
+import {
+  createLeanInfoviewHost,
+  leanInfoviewClientNotifications,
+  type LeanInfoviewHost,
+} from "codemirror-lean4-lsp/infoview";
+import "codemirror-lean4-lsp/infoview.css";
+
+declare const activeUri: string | null;
+declare const activeView: EditorView | null;
+declare const reconnectLean: (reason: string) => void;
+
+let infoview: LeanInfoviewHost | null = null;
+const workspace = createLeanWorkspace();
+const session = createLeanEditorSession({
+  client: {
+    extensions: [
+      leanInfoviewClientNotifications(() => infoview),
+    ],
+    workspace,
+  },
+});
+
+infoview = createLeanInfoviewHost({
+  client: () => session.client,
+  container: document.querySelector("#infoview")!,
+  currentLanguageId: () => "lean4",
+  currentUri: () => activeUri,
+  currentView: () => activeView,
+  requestRestart: reconnectLean,
+  workspace: () => (session.client?.workspace as LeanWorkspace | undefined) ?? null,
+});
+```
+
+The host owns Lean RPC sessions, notification subscriptions, cursor updates,
+cross-file edits, and renderer lifecycle. Add `infoview.editorExtension()` to
+each Lean editor and call `serverRestarted()`, `serverStopped()`, and
+`updateCursorLocation()` from the corresponding host lifecycle events. The main
+package entry does not import the infoview renderer.
+
+If you want standard editor ergonomics such as undo/history, search, folding, and line numbers, enable utilities explicitly:
+
+```ts
+import { lean4 } from "codemirror-lean4-lsp";
+
+const extensions = lean4({
+  client,
+  uri: "file:///workspace/Main.lean",
+  utilities: {
+    lineWrapping: true,
+  },
+});
+```
+
+For multi-file hosts, provide a custom workspace built on CodeMirror's official `Workspace` API:
+
+```ts
+import {
+  applyLeanWorkspaceEdit,
+  createLeanLspClient,
+  createLeanWorkspace,
+  type LeanWorkspace,
+} from "codemirror-lean4-lsp";
+import type {
+  RenameParams,
+  WorkspaceEdit,
+} from "vscode-languageserver-protocol";
+
+const client = createLeanLspClient({
+  rootUri: "file:///workspace",
+  workspace: createLeanWorkspace({
+    async loadDocument(uri) {
+      return { doc: await fetchDocFromBackend(uri) };
+    },
+    async displayDocument(uri) {
+      return openEditorForUri(uri);
+    },
+  }),
+});
+
+const workspace = client.workspace as LeanWorkspace;
+const lease = await workspace.acquireServerDocument(
+  "file:///workspace/Generated.lean",
+);
+try {
+  // The document stays open in Lean even without an editor view.
+  client.sync();
+} finally {
+  lease?.release();
+}
+await workspace.unloadDocument("file:///workspace/Generated.lean");
+
+client.sync();
+await client.withMapping(async (mapping) => {
+  const edit = await client.request<RenameParams, WorkspaceEdit | null>(
+    "textDocument/rename",
+    renameParams,
+  );
+  if (!edit) return;
+  const result = await applyLeanWorkspaceEdit(client, edit, {
+    mapping,
+    userEvent: "rename",
+  });
+  if (!result.applied) throw new Error(result.failureReason);
+});
+```
+
+`requestFile()` loads a document into the workspace cache without opening it in
+Lean. `acquireServerDocument()` returns an independent lease that keeps it open
+in Lean without an editor; releasing the last owner flushes pending edits before
+`didClose`. `unloadDocument()` removes an unowned cached document and reports
+`"unloaded"`, `"in-use"`, or `"not-loaded"` after in-flight loading and host
+change callbacks have settled.
+
+The default Lean keymaps use `leanJumpToDefinition` and `leanRenameSymbol`.
+They handle Lean's `LocationLink` definition responses, load cross-file targets
+through the workspace, and route rename edits through
+`applyLeanWorkspaceEdit()`. The edit helper validates every target before
+mutation and supports LSP `changes` plus text-only `documentChanges`; filesystem
+resource operations remain a host responsibility.
+
+`LeanWorkspace` intentionally allows only one editor view per URI. A host that
+needs split views should share one CodeMirror state between those views or
+provide its own `Workspace` implementation.
+
+## Notes
+
+- The default client configuration composes official CodeMirror features with Lean-aware navigation and rename commands.
+- If you need finer control, pass `features` to `createLeanLspClient()` or import the official passthrough exports from `codemirror-lean4-lsp/codemirror`.
+- The package does not start Lean itself. The embedding app owns transport and process lifecycle.
+- LSP Markdown can contain raw HTML. Production hosts should pass a trusted `sanitizeHTML`
+  function to `createLeanLspClient()` before enabling hover or signature documentation.
+- Repository, issue tracker, and release metadata point to `ejgallego/lean-mirror` on GitHub.
+- API, release policy, and backlog docs live in the repository's
+  [documentation index](https://github.com/ejgallego/lean-mirror/blob/main/docs/README.md),
+  [contribution guide](https://github.com/ejgallego/lean-mirror/blob/main/CONTRIBUTING.md),
+  and [backlog](https://github.com/ejgallego/lean-mirror/blob/main/docs/BACKLOG.md).
+

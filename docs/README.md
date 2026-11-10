@@ -1,5 +1,8 @@
 # Docs
 
+- [USAGE.md](./USAGE.md): library integration examples
+- [DEMOS.md](./DEMOS.md): demo setup, modes, and external Anneal workflows
+
 - [DEVELOPMENT.md](./DEVELOPMENT.md): setup, verification matrix, and takeover baseline
 - [API.md](./API.md): experimental top-level API and the explicit CodeMirror passthrough subpath
 - [RELEASING.md](./RELEASING.md): release and packaging verification flow

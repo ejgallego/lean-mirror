@@ -35,7 +35,7 @@ A fatal progress notification (for example, a missing import) shows
 correcting the document allows checking to finish normally.
 
 `publicLeanWorkspace.ts` composes CodeMirror, the session, workspace, and official
-infoview using only published package entries. The shell supplies loading and
+infoview using only public package entries. The shell supplies loading and
 persistence callbacks. The example is repository infrastructure, outside the npm
 tarball; an embedding app can copy the composition at an exact package version.
 Provide trusted `sanitizeHTML` when integrating untrusted LSP Markdown.

@@ -11,8 +11,8 @@ This example is the smallest browser host in the repository that combines:
 
 [`publicLeanEditor.ts`](./publicLeanEditor.ts) is the reusable boundary. It
 mounts CodeMirror, `LeanEditorSession`, `LeanWorkspace`, WebSocket transport,
-and the official infoview using only the published toolkit entries and their
-direct peer dependencies. [`main.ts`](./main.ts) is deliberately a separate
+and the official infoview using only public toolkit entries and the example's
+dependencies. [`main.ts`](./main.ts) is deliberately a separate
 repository shell adapter: it fetches the demo backend session and renders the
 currently private `@leanprover/editor-platform` prototype.
 
@@ -57,11 +57,11 @@ npm run test:packed:browser
 
 ## External host recipe
 
-1. Install `codemirror-lean4-lsp`, `@leanprover/infoview`, React, CodeMirror
-   state/view, and `vscode-languageserver-protocol` as direct dependencies.
+1. Build a package tarball using [the library installation guide](../../docs/USAGE.md#install),
+   then install it and the example's dependencies in the consuming project.
 
    ```bash
-   npm install codemirror-lean4-lsp @leanprover/infoview react react-dom \
+   npm install /path/to/codemirror-lean4-lsp-0.1.0.tgz @leanprover/infoview react react-dom \
      @codemirror/state @codemirror/view vscode-languageserver-protocol
    ```
 
