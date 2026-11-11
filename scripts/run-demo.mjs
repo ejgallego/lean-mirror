@@ -265,38 +265,45 @@ process.on("SIGTERM", () => {
   void shutdown(143);
 });
 
-await startBackend();
+try {
+  await startBackend();
 
-viteServer = await createServer({
-  configFile: resolve(rootDir, "demo/vite.config.ts"),
-});
+  viteServer = await createServer({
+    configFile: resolve(rootDir, "demo/vite.config.ts"),
+  });
 
-viteServer.watcher.add([
-  rosettaModules,
-  ...rosettaConfigFiles,
-  resolve(rootDir, "demo/externalGeneration.mjs"),
-  resolve(rootDir, "demo/server.mjs"),
-  resolve(rootDir, "demo/server"),
-  resolve(rootDir, "demo/rosetta"),
-  resolve(rootDir, "demo/shared"),
-  resolve(rootDir, "demo/index.html"),
-  resolve(rootDir, "demo/src"),
-  resolve(rootDir, "demo/workspace"),
-  resolve(rootDir, "src"),
-]);
+  viteServer.watcher.add([
+    rosettaModules,
+    ...rosettaConfigFiles,
+    resolve(rootDir, "demo/externalGeneration.mjs"),
+    resolve(rootDir, "demo/server.mjs"),
+    resolve(rootDir, "demo/server"),
+    resolve(rootDir, "demo/rosetta"),
+    resolve(rootDir, "demo/shared"),
+    resolve(rootDir, "demo/index.html"),
+    resolve(rootDir, "demo/src"),
+    resolve(rootDir, "demo/workspace"),
+    resolve(rootDir, "src"),
+  ]);
 
-viteServer.watcher.on("all", (event, path) => {
-  if (!watchReady) {
-    return;
-  }
-  if (!shouldRestartBridges(path)) {
-    return;
-  }
-  scheduleBridgeRestart(`${event} ${shortPath(path)}`);
-});
+  viteServer.watcher.on("all", (event, path) => {
+    if (!watchReady) {
+      return;
+    }
+    if (!shouldRestartBridges(path)) {
+      return;
+    }
+    scheduleBridgeRestart(`${event} ${shortPath(path)}`);
+  });
 
-await viteServer.listen();
-watchReady = true;
+  await viteServer.listen();
+  watchReady = true;
 
-console.log(`Demo frontend listening on ${demo.frontendUrl}`);
-console.log(`Demo backend listening on ${demo.backendUrl}`);
+  console.log(`Rust in Lean: ${demo.frontendUrl}/`);
+  console.log(`Lean in Rust: ${demo.frontendUrl}/?mode=rust`);
+  console.log(`Demo backend listening on ${demo.backendUrl}`);
+} catch (error) {
+  console.error(`[demo] ${error instanceof Error ? error.message : String(error)}`);
+  console.error("[demo] Check the error above; run npm run demo:setup if tools or dependencies are missing.");
+  await shutdown(1);
+}

@@ -44,22 +44,33 @@ composition and browser checks.
 
 ### Full integration demo
 
-The demo expects `lean`, `lake`, and `rust-analyzer` on `PATH`. The repository and
-demo workspace pin Lean 4.35.0; an elan installation selects and installs that
-toolchain automatically. `rust-analyzer` can be installed with
-`rustup component add rust-analyzer rust-src rustfmt`. External Anneal mode also needs
-`cargo` and a checkout of the Rust project whose examples you want to open.
+Start from a checkout with Node 24, [elan](https://github.com/leanprover/elan#installation),
+and [rustup](https://rustup.rs/) on `PATH`:
+
+```sh
+npm run demo:setup
+npm run demo
+```
+
+`demo:setup` checks the base installers before making changes, installs the Lean
+and Rust versions pinned in `lean-toolchain` and `rust-toolchain.toml` (including
+rust-analyzer, rust-src, and rustfmt), runs `npm ci`, and builds the Lean examples
+and native Rosetta host. It does not start servers, reset fixtures, or change
+your default toolchains. Rerun it after pulling changes; the native builds are
+incremental. Setup needs network access for missing tools and npm dependencies.
+If a step fails, fix the reported problem and rerun the same command.
+
+`npm run demo` starts both demos with the repository's toolchain pins. For UI
+work with dependencies and tools already installed, it also builds changed
+Lean/Rosetta sources automatically. No separate production frontend build is
+needed. Keep the command running and use Ctrl-C to stop the stack.
+
+External Anneal mode also needs `cargo` and a checkout of the Rust project whose
+examples you want to open; its separate toolchain settings still apply.
 
 If the Lean WebSocket closes, the demo starts a fresh client/server generation
 without remounting the active CodeMirror editor. A complete runtime restart is
 retained as the fallback when generation recovery itself fails.
-
-Install the npm dependencies if needed, then start the in-repo sample workspace:
-
-```bash
-npm install
-npm run demo
-```
 
 Open `http://127.0.0.1:5173`. The default opens `AeneasDemo.lean`, a static
 mock-up of a Rust `bump(&mut u32)` function paired with its Lean translation.

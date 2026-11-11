@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- `npm run demo:setup` checks prerequisites, installs pinned Lean/Rust tools and locked npm dependencies, and builds both demos and Rosetta. Demo startup prints both URLs and cleans up its backend when startup fails.
+
 - A static Aeneas-style `bump` example whose Rust Verso docstring is attached to its Lean translation, with a self-contained checked-arithmetic model, a proved increment specification, and success/overflow evaluations. Rust edits do not regenerate Lean.
 
 - A Lean-first full demo with real Verso Rust fences, Rosetta-backed rendered previews, an inline editing toggle, all six Rust editor features, and independent Rust session recovery. The Rust-driver and external Anneal experiments remain available.

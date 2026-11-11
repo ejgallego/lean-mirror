@@ -604,12 +604,12 @@ async function ensureCommandAvailable(command, args, installHint) {
 }
 
 async function ensureDemoPrerequisites({ leanOnly = false } = {}) {
-  await ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
+  await ensureCommandAvailable("lake", ["--version"], "Install elan, ensure lake is on PATH, then run `npm run demo:setup`.");
   if (leanOnly) return;
   await ensureCommandAvailable(
     "rust-analyzer",
     ["--version"],
-    "Install it with `rustup component add rust-analyzer` and ensure it is on PATH.",
+    "Run `npm run demo:setup` to install the pinned Rust toolchain and its language-server components.",
   );
 }
 

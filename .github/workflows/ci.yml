@@ -27,31 +27,26 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Select npm
         run: |
           npm install --global "$(node -p 'require("./package.json").packageManager')"
           npm --version
-          npm ci
 
       - name: Install Lean via elan
         run: |
           curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Verify Lean toolchain
-        run: lean --version
-
-      - name: Install Rust analyzer
+      - name: Ensure rustup is available
         run: |
           if ! command -v rustup >/dev/null 2>&1; then
-            curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+            curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain none
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rust-analyzer --component rust-src --component rustfmt
-          rustup default "$RUSTUP_TOOLCHAIN"
-          rustc --version
-          rust-analyzer --version
+
+      - name: Set up demos using the documented quickstart
+        run: npm run demo:setup
 
       - name: Install Playwright browser
         run: npm run playwright:install

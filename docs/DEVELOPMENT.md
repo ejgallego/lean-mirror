@@ -22,7 +22,10 @@ rustup. Primary CI uses Rust 1.99.0:
 rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src --component rustfmt
 ```
 
-Select that toolchain in your shell when matching CI. `npm run check:environment`
+The repository `rust-toolchain.toml` selects that toolchain automatically.
+For demo development, `npm run demo:setup` installs these tools and dependencies
+and builds the examples; see the [demo guide](DEMOS.md).
+`npm run check:environment`
 requires matching root/demo Lean pins, Lean, Lake, rust-analyzer, and rustfmt on PATH, and
 checks Lean against the repository pin. `npm run ci` runs this prerequisite check
 first. Focused tests can still run without every integration prerequisite.
