@@ -25,6 +25,7 @@ operational errors remain typed through analysis and profile callbacks.
 | `Client.start config` | Acquire a manually owned client; returns `EIO ClientError Client` |
 | `client.request method params timeoutMs cancel?` | Workspace/session RPC; return the JSON result or throw `ClientError` |
 | `client.notify method params` | Admit a workspace/session notification to the bounded queue |
+| `client.latestNotification method` | Observe retained params for a configured general notification method (`BaseIO`) |
 | `client.openDocument uri languageId text` | Return a handle for the admitted document version |
 | `document.request method params timeoutMs cancel?` | RPC with matching URI/version, checked at admission and delivery |
 | `document.change text` | Admit an edit and return its replacement handle |
@@ -46,6 +47,83 @@ Source composition (`compose`, `Projection.mapRange`), portable bundle
 validation/matching (`Bundle.validate`, `Bundle.find`), and the Verso bridge
 retain their existing responsibilities. The current `VersoRosetta.collect` and
 `VersoRosetta.enrich` entry points operate on Manual parts and remain pure.
+
+## Workspace references and highlighted definitions
+
+`Client.workspaceSymbols query` wraps `workspace/symbol`, including deferred
+locations via `workspaceSymbol/resolve`. `Document.definitions position` wraps
+`textDocument/definition` and preserves both full and selection ranges from
+LocationLink. `Document.semanticTokens text range?` requests and decodes semantic tokens
+against the exact opened document text. When a range is supplied and the server
+supports range tokens, it requests only that range; otherwise it requests full
+document tokens.
+Rosetta advertises both request forms and never sends an unadvertised full
+request to a range-only server. A `null` token result means no coloring; the
+source slice is still preserved. The `text` argument must be the exact text
+used to open the document version.
+
+For a named reference, use:
+
+```lean
+Client.withSession config fun client => do
+  -- Wait for the project's server to finish loading, when necessary.
+  client.sourceDefinition "rust" "EdwardsPoint::compress" "::"
+```
+
+`Client.sourceDefinition` searches by the final component, filters fuzzy results
+to an exact name and optional container supplied by the author, and requires a
+unique location. It asks `definition` at that location, follows the returned
+file URI, and highlights its returned range. The result is a
+`HighlightedDefinition` with the original `DefinitionTarget`, language ID, and
+lossless text pieces carrying semantic token types and modifiers. Token spans
+intersecting the range boundaries are clipped, preserving Unicode and CRLF.
+Source files are read only. Non-file URIs are reported as unsupported.
+
+The lower-level operations `Client.workspaceDefinition` and
+`Client.highlightDefinition` can be used separately. Missing or ambiguous names
+produce `ClientError.invalidInput`; protocol, server, and unsupported-feature
+errors keep their existing types. A Location-only server controls the source
+extent it returns; Rosetta does not invent a larger declaration range.
+
+This is workspace symbol discovery, not compiler resolution of expressions or
+imports. Qualification matches the server's `containerName` exactly; supported
+container depth is determined by the server. For a Rust expression in a known
+scope, use `Document.definitions` or the existing `ContextProfile` analysis.
+
+Initialization options remain caller-owned. For example, rust-analyzer needs
+`workspace.symbol.search.kind = "all_symbols"` to include methods. Workspace
+indexing readiness is also server-specific. Configure the methods whose latest
+params must survive unrelated traffic **before starting the session**:
+
+```lean
+Client.withSession { config with
+    retainedNotificationMethods := #["experimental/serverStatus"] } fun client => do
+  client.waitForNotification "experimental/serverStatus" (fun status =>
+    (status.getObjValAs? Bool "quiescent").toOption == some true) 30000
+  client.sourceDefinition "rust" "EdwardsPoint::compress" "::"
+```
+
+`Client.latestNotification method : BaseIO (Option Json)` returns the latest
+params for a configured general notification method. `none` means no retained
+value (including an unconfigured method); `some Json.null` means a notification
+with null params arrived. Each configured method retains one value, including
+updates received during initialization. A newer busy status replaces an older
+ready status. The default retains no methods. There is no Rust-specific status
+field or API in the core.
+
+`Client.waitForNotification method predicate timeoutMs` requires that method in
+`retainedNotificationMethods`; otherwise it fails with `ClientError.invalidInput`.
+It waits on the retained value, independent of journal eviction, and reports
+`ClientError.deadline` if the predicate is not satisfied by the deadline. This
+changes the earlier journal-scanning helper: its callers must now configure the
+method before startup. These observations are snapshots, not session-liveness
+checks or a guarantee against subsequent indexing. The caller supplies the
+server-specific predicate and experimental capabilities needed to enable it.
+
+`Client.notifications` independently retains the latest 512 general notifications
+with an eviction count. Diagnostics remain in `Document.diagnostics`, outside
+both general-notification stores. The generic API contains no Rust names, source
+paths, or Rust syntax assumptions; the author supplies the reference separator.
 
 ## Error contract
 
@@ -98,6 +176,3 @@ no-compatibility policy between revisions.
 - Replace `document.withClient f` with `f document.client`.
 - Manual cleanup returns `BaseIO CloseReport`; scoped cleanup raises
   `ClientError.cleanup` if that report is incomplete.
-
-Local host extension: `Client.serverStatus` returns the latest
-`experimental/serverStatus` parameters, separately from the bounded journal.

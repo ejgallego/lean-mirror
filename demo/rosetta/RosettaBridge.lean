@@ -81,7 +81,7 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
         ("save", Json.mkObj [("includeText", toJson true)])])]),
       ("serverInfo", Json.mkObj [("name", toJson "Rosetta / rust-analyzer")])]
   if method == "rosetta/ready" then
-    let status ← client.serverStatus
+    let status ← client.latestNotification "experimental/serverStatus"
     return toJson <| status.any fun value =>
       (value.getObjValAs? Bool "quiescent").toOption.getD false
   if method == "rosetta/preview" then
@@ -136,6 +136,7 @@ private def serve (root : System.FilePath) : EIO ClientError Unit := do
     liftM (output.writeSerializedLspMessage message.compress)
   Client.withSession {
     command := "rust-analyzer", root, timeoutMs := 20000
+    retainedNotificationMethods := #["experimental/serverStatus"]
     experimentalCapabilities := Json.mkObj [("serverStatusNotification", toJson true)]
     initializationOptions := Json.mkObj [("checkOnSave", toJson true)]
   } fun client => do

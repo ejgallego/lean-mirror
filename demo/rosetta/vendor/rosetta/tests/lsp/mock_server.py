@@ -14,6 +14,9 @@ client_request = None
 document_request = None
 cancelled_requests = []
 mode = None
+source_uri = None
+target_uri = None
+token_mode = None
 
 
 def send(message):
@@ -60,14 +63,58 @@ while True:
     request_id = message.get("id")
     params = message.get("params", {})
     if method == "initialize":
-        mode = (params.get("initializationOptions") or {}).get("mode")
+        options = params.get("initializationOptions") or {}
+        mode = options.get("mode")
+        source_uri = options.get("sourceUri")
+        target_uri = options.get("targetUri")
+        token_mode = options.get("tokenMode")
+        if mode == "workspace":
+            assert params["capabilities"]["textDocument"]["semanticTokens"]["requests"]["range"] is True
+            send({"method": "test/status", "params": {"ready": False}})
         if mode == "ignore-term":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
         reply(request_id, {"capabilities": {
             "positionEncoding": "utf-8" if mode == "wrong-encoding" else "utf-16",
             "textDocumentSync": 1,
             "definitionProvider": True, "hoverProvider": True,
+            **({"workspaceSymbolProvider": {"resolveProvider": True},
+                "semanticTokensProvider": {"full": token_mode not in ("range", "none"),
+                    "range": token_mode not in ("full", "none"), "legend": {
+                    "tokenTypes": ["keyword", "function", "number"],
+                    "tokenModifiers": ["declaration"]}}} if mode == "workspace" else {}),
         }})
+    elif method == "workspace/symbol":
+        def symbol(name, container):
+            return {"name": name, "kind": 12, "containerName": container,
+                    "location": {"uri": source_uri, "range": {
+                        "start": {"line": 0, "character": 0 if container == "Container" else 1},
+                        "end": {"line": 0, "character": 5}}}}
+        query = params["query"]
+        if query == "measure":
+            reply(request_id, [symbol("measure", "Container"), symbol("measure", "Container"),
+                               symbol("measure", "Other"), symbol("measureMore", "Container")])
+        elif query == "deferred":
+            reply(request_id, [{"name": "deferred", "kind": 12,
+                                "location": {"uri": source_uri}, "data": 7}])
+        else:
+            reply(request_id, [])
+    elif method == "workspaceSymbol/resolve":
+        assert params["data"] == 7
+        params["location"]["range"] = {"start": {"line": 0, "character": 0},
+                                        "end": {"line": 0, "character": 5}}
+        reply(request_id, params)
+    elif method == "textDocument/definition":
+        reply(request_id, [{"targetUri": target_uri,
+                            "targetRange": {"start": {"line": 0, "character": 2},
+                                            "end": {"line": 0, "character": 20}},
+                            "targetSelectionRange": {"start": {"line": 0, "character": 5},
+                                                     "end": {"line": 0, "character": 12}}}])
+    elif method in ("textDocument/semanticTokens/full", "textDocument/semanticTokens/range"):
+        assert token_mode != "none"
+        assert token_mode != "range" or method.endswith("/range")
+        assert token_mode != "full" or method.endswith("/full")
+        reply(request_id, None if token_mode == "null" else {
+            "data": [0, 2, 2, 0, 0, 0, 3, 7, 1, 1, 0, 12, 1, 2, 0]})
     elif method == "textDocument/didOpen":
         document = params["textDocument"]
         diagnostics(document["uri"], document["version"], "old warning")
@@ -77,10 +124,19 @@ while True:
         document = params["textDocument"]
         diagnostics(document["uri"], 1, "stale after edit")
         diagnostics(document["uri"], document["version"], "current warning")
-    elif method == "test/status-overflow":
-        for _ in range(520):
-            send({"method": "test/noise", "params": {}})
-        send({"method": "experimental/serverStatus", "params": {"quiescent": True}})
+    elif method == "test/readiness":
+        send({"method": "test/status", "params": {"ready": False}})
+        for _ in range(600):
+            send({"method": "window/logMessage", "params": {"type": 3, "message": "indexing"}})
+        send({"method": "test/status", "params": {"ready": True}})
+        send({"method": "test/null-status", "params": None})
+        for _ in range(600):
+            send({"method": "window/logMessage", "params": {"type": 3, "message": "finished"}})
+        reply(request_id, True)
+    elif method == "test/not-ready":
+        send({"method": "test/status", "params": {"ready": False}})
+        for _ in range(600):
+            send({"method": "window/logMessage", "params": {"type": 3, "message": "busy again"}})
         reply(request_id, True)
     elif method == "test/barrier":
         reply(request_id, True)
