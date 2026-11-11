@@ -60,6 +60,8 @@ test("Rosetta serves all six editor features and versioned Cargo diagnostics", {
   try {
     const initialized = await request("initialize", {});
     assert.equal(initialized.serverInfo.name, "Rosetta / rust-analyzer");
+    assert.equal(initialized.capabilities.workspaceSymbolProvider, undefined);
+    assert.equal(initialized.capabilities.executeCommandProvider, undefined);
     notify("initialized", {});
     notify("textDocument/didOpen", { textDocument: { uri, languageId: "rust", text, version: 7 } });
     const base = { textDocument: { uri } };
@@ -103,3 +105,29 @@ test("Rosetta serves all six editor features and versioned Cargo diagnostics", {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const method of ['second-open', 'textDocument/didChange', 'textDocument/didClose', 'textDocument/didSave']) {
+  test(`Rosetta rejects ${method} outside its one-document lifecycle`, { timeout: 30000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rosetta-uri-contract-'));
+    await mkdir(join(root,'src'));
+    await writeFile(join(root,'Cargo.toml'), '[package]\nname="uri_contract"\nversion="0.1.0"\nedition="2021"\n');
+    const path = join(root,'src','lib.rs'); await writeFile(path,'fn probe() {}');
+    const uri = pathToFileURL(path).href;
+    const child = spawn(process.env.LEAN_DEMO_ROSETTA_BINARY, [root], {stdio:['pipe','pipe','pipe']});
+    const exited = once(child,'exit');
+    let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; }); child.stdout.resume();
+    try {
+      writeLspFrame(child.stdin, {jsonrpc:'2.0',method:'textDocument/didOpen',params:{textDocument:{uri,languageId:'rust',version:1,text:'fn probe() {}'}}});
+      const wrong = pathToFileURL(join(root,'src','other.rs')).href;
+      writeLspFrame(child.stdin, {jsonrpc:'2.0',method:method === 'second-open' ? 'textDocument/didOpen' : method,
+        params:{textDocument:{uri:wrong,languageId:'rust',version:2,text:'fn other() {}'},contentChanges:[{text:'fn other() {}'}]}});
+      const result = await Promise.race([exited, new Promise((_,reject) => { const t=setTimeout(()=>reject(new Error('invalid lifecycle did not close')),20000);t.unref(); })]);
+      assert.notEqual(result[0],0);
+      assert.match(stderr,/invalid input.*(document|URI)/);
+    } finally {
+      child.stdin.end(); if(child.exitCode===null) child.kill('SIGTERM');
+      await exited;
+      await rm(root,{recursive:true,force:true});
+    }
+  });
+}

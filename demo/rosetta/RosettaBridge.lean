@@ -59,7 +59,23 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
   if method == "initialize" then
     let caps ← client.capabilities
     let fields ← readJson caps.getObj?
-    let fields := fields.toArray.filter (·.1 != "textDocumentSync")
+    let supported := #["hoverProvider", "completionProvider", "definitionProvider", "referencesProvider",
+      "renameProvider", "documentFormattingProvider", "signatureHelpProvider", "diagnosticProvider",
+      "semanticTokensProvider", "positionEncoding"]
+    let fields := fields.toArray.filter (fun field => supported.contains field.1)
+    let fields ← fields.mapM fun (name, value) => do
+      if name == "completionProvider" then
+        let properties ← readJson value.getObj?
+        return (name, Json.mkObj <| properties.toList.filter (·.1 != "resolveProvider") ++
+          [("resolveProvider", toJson false)])
+      if name == "semanticTokensProvider" then
+        let legend ← readJson <| value.getObjVal? "legend"
+        return (name, Json.mkObj [("legend", legend), ("full", toJson true)])
+      if name == "diagnosticProvider" then
+        let properties ← readJson value.getObj?
+        return (name, Json.mkObj <| properties.toList.filter (·.1 != "workspaceDiagnostics") ++
+          [("workspaceDiagnostics", toJson false)])
+      return (name, value)
     return Json.mkObj [("capabilities", Json.mkObj <| fields.toList ++ [
       ("textDocumentSync", Json.mkObj [("openClose", toJson true), ("change", toJson (1 : Nat)),
         ("save", Json.mkObj [("includeText", toJson true)])])]),
@@ -76,6 +92,11 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
     if raw == .null then return toJson (#[] : Array SemanticSpan)
     let tokens ← readJson <| semanticSpans file.text provider raw
     return toJson tokens
+  let supported := #["textDocument/hover", "textDocument/completion", "textDocument/definition",
+    "textDocument/references", "textDocument/rename", "textDocument/prepareRename",
+    "textDocument/formatting", "textDocument/signatureHelp", "textDocument/diagnostic",
+    "textDocument/semanticTokens/full"]
+  unless supported.contains method do throw <| ClientError.unsupported method
   if (params.getObjVal? "textDocument").isOk then
     let some file := file | throw <| ClientError.invalidInput "document is not open"
     let result ← requestDocument file.document method params cancel
@@ -86,6 +107,9 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
       return .arr <| targets.map fun target =>
         Json.mkObj [("uri", toJson target.uri), ("range", toJson target.selectionRange)]
     if method == "textDocument/rename" then
+      if let .ok changes := result.getObjVal? "changes" >>= Json.getObj? then
+        unless changes.toList.all (·.1 == file.document.uri) do
+          throw <| ClientError.unsupported "rename outside this embedded Rust document"
       if let .ok changes := result.getObjValAs? (Array Json) "documentChanges" then
         let mut edits := #[]
         for change in changes do
@@ -101,9 +125,10 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
         -- the response with the originating document handle on delivery.
         return Json.mkObj [("changes", Json.mkObj [(file.document.uri, toJson edits)])]
     return result
-  client.request method params 20000 (some cancel)
+  throw <| ClientError.invalidInput "document request requires textDocument"
 
 private def serve (root : System.FilePath) : EIO ClientError Unit := do
+  let expectedUri := (System.Uri.pathToUri (root / "src" / "lib.rs") : String)
   let input ← IO.getStdin
   let output ← IO.getStdout
   let lock ← Std.Mutex.new ()
@@ -176,21 +201,31 @@ private def serve (root : System.FilePath) : EIO ClientError Unit := do
           let uri ← readJson <| doc.getObjValAs? String "uri"
           let text ← readJson <| doc.getObjValAs? String "text"
           let browserVersion ← readJson <| doc.getObjValAs? Int "version"
+          unless uri == expectedUri && file.isNone do
+            throw <| ClientError.invalidInput "this session admits only its expected Rust document"
           let document ← client.openDocument uri "rust" text
           file := some { document, text, browserVersion }
           currentFile.set file
         else if method == "textDocument/didChange" then
           let some current := file | throw <| ClientError.invalidInput "document is not open"
+          let uri ← readJson <| params.getObjVal? "textDocument" >>= (·.getObjValAs? String "uri")
+          unless uri == current.document.uri do throw <| ClientError.invalidInput "change URI does not match open document"
           let changes ← readJson <| params.getObjValAs? (Array Json) "contentChanges"
           let text ← replaceChanges current.text changes
           let browserVersion ← readJson <| params.getObjVal? "textDocument" >>= (·.getObjValAs? Int "version")
           file := some { document := ← current.document.change text, text, browserVersion }
           currentFile.set file
         else if method == "textDocument/didClose" then
+          let uri ← readJson <| params.getObjVal? "textDocument" >>= (·.getObjValAs? String "uri")
+          unless uri == expectedUri do throw <| ClientError.invalidInput "close URI does not match session document"
           if let some current := file then current.document.close
           file := none
           currentFile.set none
-        else if method == "textDocument/didSave" then client.notify method params
+        else if method == "textDocument/didSave" then
+          let some current := file | throw <| ClientError.invalidInput "document is not open"
+          let uri ← readJson <| params.getObjVal? "textDocument" >>= (·.getObjValAs? String "uri")
+          unless uri == current.document.uri do throw <| ClientError.invalidInput "save URI does not match open document"
+          client.notify method params
     catch error =>
       if !(error matches .disconnected) then throw error
     finally
