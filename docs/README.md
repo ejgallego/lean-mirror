@@ -2,6 +2,7 @@
 
 - [USAGE.md](./USAGE.md): library integration examples
 - [DEMOS.md](./DEMOS.md): demo setup, modes, and external Anneal workflows
+- [demo-runtime.md](./demo-runtime.md): document snapshots, save receipts, and workflow ownership
 
 - [DEVELOPMENT.md](./DEVELOPMENT.md): setup, verification matrix, and takeover baseline
 - [API.md](./API.md): experimental top-level API and the explicit CodeMirror passthrough subpath

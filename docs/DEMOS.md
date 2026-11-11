@@ -226,3 +226,6 @@ Useful external-mode variables:
 - `LEAN_DEMO_SKIP_LEAN_BUILD=1`: skip `lake exe cache get` and `lake build` for an external Lean workspace
 - `DEMO_WATCH_USE_POLLING=0`: opt out of the default polling Vite watcher and use native filesystem watches
 - `PLAYWRIGHT_BROWSERS_PATH`: browser cache for E2E tests; defaults to `.demo-cache/playwright-browsers`
+
+The [demo controller design](demo-runtime.md) describes document authority,
+source receipts, cancellation, and the three workflow contracts.
