@@ -28,12 +28,9 @@ test.beforeEach(async ({ page, request }) => {
   if (session.rootUri === new URL("../../demo/workspace", import.meta.url).href) {
     // Restore through the backend queue so a failed scenario cannot leave its
     // persisted Rust edit behind for the next one. External workspaces stay alone.
-    const [code, leanDocument] = await Promise.all([
-      readFile(new URL("../../demo/baseline/Main.rs", import.meta.url), "utf8"),
-      readFile(new URL("../../demo/baseline/RustSnippets.lean", import.meta.url), "utf8"),
-    ]);
+    const code = await readFile(new URL("../../demo/baseline/Main.rs", import.meta.url), "utf8");
     const restored = await request.post(backend + "/rust-main", {
-      data: { uri: session.rustMainDocumentUri, code, leanDocument, revision: 0 },
+      data: { uri: session.rustMainDocumentUri, diskRevision: session.rustMainDiskRevision, code, revision: 0 },
     });
     expect(restored.ok()).toBe(true);
   }
@@ -84,6 +81,25 @@ async function hasHighlightedToken(page: Page, selector: string, text: string) {
       ),
     { selector, text },
   );
+}
+
+async function hoverSourceText(page: Page, lineText: string, name: string) {
+  const line = page.locator("#editor > .cm-editor .cm-line").filter({ hasText: lineText }).first();
+  await line.scrollIntoViewIfNeeded();
+  const point = await line.evaluate((element, text) => {
+    const nodes = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = nodes.nextNode(); node; node = nodes.nextNode()) {
+      const index = node.textContent?.indexOf(text) ?? -1;
+      if (index < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + text.length);
+      const rect = range.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }
+    throw new Error(`Missing source text ${text}`);
+  }, name);
+  await page.mouse.move(point.x, point.y);
 }
 
 function statusValue(page: Page, kind: string) {
@@ -158,7 +174,7 @@ function waitForRustMainRegeneration(page: Page) {
 test("demo supports undo and cross-file navigation", async ({ page }) => {
   const insertedSnippet = "#check demo";
 
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.rs");
@@ -183,7 +199,7 @@ test("demo supports undo and cross-file navigation", async ({ page }) => {
 });
 
 test("demo recreates its Lean session after a page reload", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("Lean server initialized.");
 
@@ -195,7 +211,7 @@ test("demo recreates its Lean session after a page reload", async ({ page }) => 
 });
 
 test("demo reconnects Lean without remounting the active editor", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocumentContaining(page, "Main.lean", "#check Nat.succ");
   await expect(page.locator("#editor [data-lean-semantic-token]").first()).toBeVisible({
@@ -234,7 +250,7 @@ test("demo reconnects Lean without remounting the active editor", async ({ page 
 });
 
 test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
@@ -260,22 +276,23 @@ test("demo opens and syncs the embedded Rust widget", async ({ page }) => {
 });
 
 test("demo toggles embedded widgets on and off", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
 
   for (let i = 0; i < 2; i += 1) {
-    await clickButtonByText(page, "Disable widget");
+    await clickButtonByText(page, "Show Verso source");
     await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
-    await expect.poll(() => hasButtonByText(page, "Enable widget")).toBe(true);
+    await expect.poll(() => hasButtonByText(page, "Render Rust")).toBe(true);
     await expect(page.locator(".cm-content")).toContainText("/-!");
-    await expect(page.locator(".cm-content")).toContainText("```rust demo-widget");
-    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(false);
-    await expect(page.locator(".cm-content")).toContainText("a + b");
+    await expect(page.locator(".cm-content")).toContainText("```rust (name := demoWidget)");
+    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+    await expect(page.locator(".cm-content")).toContainText("a - b");
+    expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a - b", "a + b"))).toBe(true);
 
-    await clickButtonByText(page, "Enable widget");
+    await clickButtonByText(page, "Render Rust");
   }
 
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(1);
@@ -283,7 +300,7 @@ test("demo toggles embedded widgets on and off", async ({ page }) => {
 });
 
 test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await openDocument(page, "Main.lean");
@@ -293,13 +310,13 @@ test("demo inserts a Rust scaffold from the gutter", async ({ page }) => {
 
   await expect
     .poll(() => page.evaluate(() => window.__leanDemo?.currentDoc()))
-    .toContain("```rust demo-widget-2");
+    .toContain("```rust (name := «demoWidget-2»)");
 
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
 });
 
 test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.rs");
@@ -313,7 +330,7 @@ test("demo opens the Rust driver and refreshes embedded Lean snippets", async ({
 });
 
 test("demo sizes short embedded editors to their content", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(2);
@@ -326,7 +343,7 @@ test("demo sizes short embedded editors to their content", async ({ page }) => {
 });
 
 test("demo infoview follows embedded Lean editors", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
@@ -343,7 +360,7 @@ test("demo infoview follows embedded Lean editors", async ({ page }) => {
 });
 
 test("demo shows hovers in embedded Lean editors", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("Rust driver saved; Lean snippets refreshed.");
@@ -360,7 +377,7 @@ test("demo shows hovers in embedded Lean editors", async ({ page }) => {
 });
 
 test("demo highlights Rust and embedded Lean code", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("Main.rs");
@@ -371,7 +388,7 @@ test("demo highlights Rust and embedded Lean code", async ({ page }) => {
 });
 
 test("demo updates Rust and embedded Lean diagnostics after edits", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
@@ -430,7 +447,7 @@ test("demo keeps versioned Rust diagnostics when a later pull is empty", async (
       route.send(message);
     });
   });
-  await page.goto("/");
+  await page.goto("/?mode=rust");
   await expect(statusValue(page, "status")).toHaveText("Ready");
   edited = true;
   expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "\"bad\""))).toBe(true);
@@ -439,7 +456,7 @@ test("demo keeps versioned Rust diagnostics when a later pull is empty", async (
 });
 
 test("demo syncs Rust keyboard edits", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#events")).toContainText("rust-analyzer initialized.");
@@ -467,7 +484,7 @@ test("demo syncs Rust keyboard edits", async ({ page }) => {
 });
 
 test("demo marks extracted Lean state fresh only when host Rust matches startup extraction", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(page.locator("#extraction-state")).toHaveText("Fresh");
@@ -489,10 +506,52 @@ test("demo marks extracted Lean state fresh only when host Rust matches startup 
   await expect(page.locator("#extraction-state")).toHaveText("Fresh");
 });
 
+
+test("demo keeps saved Rust text and both undo histories across file switches", async ({ page }) => {
+  await page.goto("/?mode=rust");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await openDocument(page, "Main.lean");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("#check Nat.succ", "#check Nat.pred"))).toBe(true);
+  await openDocument(page, "Main.rs");
+  const saved = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await saved;
+  await openDocument(page, "Main.lean");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("#check Nat.pred");
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("#check Nat.succ");
+  await openDocument(page, "Main.rs");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a - b");
+  expect(await readFile(new URL("../../demo/workspace/Main.rs", import.meta.url), "utf8")).toContain("a - b");
+  const undone = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+  await undone;
+});
+
+test("demo recovers Rust after a dropped connection without losing edits", async ({ page }) => {
+  let route: import("@playwright/test").WebSocketRoute | undefined;
+  let connections = 0;
+  await page.routeWebSocket(/\/rust-main-lsp$/, (socket) => {
+    route = socket;
+    connections++;
+    socket.connectToServer();
+  });
+  await page.goto("/?mode=rust");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  const saved = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await saved;
+  await route!.close({ code: 1011, reason: "test interruption" });
+  await expect.poll(() => connections).toBe(2);
+  await expect(page.locator("#events")).toContainText("Rust server reconnected; editor state preserved.");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("a - b");
+  expect(await page.evaluate(() => window.__leanDemo?.undo())).toBe(true);
+});
+
 test("external demo switches prepared examples and preserves embedded Lean diagnostics", async ({ page }) => {
   const targetExample = "namespaces.rs";
 
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   const targetButton = await preparedExampleButton(page, targetExample);
@@ -528,7 +587,7 @@ test("external demo switches prepared examples and preserves embedded Lean diagn
 test("external demo auto-regenerates stale host Rust edits", async ({ page }) => {
   test.setTimeout(600_000);
 
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   const targetButton = await preparedExampleButton(page, "linked_list.rs");
@@ -577,7 +636,7 @@ test("external demo auto-regenerates stale host Rust edits", async ({ page }) =>
 });
 
 test("external demo switches through all ready prepared examples", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?mode=rust");
 
   await expect(statusValue(page, "status")).toHaveText("Ready");
   const labels = await readyExampleLabels(page);
@@ -594,4 +653,390 @@ test("external demo switches through all ready prepared examples", async ({ page
     await expect(page.locator("#extraction-state")).toHaveText("Fresh");
     await expect(page.locator(".cm-embedded-block-widget")).not.toHaveCount(0);
   }
+});
+
+test("static Aeneas mock-up pairs a Rust docstring with checked Lean without regeneration", async ({ page }) => {
+  let regenerationRequests = 0;
+  page.on("request", request => {
+    if (request.url().endsWith("/regenerate-rust-main")) regenerationRequests++;
+  });
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("AeneasDemo.lean");
+  await expect(page.locator("#extraction-state")).toHaveText("Static mock-up");
+  await expect(page.locator("#regenerate-workspace")).toBeHidden();
+  const content = page.locator("#editor > .cm-editor .cm-content");
+  await expect(content).toContainText("pub fn bump(x: &mut u32)");
+  await expect(content).toContainText("Static mock-up:");
+  const before = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(before).toContain("-/\ndef bump (x : U32) : Result U32");
+  const tooltip = page.locator(".cm-tooltip .cm-lsp-hover-tooltip");
+  await hoverSourceText(page, "pub fn bump(", "bump");
+  await expect(tooltip).toContainText("fn bump");
+  await expect(tooltip).toContainText("mut u32");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "#check bump", "bump");
+  await expect(tooltip).toContainText("AeneasDemo.bump");
+  await page.mouse.move(10, 10);
+  await page.locator("#lean-infoview").getByText("All Messages", { exact: false }).first().click();
+  await expect(page.locator("#lean-infoview")).toContainText("Except.ok 42");
+  await expect(page.locator("#lean-infoview")).toContainText("integerOverflow");
+  await expect(content.locator("..").locator(".cm-lintRange-error")).toHaveCount(0);
+
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("*x += 1;", "*x += 2;"))).toBe(true);
+  const after = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(after.slice(after.indexOf("\ndef bump"))).toBe(before.slice(before.indexOf("\ndef bump")));
+  await expect(page.locator("#extraction-state")).toHaveText("Static mock-up");
+
+  await clickButtonByText(page, "Render Rust");
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  await page.locator(".cm-embedded-block-inline .cm-content").click();
+  const saved = page.waitForResponse(response => response.url().endsWith("/rust-document") &&
+    response.ok() && response.request().postDataJSON()?.code?.includes("*x += 3;"));
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("3");
+  await saved;
+  await clickButtonByText(page, "Show Verso source");
+  const inlineEdited = (await page.evaluate(() => window.__leanDemo?.currentDoc()))!;
+  expect(inlineEdited).toContain("*x += 3;");
+  expect(inlineEdited.slice(inlineEdited.indexOf("\ndef bump"))).toBe(before.slice(before.indexOf("\ndef bump")));
+
+  // Lean remains live and checked even though the source/translation pairing is static.
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("checkedAdd x 1", "checkedAdd x 2"))).toBe(true);
+  await content.click();
+  await page.keyboard.press("Control+End");
+  await expect(content.locator("..").locator(".cm-lintRange-error")).not.toHaveCount(0);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("checkedAdd x 2", "checkedAdd x 1"))).toBe(true);
+  await expect(content.locator("..").locator(".cm-lintRange-error")).toHaveCount(0);
+  expect(regenerationRequests).toBe(0);
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("Lean basic example shows editable raw Verso source with current Rust and Lean hovers", async ({ page }) => {
+  const methods: string[] = [];
+  await page.routeWebSocket(/\/rust-lsp\?/, route => {
+    const server = route.connectToServer();
+    route.onMessage(raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.method) methods.push(message.method);
+      server.send(raw);
+    });
+  });
+  await page.goto("/?example=basic");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.lean");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+  const content = page.locator("#editor > .cm-editor .cm-content");
+  await expect(content).toContainText("/-!");
+  await expect(content).toContainText("```rust (name := demoWidget)");
+  const tooltip = page.locator(".cm-tooltip .cm-lsp-hover-tooltip");
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("fn add");
+  await expect(tooltip).toContainText("i32");
+  expect(methods).toContain("textDocument/hover");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText(
+    "fn add(a: i32, b: i32) -> i32", "fn add(a: i64, b: i64) -> i64",
+  ))).toBe(true);
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("i64");
+  expect(methods).toContain("textDocument/didChange");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "#check Nat.succ", "succ");
+  await expect(tooltip).toContainText("Nat.succ");
+  await clickButtonByText(page, "Render Rust");
+  await expect(page.getByLabel("Rust code preview")).toContainText("i64");
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  await expect(page.locator(".cm-embedded-block-inline .cm-content")).toContainText("i64");
+  await clickButtonByText(page, "Show Verso source");
+  await expect(page.locator(".cm-embedded-block-widget")).toHaveCount(0);
+  await expect(content).toContainText("```rust (name := demoWidget)");
+  await expect(content).toContainText("i64");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("Edits stay in this Lean document.");
+  await page.mouse.move(10, 10);
+  await hoverSourceText(page, "fn add(", "add");
+  await expect(tooltip).toContainText("i64");
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("rendered mode keeps Rosetta preview and all inline Rust editor features", async ({ page }) => {
+  const methods = new Set<string>();
+  await page.routeWebSocket(/\/rust-lsp\?/, route => {
+    const server = route.connectToServer();
+    route.onMessage(raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.method) methods.add(message.method);
+      server.send(raw);
+    });
+  });
+  await page.goto("/?example=basic&view=rendered");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await expect(statusValue(page, "document")).toContainText("Main.lean");
+  const preview = page.getByLabel("Rust code preview");
+  await expect(preview).toBeVisible();
+  const token = preview.locator('[data-rosetta-token="function"]').filter({ hasText: /^add$/ }).first();
+  await expect(token).toBeVisible();
+  await token.hover();
+  await expect(token).toHaveAttribute("title", /add/);
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  const content = page.locator(".cm-embedded-block-inline .cm-content");
+  await expect(content).toBeVisible();
+  await content.click();
+  await page.keyboard.press("Control+Home");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("F2");
+  const rename = page.locator(".cm-lsp-rename-panel input");
+  await expect(rename).toBeVisible();
+  await expect(rename).toHaveValue("add");
+  await rename.fill("sum");
+  await rename.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("fn sum");
+  await expect(content).toContainText("sum(20, 22)");
+  await content.click();
+  await page.keyboard.press("Control+Home");
+  const lines = await content.locator(".cm-line").allTextContents();
+  for (let i = 0; i < lines.findIndex(line => line.includes("println!")); i++) await page.keyboard.press("ArrowDown");
+  const call = await content.locator(".cm-line").filter({ hasText: "println!" }).innerText();
+  for (let i = 0; i < call.indexOf("sum(") + 1; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("F12");
+  await expect.poll(() => page.evaluate(() => document.getSelection()?.anchorNode?.parentElement?.closest(".cm-line")?.textContent)).toContain("fn sum");
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("\nfn completion() { su }");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("Control+Space");
+  await expect(page.locator(".cm-tooltip-autocomplete")).toContainText("sum");
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("fn completion() { su }", "fn completion() { let _ = sum(1, 2); }"))).toBe(true);
+  await page.keyboard.press("Shift+Alt+f");
+  await expect.poll(() => page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("fn completion() {\n    let _ = sum(1, 2);\n}");
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", '"bad"'))).toBe(true);
+  await expect(page.locator(".cm-embedded-block-inline .cm-lintRange-error")).not.toHaveCount(0);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('"bad"', "a + b"))).toBe(true);
+  await expect(page.locator(".cm-embedded-block-inline .cm-lintRange-error")).toHaveCount(0);
+  await page.getByRole("button", { name: "Preview Rust", exact: true }).click();
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText("fn sum");
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toContain("Edits stay in this Lean document.");
+  // Diagnostics above may arrive as a current-version push before a pull is needed.
+  for (const method of ["textDocument/hover", "textDocument/completion", "textDocument/definition", "textDocument/rename", "textDocument/formatting"]) {
+    expect(methods.has(method), method).toBe(true);
+  }
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+test("inline Rust retries a failed Rosetta reconnect and preserves preview toggles", async ({ page }) => {
+  let socket: import("@playwright/test").WebSocketRoute | undefined;
+  let connections = 0;
+  await page.routeWebSocket(/\/rust-lsp\?/, route => {
+    socket = route;
+    connections++;
+    if (connections === 2) { void route.close({ code: 1011, reason: "temporary outage" }); return; }
+    route.connectToServer();
+  });
+  await page.goto("/?example=basic&view=rendered");
+  await expect(page.getByLabel("Rust code preview").locator("[data-rosetta-token]").first()).toBeVisible();
+  await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  const content = page.locator(".cm-embedded-block-inline .cm-content");
+  const saved = waitForRustWidgetSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a + b", "a - b"))).toBe(true);
+  await saved;
+  await content.evaluate(element => { element.dataset.reconnectProbe = "preserved"; });
+  await socket!.close({ code: 1011, reason: "test interruption" });
+  await expect.poll(() => connections).toBe(3);
+  await expect(page.locator(".cm-embedded-block-inline-status")).toBeHidden();
+  await expect(content).toHaveAttribute("data-reconnect-probe", "preserved");
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole("button", { name: "Preview Rust", exact: true }).click();
+    await expect(page.getByLabel("Rust code preview")).toContainText("a - b");
+    await page.getByRole("button", { name: "Edit Rust", exact: true }).click();
+  }
+  const nextSave = waitForRustWidgetSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("a - b", "a + b"))).toBe(true);
+  await nextSave;
+  await expect(content).toContainText("a + b");
+});
+
+test("regenerated Lean updates a previously opened hidden editor", async ({ page }) => {
+  await page.goto("/?mode=rust");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  await openDocumentContaining(page, "RustSnippets.lean", "#check Nat.succ");
+  await openDocument(page, "Main.rs");
+  const saved = waitForRustMainSave(page);
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText("Nat.succ", "Nat.pred"))).toBe(true);
+  await saved;
+  await openDocumentContaining(page, "RustSnippets.lean", "#check Nat.pred");
+  expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+
+test("Lean-first startup does not connect the independent Rust driver", async ({ page }) => {
+  const connections: string[] = [];
+  page.on("websocket", socket => connections.push(socket.url()));
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  expect(connections.some(url => url.includes("rust-main-lsp"))).toBe(false);
+  await page.locator('button').filter({ hasText: 'Main.rs' }).first().click();
+  await expect.poll(() => connections.some(url => url.includes("rust-main-lsp"))).toBe(true);
+});
+
+test("clicking the active Rust document preserves the visible and saved snapshot", async ({ page, request }) => {
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page, 'status')).toHaveText('Ready');
+  await page.getByRole('button', {name:'Helper.lean', exact:true}).click();
+  await page.getByRole('button', {name:'Main.rs', exact:true}).click();
+  const saved = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await saved;
+  // Observe beyond the 450ms save debounce: clicking the active tab must not
+  // schedule an older retained snapshot, even if no further edit follows.
+  const rollback = page.waitForRequest(request => request.url().endsWith('/rust-main') &&
+    !request.postDataJSON()?.code?.includes('a + b + 1'), {timeout:1000}).then(() => true, () => false);
+  await page.getByRole('button', {name:'Main.rs', exact:true}).click();
+  expect(await rollback).toBe(false);
+  // A following save must carry the actual edited buffer, not a retained prior visit.
+  const next = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 2'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b + 2'))).toBe(true);
+  await next;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const session = await (await request.get(backend + '/session')).json();
+  expect(session.initialDoc).toContain('a + b + 2');
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toBe(session.initialDoc);
+});
+
+test("a rejected Rust handshake leaves its allocation releasable", async ({ request }) => {
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const info = await (await request.post(backend + '/rust-session', {data:{key:'handshake-probe',code:'fn probe() {}'}})).json();
+  const url = new URL(info.websocketUrl); url.protocol = 'http:';
+  const rejected = await request.get(url.href, {headers:{Connection:'Upgrade', Upgrade:'websocket', 'Sec-WebSocket-Version':'13', 'Sec-WebSocket-Key':'invalid'}});
+  expect(rejected.status()).toBe(400);
+  expect((await request.delete(backend + '/rust-session?key=' + encodeURIComponent(info.key))).status()).toBe(204);
+  await expect(readFile(new URL(info.documentUri))).rejects.toMatchObject({code:'ENOENT'});
+});
+
+test("overlapping lazy Rust opens create only one driver connection", async ({ page }) => {
+  let attempts = 0, remaining = 0;
+  page.on('websocket', socket => {
+    if (socket.url().includes('rust-main-lsp')) {
+      attempts++; remaining++;
+      socket.on('close', () => { remaining--; });
+    }
+  });
+  await page.addInitScript(() => {
+    const Original = window.WebSocket;
+    window.WebSocket = class extends Original {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (String(url).includes('rust-main-lsp')) {
+          const add = this.addEventListener.bind(this);
+          this.addEventListener = ((type: string, handler: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+            if (type === 'open') add(type, event => setTimeout(() => typeof handler === 'function' ? handler(event) : handler.handleEvent(event), 300), options);
+            else add(type, handler, options);
+          }) as typeof this.addEventListener;
+        }
+      }
+    };
+  });
+  await page.goto('/');
+  await expect(statusValue(page, 'status')).toHaveText('Ready');
+  await page.getByRole('button', {name:'Main.rs',exact:true}).dblclick();
+  await expect(statusValue(page, 'document')).toContainText('Main.rs');
+  expect(attempts).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
+  await expect.poll(() => remaining).toBe(0);
+});
+
+test("a failed generation keeps its source receipt usable for a corrective save", async ({ page, request }) => {
+  await page.route('**/session', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({response,json:{...body,canRegenerate:true}});
+  });
+  await page.route('**/regenerate-rust-main', route => route.fulfill({status:500,body:'controlled generator failure'}));
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  const generated = page.waitForResponse(response => response.url().endsWith('/regenerate-rust-main'));
+  await page.evaluate(() => {
+    window.__leanDemo?.replaceCurrentText('a + b', 'a + b +');
+    document.querySelector<HTMLButtonElement>('#regenerate-workspace')!.click();
+  });
+  await generated;
+  await expect(page.locator('#events')).toContainText('controlled generator failure');
+  const correction = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b +', 'a + b + 1'))).toBe(true);
+  await correction;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const persisted = await (await request.get(backend + '/session')).json();
+  expect(persisted.initialDoc).toContain('a + b + 1');
+});
+
+test("invalid nested Rust edits preserve both editor buffers", async ({ page }) => {
+  await page.goto('/?view=rendered');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await page.getByRole('button',{name:'Edit Rust',exact:true}).click();
+  const inner = page.locator('.cm-embedded-block-inline .cm-content');
+  await inner.click();
+  const before = await page.evaluate(() => window.__leanDemo?.currentDoc());
+  const innerBefore = await inner.innerText();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText('\nfn delimiter() { let s = "-/"; }');
+  await expect(page.locator('.cm-embedded-block-inline-status')).toContainText('break the Lean comment');
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toBe(before);
+  expect(await inner.innerText()).toBe(innerBefore);
+});
+
+test("restoring saved text during an in-flight save still persists the current revision", async ({ page, request }) => {
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await expect(page.locator('#events')).toContainText('Rust driver saved; Lean snippets refreshed.');
+  let committed!: () => void, release!: () => void;
+  const committedPromise = new Promise<void>(resolve => { committed = resolve; });
+  const releasePromise = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/rust-main', async route => {
+    const response = await route.fetch();
+    if (route.request().postDataJSON()?.code?.includes('a + b + 1')) {
+      committed(); await releasePromise;
+    }
+    await route.fulfill({response});
+  });
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await committedPromise;
+  const restored = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() &&
+    response.request().postDataJSON()?.code?.includes('a + b') && !response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b'))).toBe(true);
+  release(); await restored;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const disk = await (await request.get(backend + '/session')).json();
+  expect(disk.initialDoc).toBe(await page.evaluate(() => window.__leanDemo?.currentDoc()));
+});
+
+test("failed auto-generation does not suppress a newer authored snapshot", async ({page}) => {
+  await page.route('**/session', async route => {
+    const response = await route.fetch();
+    await route.fulfill({response,json:{...await response.json(),canRegenerate:true}});
+  });
+  let firstStarted!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { firstStarted = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const attempts: string[] = [];
+  await page.route('**/regenerate-rust-main', async route => {
+    attempts.push(route.request().postDataJSON().code);
+    if (attempts.length === 1) { firstStarted(); await held; }
+    await route.fulfill({status:500,body:'controlled auto-generation failure'});
+  });
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await page.locator('#regeneration-mode button[data-mode="auto"]').click();
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await started;
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b + 2'))).toBe(true);
+  release();
+  await expect.poll(() => attempts.length).toBe(2);
+  expect(attempts[0]).toContain('a + b + 1');
+  expect(attempts[1]).toContain('a + b + 2');
+  await expect(page.locator('#extraction-state')).toHaveText('Generation failed');
 });

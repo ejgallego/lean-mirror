@@ -12,7 +12,13 @@ export function renewClientLifetime(client: LSPClient): AbortSignal {
 }
 
 export function retireClientOperations(client: LSPClient): void {
-  lifetimes.get(client)?.abort(new Error("Lean client connection was disconnected."));
+  // Upstream completion recognizes the LSP cancellation code. Retirement is
+  // expected cancellation, including for requests still queued by the client.
+  const error = Object.assign(new Error("Lean client connection was disconnected."), {
+    name: "AbortError",
+    code: -32800,
+  });
+  lifetimes.get(client)?.abort(error);
 }
 
 export function clientLifetimeSignal(client: LSPClient): AbortSignal | undefined {

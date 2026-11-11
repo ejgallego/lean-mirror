@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -11,7 +12,8 @@ import {
   markAnnealGenerationBuilt,
   registerAnnealGeneration,
 } from "../externalGeneration.mjs";
-import { ensureEmbeddedLeanArtifacts } from "./embeddedLeanDocument.mjs";
+import { ensureEmbeddedLeanArtifacts, buildEmbeddedLeanDocumentFromSource } from "./embeddedLeanDocument.mjs";
+import { createLeanDocumentStore } from "./leanDocuments.mjs";
 import {
   parseExternalAnnealArgs,
   resolveExternalExamplePresets,
@@ -70,6 +72,34 @@ export function createDemoWorkspace(demoDir, options = {}) {
   let rustMainUpdateQueue = Promise.resolve();
   let preparationStatus = createPreparationStatus("idle", "Waiting to prepare demo workspace.");
   const rustBlockUpdateStates = new Map();
+  const rustSessions = new Map();
+  async function releaseRustBlockSession(key) {
+    const entry = rustSessions.get(key);
+    if (!entry) return;
+    entry.retired = true;
+    if (entry.active) return;
+    clearTimeout(entry.expiry);
+    rustSessions.delete(key);
+    await rustBlockUpdateStates.get(key)?.queue;
+    rustBlockUpdateStates.delete(key);
+    await rm(entry.rootPath, { recursive: true, force: true });
+  }
+  function acquireRustBlockSession(slug) {
+    const entry = [...rustSessions.values()].find(entry => entry.slug === slug);
+    if (!entry || entry.retired || entry.active) return null;
+    clearTimeout(entry.expiry);
+    entry.active = true;
+    return { ...entry, release: async () => { entry.active = false; await releaseRustBlockSession(entry.key); } };
+  }
+  const rustSourceStores = new Map();
+  function rustSourceStore() {
+    let store = rustSourceStores.get(rustMainPath);
+    if (!store) {
+      store = createLeanDocumentStore([rustMainPath]);
+      rustSourceStores.set(rustMainPath, store);
+    }
+    return store;
+  }
 
   function setPreparationStatus(phase, message, detail) {
     preparationStatus = createPreparationStatus(phase, message, detail);
@@ -108,8 +138,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
       activeExampleLabel: "Default workspace",
       demoProject: "Lean 4 + CodeMirror 6",
       demoSummary:
-        "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.",
-      demoTitle: "Embedded Lean over Rust comments",
+        "A Rust docstring beside its hand-authored Aeneas-style Lean translation and checked proof. This is a static mock-up: Rust edits do not regenerate Lean.",
+      demoTitle: "Rust and Lean: an Aeneas mock-up",
     };
   }
 
@@ -128,6 +158,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     if (!externalMode) {
       documentMap.set(documentUri, "lean4");
       documentMap.set(helperUri, "lean4");
+      documentMap.set(pathToFileURL(join(defaultWorkspaceDir, "AeneasDemo.lean")).toString(), "lean4");
     }
     documents = [...documentMap.keys()];
     documentLanguageIds = Object.fromEntries(documentMap);
@@ -144,6 +175,9 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function ensureRustBlockWorkspace(key, code) {
+    // A recreated widget owns a new session and version sequence. Late saves
+    // from a retired widget must never target its replacement's workspace.
+    key = `${key}:${randomUUID()}`;
     const { documentPath, rootPath, slug } = rustBlockPaths(key);
     const crateName = "widget";
     await mkdir(join(rootPath, "src"), { recursive: true });
@@ -164,7 +198,11 @@ export function createDemoWorkspace(demoDir, options = {}) {
       "utf8",
     );
     await writeFile(documentPath, code, "utf8");
+    const expiry = setTimeout(() => { void releaseRustBlockSession(key); }, 60_000);
+    expiry.unref?.();
+    rustSessions.set(key, { key, slug, rootPath, active: false, retired: false, expiry });
     return {
+      key,
       documentPath,
       documentUri: pathToFileURL(documentPath).toString(),
       rootPath,
@@ -175,7 +213,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
 
   async function updateRustBlockDocument(key, code) {
     const { documentPath } = rustBlockPaths(key);
-    await writeFile(documentPath, code, "utf8");
+    if (await readFile(documentPath, "utf8") !== code) await writeFile(documentPath, code, "utf8");
   }
 
   function currentEmbeddedLeanContext() {
@@ -190,6 +228,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   function enqueueRustBlockDocumentUpdate(key, code, version) {
+    if (!rustSessions.has(key) || rustSessions.get(key).retired) return false;
     let state = rustBlockUpdateStates.get(key);
     if (!state) {
       state = { latestVersion: -1, queue: Promise.resolve() };
@@ -210,9 +249,16 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function refreshRustMainArtifacts(payload) {
-    await writeFile(rustMainPath, payload.code, "utf8");
-    await writeFile(embeddedLeanPath, payload.leanDocument, "utf8");
+    const saved = await rustSourceStore().save({
+      uri: rustMainUri, text: payload.code, revision: payload.diskRevision,
+    });
+    let projectionError;
+    try {
+      await writeFile(embeddedLeanPath, buildEmbeddedLeanDocumentFromSource(payload.code, currentEmbeddedLeanContext()), "utf8");
+    } catch (error) { projectionError = error instanceof Error ? error.message : String(error); }
     return {
+      ...(projectionError ? { projectionError } : {}),
+      diskRevision: saved.revision,
       leanDocumentUri: embeddedLeanUri,
       revision: payload.revision,
     };
@@ -355,7 +401,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   async function readSessionPayload({ websocketUrl, rustMainWebsocketUrl }) {
-    const initialDoc = await readFile(rustMainPath, "utf8");
+    const snapshot = await rustSourceStore().read(rustMainUri);
+    const initialDoc = snapshot.text;
     const descriptor = demoDescriptor();
     return {
       activeExampleId: descriptor.activeExampleId,
@@ -376,6 +423,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
       initialDoc,
       rustRootUri,
       rustMainDocumentUri: rustMainUri,
+      rustMainDiskRevision: snapshot.revision,
       rustMainWebsocketUrl,
       websocketUrl,
     };
@@ -390,8 +438,13 @@ export function createDemoWorkspace(demoDir, options = {}) {
     }
     const job = rustMainUpdateQueue.then(async () => {
       try {
-        setPreparationStatus("preparing", "Saving Rust source before regeneration.");
-        await writeFile(rustMainPath, payload.code, "utf8");
+        const committed = await rustSourceStore().read(rustMainUri);
+        if (committed.revision !== payload.diskRevision || committed.text !== payload.code) {
+          const error = new Error("Regeneration requires an acknowledged source snapshot. Save the source first.");
+          error.code = "ERR_LEAN_DOCUMENT_CONFLICT";
+          throw error;
+        }
+        setPreparationStatus("preparing", "Generating from the acknowledged Rust source.");
         await configureExternalWorkspace();
         await ensureEmbeddedLeanArtifacts(embeddedLeanPath, currentEmbeddedLeanContext());
         setPreparationStatus("ready", "Demo workspace ready.");
@@ -466,6 +519,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
       return preparationStatus;
     },
     createRustBlockSession: ensureRustBlockWorkspace,
+    releaseRustBlockSession,
+    acquireRustBlockSession,
     async readDocument(uri) {
       const path = fileURLToPath(uri);
       if (!allowedDocumentRoots.some((root) => path === root || path.startsWith(`${root}/`))) {
@@ -583,12 +638,12 @@ async function ensureCommandAvailable(command, args, installHint) {
 }
 
 async function ensureDemoPrerequisites({ leanOnly = false } = {}) {
-  await ensureCommandAvailable("lake", ["--version"], "Install Lean through elan and ensure lake is on PATH.");
+  await ensureCommandAvailable("lake", ["--version"], "Install elan, ensure lake is on PATH, then run `npm run demo:setup`.");
   if (leanOnly) return;
   await ensureCommandAvailable(
     "rust-analyzer",
     ["--version"],
-    "Install it with `rustup component add rust-analyzer` and ensure it is on PATH.",
+    "Run `npm run demo:setup` to install the pinned Rust toolchain and its language-server components.",
   );
 }
 
@@ -596,7 +651,7 @@ async function ensureDemoArtifacts(workspaceDir, { externalMode }) {
   if (externalMode) {
     return;
   }
-  const result = await runCommand("lake", ["build", "Helper"], {
+  const result = await runCommand("lake", ["build"], {
     cwd: workspaceDir,
   });
   if (result.status !== 0) {

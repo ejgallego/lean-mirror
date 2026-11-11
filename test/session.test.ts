@@ -1,5 +1,6 @@
 import { history, undo } from "@codemirror/commands";
-import { LSPPlugin } from "@codemirror/lsp-client";
+import { autocompletion, startCompletion, type CompletionContext } from "@codemirror/autocomplete";
+import { LSPPlugin, serverCompletionSource } from "@codemirror/lsp-client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -29,6 +30,34 @@ function initializedTransport(): MockTransport {
 }
 
 describe("LeanEditorSession", () => {
+  it("aborts completion contexts before removing the client editor extensions", async () => {
+    let context: CompletionContext | undefined;
+    const session = createLeanEditorSession({ client: {
+      features: { completion: false },
+      extensions: [autocompletion({ override: [next => {
+        context = next;
+        return serverCompletionSource(next);
+      }] })],
+    } });
+    const transport = initializedTransport();
+    transport.onRequest("initialize", () => ({ capabilities: {
+      textDocumentSync: 2, completionProvider: {},
+    } }));
+    const connection = session.connect(transport);
+    const view = createTestView("Nat.s", lean4({ session, uri: URI }));
+    try {
+      await connection.initialized;
+      await waitFor(() => LSPPlugin.get(view)?.client === connection.client);
+      startCompletion(view);
+      await waitFor(() => transport.requests("textDocument/completion").length === 1);
+      session.disconnect();
+      expect(context?.aborted).toBe(true);
+    } finally {
+      view.destroy();
+      session.dispose();
+    }
+  });
+
   it("owns client generations, progress cleanup, and transport disposal", async () => {
     const states: string[] = [];
     const progress = leanFileProgress();

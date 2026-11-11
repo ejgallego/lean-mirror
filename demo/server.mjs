@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { createDemoWorkspace } from "./server/demoWorkspace.mjs";
+import { prepareRosetta } from "./server/rosetta.mjs";
 import { createLeanDocumentStore } from "./server/leanDocuments.mjs";
 import { handleLeanDocumentRequest } from "./server/leanDocumentHttp.mjs";
 import { attachLspProcess, pipeServerStderr } from "./server/lspProcessBridge.mjs";
@@ -67,7 +68,19 @@ const demoWorkspace = createDemoWorkspace(__dirname, {
   },
 });
 let prepareError = null;
-const preparePromise = demoWorkspace.prepare().catch((error) => {
+let rosettaBinary = null;
+function preparationStatus() {
+  const status = demoWorkspace.readPreparationStatus();
+  if (prepareError) return { ...status, phase: "failed", message: prepareError.message };
+  if (status.phase === "ready" && process.env.LEAN_DEMO_LEAN_ONLY !== "1" && !rosettaBinary) {
+    return { ...status, phase: "preparing", message: "Building the Rosetta Rust host." };
+  }
+  return status;
+}
+const preparePromise = Promise.all([
+  demoWorkspace.prepare(),
+  process.env.LEAN_DEMO_LEAN_ONLY === "1" ? null : prepareRosetta().then(path => { rosettaBinary = path; }),
+]).catch((error) => {
   prepareError = error;
 });
 
@@ -84,7 +97,7 @@ function withCorsHeaders(req, headers = {}) {
     ...(origin && allowedOrigins.has(origin)
       ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" }
       : {}),
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     ...headers,
   };
@@ -130,7 +143,7 @@ async function handleHttpRequest(req, res) {
         "Content-Type": "application/json; charset=utf-8",
       }),
     );
-    res.end(JSON.stringify(demoWorkspace.readPreparationStatus()));
+    res.end(JSON.stringify(preparationStatus()));
     return;
   }
   if (req.url === DEMO_ENDPOINTS.session) {
@@ -199,12 +212,17 @@ async function handleHttpRequest(req, res) {
     );
     res.end(
       JSON.stringify({
+        key: session.key,
         documentUri: session.documentUri,
         rootUri: session.rootUri,
         websocketUrl: `ws://${host}:${port}/rust-lsp?block=${encodeURIComponent(session.slug)}`,
       }),
     );
     return;
+  }
+  if (req.method === "DELETE" && new URL(req.url, `http://${host}:${port}`).pathname === DEMO_ENDPOINTS.rustSession) {
+    await demoWorkspace.releaseRustBlockSession(new URL(req.url, `http://${host}:${port}`).searchParams.get("key"));
+    res.writeHead(204, withCorsHeaders(req)); res.end(); return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustDocument) {
     await preparePromise;
@@ -218,7 +236,12 @@ async function handleHttpRequest(req, res) {
       "Invalid rust-document payload",
     );
     if (!payload) return;
-    await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
+    const saved = await demoWorkspace.updateRustBlockDocument(payload.key, payload.code, payload.version);
+    if (!saved) {
+      res.writeHead(409, withCorsHeaders(req));
+      res.end("Rust widget version was superseded");
+      return;
+    }
     res.writeHead(204, withCorsHeaders(req));
     res.end();
     return;
@@ -273,7 +296,7 @@ async function handleHttpRequest(req, res) {
       res.end(JSON.stringify(result));
     } catch (error) {
       res.writeHead(
-        500,
+        error.code === "ERR_LEAN_DOCUMENT_CONFLICT" ? 409 : 500,
         withCorsHeaders(req, {
           "Content-Type": "text/plain; charset=utf-8",
         }),
@@ -324,6 +347,11 @@ async function handleHttpRequest(req, res) {
 
 const httpServer = createServer((req, res) => {
   void handleHttpRequest(req, res).catch((error) => {
+    if (error.code === "ERR_LEAN_DOCUMENT_CONFLICT") {
+      res.writeHead(409, withCorsHeaders(req));
+      res.end(error.message);
+      return;
+    }
     console.error("[demo] request failed", error);
     res.writeHead(
       500,
@@ -348,7 +376,7 @@ function rejectUpgrade(socket, status, message) {
   socket.destroy();
 }
 
-function attachSpawnedLsp(connection, command, args, cwd) {
+function attachSpawnedLsp(connection, command, args, cwd, limits = lspRelayLimits) {
   activeLspProcesses += 1;
   let released = false;
   const release = () => {
@@ -367,7 +395,8 @@ function attachSpawnedLsp(connection, command, args, cwd) {
   child.once("error", release);
   child.once("error", () => connection.close());
   pipeServerStderr(child.stderr);
-  attachLspProcess(connection, child, lspRelayLimits);
+  attachLspProcess(connection, child, limits);
+  return child;
 }
 
 wsServer.on("connection", (socket) => {
@@ -405,9 +434,24 @@ httpServer.on("upgrade", (req, socket, head) => {
       socket.destroy();
       return;
     }
-    const { rootPath } = demoWorkspace.rustBlockPaths(block);
+    if (!rosettaBinary) {
+      rejectUpgrade(socket, "503 Service Unavailable", "Rosetta is not ready");
+      return;
+    }
+    // Only a validated handshake may claim an allocation and clear its expiry.
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      attachSpawnedLsp(connection, "rust-analyzer", [], rootPath);
+      const session = demoWorkspace.acquireRustBlockSession(block);
+      if (!session) { connection.close(1008, "Rust session retired or already connected"); return; }
+      const { rootPath } = session;
+      try {
+        attachSpawnedLsp(connection, rosettaBinary, [rootPath], rootPath, {
+          ...lspRelayLimits, killDelayMs: 2000,
+        }).once("close", () => { void session.release(); });
+      } catch (error) {
+        void session.release();
+        connection.close(1011, "Cannot start Rust session");
+        console.error(error);
+      }
     });
     return;
   }

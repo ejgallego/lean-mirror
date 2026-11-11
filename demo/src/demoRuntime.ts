@@ -1,4 +1,5 @@
-import { EditorState, type Extension } from "@codemirror/state";
+import { ConnectionScope } from "./connectionScope.js";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { redo, undo } from "@codemirror/commands";
 import { rust } from "@codemirror/lang-rust";
@@ -40,6 +41,7 @@ import {
   type EmbeddedLeanDocument,
 } from "./embeddedLean.js";
 import { createEmbeddedEditorShell, type ActiveEmbeddedEditor } from "./embeddedEditorShell.js";
+import { filterLeanHovers, rustPositionAt } from "./rustSourceHover.js";
 import type { AnyEmbeddedBlockEditorAdapter } from "./embeddedBlocks.js";
 import {
   createEmbeddedLeanLspFeatures,
@@ -74,9 +76,12 @@ export interface DemoRuntime {
 }
 
 export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<DemoRuntime> {
+  const documentStates = new Map<string, EditorState>();
+  const rustBinding = new Compartment();
   let currentView: EditorView | null = null;
   let currentLanguageId: string | null = null;
   let currentUri: string | null = null;
+  let activationRevision = 0;
   let workspace: LeanWorkspace | null = null;
   let client: LSPClient | null = null;
   let leanSessionOwner: LeanEditorSession | null = null;
@@ -87,6 +92,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustSocket: WebSocket | null = null;
   let detachLeanSocketListeners: (() => void) | null = null;
   let leanReconnectPromise: Promise<void> | null = null;
+  let rustReconnectPromise: Promise<void> | null = null;
   let disposed = false;
   let embeddedLeanDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainDiagnosticTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +101,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   let rustMainPersistTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainAutoRegenerateTimer: ReturnType<typeof setTimeout> | null = null;
   let rustMainRevision = 0;
+  let rustAuthoredRevision = 0;
+  let rustMainDiskRevision = "";
   let rustMainQueue = Promise.resolve();
   let lastEmbeddedLeanDocument: EmbeddedLeanDocument | null = null;
   let lastRustMainSourceSent: string | null = null;
@@ -437,6 +445,11 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   }
 
   function setRegenerateControlState(): void {
+    const staticMockup = currentLanguageId === "lean4" && !session.canRegenerate;
+    if (staticMockup) options.ui.setExtractionState("Static mock-up", "pending");
+    else if (rustMainExtractionFresh !== null && !rustMainRegenerationInFlight) {
+      options.ui.setExtractionState(rustMainExtractionFresh ? "Fresh" : "Stale", rustMainExtractionFresh ? "fresh" : "stale");
+    }
     const canRegenerate = canRegenerateCurrentRust();
     const autoQueued = Boolean(rustMainAutoRegenerateTimer);
     const enabled = regenerationMode === "manual" && canRegenerate;
@@ -449,7 +462,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       busy: rustMainRegenerationInFlight,
       enabled,
       label,
-      title: session.canRegenerate
+      title: staticMockup ? "Rust and Lean are paired by hand in this static mock-up." : session.canRegenerate
         ? "Regenerate the Anneal workspace from the current Rust source."
         : "Regeneration is only available for manifest-backed Anneal demos.",
     });
@@ -554,10 +567,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     if (uri !== session.rustMainDocumentUri) {
       return;
     }
+    const authoredRevision = rustAuthoredRevision;
     const extractionFresh = syncRustMainExtractionState(source);
-    if (source === lastRustMainSourceSent) {
-      return;
-    }
     if (rustMainPersistTimer) {
       clearTimeout(rustMainPersistTimer);
     }
@@ -579,18 +590,25 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           const result = await rustRuntime.trackRequest(
             "rust-main/update",
             () => options.sessionApi.updateRustMainDocument({
+              diskRevision: rustMainDiskRevision,
               code: source,
-              leanDocument,
               revision,
               uri,
             }),
           );
-          if (disposed || result.stale || revision !== rustMainRevision) {
+          rustMainDiskRevision = result.diskRevision;
+          if (disposed || result.stale || revision !== rustMainRevision || authoredRevision !== rustAuthoredRevision) {
             return;
           }
           lastRustMainSourceSent = source;
           // Cargo checks run on didSave, rather than ordinary document changes.
           notifyRustMainSaved();
+          if (result.projectionError) {
+            options.ui.setDocumentSyncState(uri, "clean");
+            options.ui.setExtractionState("Projection failed", "stale");
+            options.ui.logEvent(`Rust source saved; Lean projection failed: ${result.projectionError}`);
+            return;
+          }
           lastEmbeddedLeanDocument = embeddedLeanDocument;
           refreshLeanWorkspaceArtifacts(result, leanDocument);
           options.ui.setDocumentSyncState(uri, "clean");
@@ -638,11 +656,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     setRegenerateControlState();
 
     let restartRequested = false;
+    let committedSource: { source: string; authoredRevision: number } | null = null;
+    let generationFailed = false;
+    let attemptedSource: string | null = null;
     const job = rustMainQueue.then(async () => {
       if (disposed || !currentView || currentUri !== uri) {
         return;
       }
       const source = currentView.state.doc.toString();
+      attemptedSource = source;
       const revision = ++rustMainRevision;
       const embeddedLeanDocument = buildEmbeddedLeanDocument(source, {
         defaultImports: session.embeddedLeanDefaultImports ?? [],
@@ -650,11 +672,17 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         postamble: session.embeddedLeanPostamble ?? [],
         sourceName: uri.split("/").at(-1) ?? "Main.rs",
       });
+      const authoredRevision = rustAuthoredRevision;
+      const receipt = await options.sessionApi.updateRustMainDocument({ diskRevision: rustMainDiskRevision, code: source, revision, uri });
+      rustMainDiskRevision = receipt.diskRevision;
+      committedSource = { source, authoredRevision };
+      lastRustMainSourceSent = source;
+      options.ui.setDocumentSyncState(uri, authoredRevision === rustAuthoredRevision && currentDocumentText(uri) === source ? "clean" : "dirty");
       const request = rustRuntime.beginRequest("rust-main/regenerate");
       await options.sessionApi
         .regenerateRustMainDocument({
+          diskRevision: rustMainDiskRevision,
           code: source,
-          leanDocument: embeddedLeanDocument.doc,
           revision,
           uri,
         })
@@ -668,7 +696,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             throw error;
           },
         );
-      if (disposed) {
+      if (disposed) return;
+      if (authoredRevision !== rustAuthoredRevision) {
+        options.ui.logEvent("Generated output belongs to an earlier Rust revision; newer edits are retained.");
         return;
       }
       lastRustMainSourceSent = source;
@@ -689,10 +719,14 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       }
       const message = error instanceof Error ? error.message : "Anneal workspace regeneration failed.";
       if (trigger === "auto") {
-        suppressedAutoRegenerationSource = currentView?.state.doc.toString() ?? null;
+        suppressedAutoRegenerationSource = attemptedSource;
       }
       options.ui.logEvent(`Anneal workspace regeneration failed: ${message}`);
-      options.ui.setDocumentSyncState(uri, "failed", message);
+      generationFailed = true;
+      const receipt = committedSource as { source: string; authoredRevision: number } | null;
+      options.ui.setDocumentSyncState(uri, receipt
+        ? (receipt.authoredRevision === rustAuthoredRevision && currentDocumentText(uri) === receipt.source ? "clean" : "dirty")
+        : "failed", message);
       options.ui.setStatus("Ready");
     } finally {
       rustMainRegenerationInFlight = false;
@@ -700,6 +734,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         const source = currentView?.state.doc.toString() ?? "";
         syncRustMainExtractionState(source, { logTransition: false });
         setRegenerateControlState();
+        if (generationFailed) options.ui.setExtractionState("Generation failed", "stale");
       } else if (!disposed) {
         options.ui.setRegenerateState({
           enabled: false,
@@ -709,12 +744,19 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     }
   }
 
+  function currentDocumentText(uri: string): string | undefined {
+    if (uri === currentUri && currentView) return currentView.state.doc.toString();
+    return documentStates.get(uri)?.doc.toString();
+  }
+
   async function mountDocument(uri: string, doc: string): Promise<EditorView> {
     if (disposed) {
       throw new Error("Demo runtime is disposed.");
     }
     const languageId = languageIdForUri(session, uri);
     client?.sync();
+    rustClient?.sync();
+    if (currentView && currentUri) documentStates.set(currentUri, currentView.state);
     currentView?.destroy();
     embeddedEditors.close();
     options.ui.editorHost.replaceChildren();
@@ -729,11 +771,12 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             ...leanUtilities({
               lineWrapping: true,
             }),
-            ...(rustClient && uri === session.rustMainDocumentUri
-              ? [rustClient.plugin(uri, "rust")]
-              : []),
+            rustBinding.of(rustClient && uri === session.rustMainDocumentUri
+              ? rustClient.plugin(uri, "rust") : []),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
+                rustAuthoredRevision++;
+                documentStates.set(uri, update.state);
                 rustMainDiagnosticGate.beginEdit();
                 suppressedAutoRegenerationSource = null;
                 options.ui.setDocumentSyncState(uri, "dirty");
@@ -757,7 +800,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
     const view = new EditorView({
       parent: options.ui.editorHost,
-      state: EditorState.create({
+      state: documentStates.get(uri) ?? EditorState.create({
         doc,
         extensions: [
           ...languageExtensions,
@@ -774,8 +817,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     options.ui.setCurrentDocument(uri, languageId);
     options.ui.setActiveDocument(uri);
     if (languageId === "rust") {
-      syncRustMainExtractionState(doc, { logTransition: false });
-      scheduleRustMainPersist(session, uri, doc);
+      const mountedSource = view.state.doc.toString();
+      syncRustMainExtractionState(mountedSource, { logTransition: false });
+      scheduleRustMainPersist(session, uri, mountedSource);
     } else {
       setRegenerateControlState();
     }
@@ -829,6 +873,15 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   options.ui.setStatus("Loading session");
   const session = await fetchSessionWithPreparationProgress();
+  rustMainDiskRevision = session.rustMainDiskRevision ?? "";
+  const preferredLeanFile = new URLSearchParams(location.search).get("example") === "basic"
+    ? "Main.lean" : "AeneasDemo.lean";
+  const leanDocumentUri = session.documents.find(uri => uri.endsWith(`/${preferredLeanFile}`)) ??
+    session.documents.find(uri => uri.endsWith("/Main.lean"));
+  const initialUri = new URLSearchParams(location.search).get("mode") !== "rust" && leanDocumentUri
+    ? leanDocumentUri : session.documentUri;
+  const initialDoc = initialUri === session.documentUri
+    ? session.initialDoc : await options.sessionApi.fetchDocument(initialUri);
   if (session.preparationStatus) {
     logPreparationStatus(session.preparationStatus);
   }
@@ -865,8 +918,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     session.activeExampleId,
     options.switchExample,
   );
+  options.ui.setRegenerationAvailable(session.canRegenerate === true);
   options.ui.setRootUri(session.rootUri);
-  options.ui.setCurrentDocument(session.documentUri);
+  options.ui.setCurrentDocument(initialUri);
   syncRustMainExtractionState(session.initialDoc, { logTransition: false });
 
   options.ui.setStatus("Connecting to Lean");
@@ -876,6 +930,17 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       extensions: [
         leanProgress,
         leanInfoviewClientNotifications(() => leanInfoview),
+        filterLeanHovers(params => {
+          if (!currentView || params.textDocument.uri !== currentUri) return false;
+          const { line, character } = params.position;
+          const state = currentView.state;
+          if (line < 0 || line >= state.doc.lines) return false;
+          const sourceLine = state.doc.line(line + 1);
+          if (character < 0 || character > sourceLine.length) return false;
+          const pos = sourceLine.from + character;
+          const block = embeddedEditors.sourceBlockAt(state, pos);
+          return !!block?.key.startsWith("rust:") && rustPositionAt(block, pos) !== null;
+        }),
       ],
       features: {
         semanticTokens: true,
@@ -912,6 +977,16 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
           const file = await currentWorkspace.requestFile(uri);
           const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
           return mountDocument(uri, doc);
+        },
+        onDocumentChange(uri, file, update) {
+          // Hidden generated files and workspace edits also update any retained
+          // editor state, so reopening cannot reintroduce its older text.
+          const state = documentStates.get(uri);
+          if (!state || uri === currentUri) return;
+          const next = state.update(update).state;
+          documentStates.set(uri, next.doc.eq(file.doc) ? next : state.update({
+            changes: { from: 0, to: state.doc.length, insert: file.doc },
+          }).state);
         },
       }),
     },
@@ -1060,60 +1135,136 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   });
   await activateLeanInfoviewGeneration();
 
-  if (session.rustMainWebsocketUrl) {
-    rustRuntime.connecting();
-    rustSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl);
-    rustRuntime.initializing();
-    rustClient = new LSPClient({
-      extensions: [
-        rustProgress, ...languageServerExtensions(),
-        { clientCapabilities: { experimental: { serverStatusNotification: true } } },
-      ],
-      notificationHandlers: {
-        "experimental/serverStatus": (_client, params: { quiescent?: boolean }) => {
-          // Workspace loading can discard Cargo results from an early save.
-          // Recheck the saved buffer once loading finishes. Cargo checks do not
-          // change this workspace-loading state, so this cannot form a loop.
-          if (params.quiescent === true) notifyRustMainSaved();
-          return true;
-        },
-        "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
-          if (
-            params.uri === session.rustMainDocumentUri &&
-            !rustMainDiagnosticGate.acceptsPush(params.version)
-          ) {
+  function rebindRust(client: LSPClient | null): void {
+    const uri = session.rustMainDocumentUri;
+    if (!uri) return;
+    const effect = rustBinding.reconfigure(client ? client.plugin(uri, "rust") : []);
+    if (currentUri === uri && currentView) {
+      currentView.dispatch({ selection: currentView.state.selection });
+      currentView.dispatch({ effects: effect });
+    }
+    else {
+      const state = documentStates.get(uri);
+      if (state) documentStates.set(uri, state.update({ effects: effect }).state);
+    }
+  }
+
+  let rustConnection = new ConnectionScope<{ client: LSPClient; socket: WebSocket }>();
+  async function connectRustGeneration(): Promise<void> {
+    if (!session.rustMainWebsocketUrl) return;
+    const scope = rustConnection;
+    await scope.open(async () => {
+      rustRuntime.connecting();
+      const nextSocket = await options.sessionApi.connectWebSocket(session.rustMainWebsocketUrl!, scope.signal);
+      scope.own(() => nextSocket.close());
+      nextSocket.addEventListener("close", () => scope.dispose(), { once: true });
+      nextSocket.addEventListener("error", () => scope.dispose(), { once: true });
+      if (disposed || scope.disposed) throw new Error("Rust generation retired");
+      rustRuntime.initializing();
+      const nextClient = new LSPClient({
+        extensions: [
+          rustProgress, ...languageServerExtensions(),
+          { clientCapabilities: { experimental: { serverStatusNotification: true } } },
+        ],
+        notificationHandlers: {
+          "experimental/serverStatus": (_client, params: { quiescent?: boolean }) => {
+            // Workspace loading can discard Cargo results from an early save.
+            // Recheck the saved buffer once loading finishes. Cargo checks do not
+            // change this workspace-loading state, so this cannot form a loop.
+            if (rustClient === _client && params.quiescent === true) notifyRustMainSaved();
             return true;
-          }
-          // rust-analyzer's pulls omit Cargo diagnostics. Once a push is
-          // accepted for this version, an empty native pull must not erase it.
-          if (params.uri === session.rustMainDocumentUri) {
-            rustMainPushTicket = rustMainDiagnosticGate.ticket();
-          }
-          return applyRustMainDiagnostics(params);
+          },
+          "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+            if (scope !== rustConnection || scope.disposed || rustClient !== _client) return true;
+            if (
+              params.uri === session.rustMainDocumentUri &&
+              !rustMainDiagnosticGate.acceptsPush(params.version)
+            ) {
+              return true;
+            }
+            // rust-analyzer's pulls omit Cargo diagnostics. Once a push is
+            // accepted for this version, an empty native pull must not erase it.
+            if (params.uri === session.rustMainDocumentUri) {
+              rustMainPushTicket = rustMainDiagnosticGate.ticket();
+            }
+            return applyRustMainDiagnostics(params);
+          },
         },
-      },
-      rootUri: session.rustRootUri ?? session.rootUri,
-      sanitizeHTML: sanitizeHtml,
-      timeout: 20_000,
+        rootUri: session.rustRootUri ?? session.rootUri,
+        sanitizeHTML: sanitizeHtml,
+        timeout: 20_000,
+      });
+      scope.own(() => nextClient.disconnect());
+      nextClient.connect(rustProgress.wrapTransport(createWebSocketTransport(nextSocket)));
+      await nextClient.initializing;
+      if (disposed || scope !== rustConnection || scope.disposed) throw new Error("Rust generation retired");
+      rustClient = nextClient;
+      rustSocket = nextSocket;
+      rebindRust(nextClient);
+      const interrupted = () => {
+        if (!disposed && rustSocket === nextSocket) void reconnectRust();
+      };
+      nextSocket.addEventListener("close", interrupted, { once: true });
+      nextSocket.addEventListener("error", interrupted, { once: true });
+      rustRuntime.ready();
+      notifyRustMainSaved();
+      options.ui.logEvent("rust-analyzer initialized.");
+      return { client: nextClient, socket: nextSocket };
+    }).catch(error => {
+      if (rustConnection === scope && !disposed) rustConnection = new ConnectionScope();
+      throw error;
     });
-    rustClient.connect(rustProgress.wrapTransport(createWebSocketTransport(rustSocket)));
-    await rustClient.initializing;
-    rustRuntime.ready();
-    options.ui.logEvent("rust-analyzer initialized.");
-  } else {
-    rustRuntime.stopped();
+  }
+
+  function reconnectRust(): Promise<void> {
+    if (rustReconnectPromise) return rustReconnectPromise;
+    rustRuntime.recordConnectionStatus({ phase: "stale", message: "Reconnecting" });
+    rustMainDiagnosticGate.beginEdit();
+    rebindRust(null);
+    rustConnection.dispose();
+    rustConnection = new ConnectionScope();
+    rustSocket = null;
+    rustClient = null;
+    rustProgress.clear();
+    rustReconnectPromise = (async () => {
+      for (let attempt = 0; attempt < 3 && !disposed; attempt++) {
+        try {
+          await connectRustGeneration();
+          if (session.rustMainDocumentUri) {
+            rustMainDiagnosticGate.recordSync((rustClient as LSPClient | null)?.workspace.getFile(session.rustMainDocumentUri)?.version);
+          }
+          options.ui.logEvent("Rust server reconnected; editor state preserved.");
+          return;
+        } catch (error) {
+          rustConnection.dispose();
+          rustConnection = new ConnectionScope();
+          if (attempt === 2) {
+            rustRuntime.recordConnectionStatus({ phase: "failed", message: String(error) });
+            options.ui.logEvent(`Rust reconnect failed: ${String(error)}`);
+          } else await delay(250 * (attempt + 1));
+        }
+      }
+    })().finally(() => { rustReconnectPromise = null; });
+    return rustReconnectPromise;
   }
 
   const openDocument = async (uri: string): Promise<void> => {
-    const file = await workspace?.requestFile(uri);
-    const doc = file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
+    const activation = ++activationRevision;
+    if (uri === currentUri && currentView) return;
+    if (languageIdForUri(session, uri) === "rust" && !rustClient && session.rustMainWebsocketUrl) await connectRustGeneration();
+    const retained = currentDocumentText(uri);
+    const file = languageIdForUri(session, uri) === "rust"
+      ? rustClient?.workspace.getFile(uri) : await workspace?.requestFile(uri);
+    const doc = retained ?? file?.doc.toString() ?? (await options.sessionApi.fetchDocument(uri));
+    if (disposed || activation !== activationRevision) return;
     await mountDocument(uri, doc);
     options.ui.logEvent(`Opened ${uri.split("/").at(-1) ?? uri}`);
   };
 
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);
-  await mountDocument(session.documentUri, session.initialDoc);
+  if (languageIdForUri(session, initialUri) === "rust") await connectRustGeneration();
+  await mountDocument(initialUri, initialDoc);
   leanInfoview.updateCursorLocation();
 
   const handleBeforeUnload = () => {
@@ -1170,10 +1321,9 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
       leanSessionOwner?.dispose();
       leanSessionOwner = null;
       leanRuntime.stopped();
-      rustClient?.disconnect();
+      rustConnection.dispose();
       rustProgress.clear();
       rustRuntime.stopped();
-      rustSocket?.close();
       socket = null;
       rustSocket = null;
       workspace = null;

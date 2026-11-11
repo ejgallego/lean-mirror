@@ -483,3 +483,25 @@ code {
     max-height: none;
   }
 }
+
+/* Keep inactive editor views out of layout, including themes using display. */
+[hidden] { display: none !important; }
+.cm-embedded-block-inline > button { margin: 6px 10px; }
+.rosetta-rust-preview { margin: 0; padding: 10px 14px; white-space: pre-wrap; font: 14px/1.5 "Iosevka Term", monospace; }
+[data-rosetta-token="function"], [data-rosetta-token="method"] { color: #164faf; }
+[data-rosetta-token="type"], [data-rosetta-token="struct"] { color: #735215; }
+[data-rosetta-token="keyword"] { color: #813187; }
+[data-rosetta-token="string"] { color: #176334; }
+[data-rosetta-token="number"] { color: #9c3c1a; }
+.cm-embedded-block-inline > button {
+  border: 1px solid #b9c9bd;
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: #214d3d;
+  background: #f5faf4;
+  font: 600 13px/1.3 system-ui, sans-serif;
+  cursor: pointer;
+}
+.rosetta-diagnostics { margin: 4px 14px; padding-left: 18px; font: 13px/1.4 system-ui, sans-serif; }
+.rosetta-diagnostics:empty { display: none; }
+.rosetta-diagnostics [data-severity="error"] { color: #a52b23; }

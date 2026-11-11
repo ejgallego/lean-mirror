@@ -68,7 +68,9 @@ async function startDemoLoop() {
     try {
       runtime = await bootDemoRuntime({
         editorTheme: demoTheme(),
-        embeddedAdapters: createDemoEmbeddedAdapters(sessionApi),
+        embeddedAdapters: createDemoEmbeddedAdapters(sessionApi,
+          new URLSearchParams(location.search).get("mode") === "rust" ? "editor"
+            : new URLSearchParams(location.search).get("view") === "rendered" ? "preview" : "source"),
         requestRestart(reason) {
           if (stopped) {
             return;

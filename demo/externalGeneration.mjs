@@ -16,6 +16,7 @@ const ignoredIdentityDirectories = new Set([
   ".demo-cache",
   ".git",
   ".lake",
+  ".lean-mirror-recovery",
   "node_modules",
   "target",
 ]);
@@ -79,6 +80,7 @@ async function gitProjectIdentity(path, excludedPaths) {
     .split("\0")
     .filter(Boolean)
     .filter((path) => !excludedRelativePaths.has(normalizeSlashes(path)))
+    .filter((path) => !normalizeSlashes(path).split("/").includes(".lean-mirror-recovery"))
     .sort();
   const untrackedParts = [];
   for (const relative of untrackedPaths) {

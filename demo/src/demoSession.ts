@@ -13,6 +13,7 @@ import {
   type RustMainUpdateResult,
   type RustSession,
 } from "../shared/demoProtocol.mjs";
+import { waitForWebSocketOpen } from "codemirror-lean4-lsp";
 
 export type {
   DemoExample,
@@ -24,8 +25,9 @@ export type {
 export type RustMainUpdatePayload = RustMainUpdateRequest;
 
 export interface DemoSessionApi {
-  connectWebSocket(url: string): Promise<WebSocket>;
-  createRustSession(key: string, code: string): Promise<RustSession>;
+  releaseRustSession(key: string): Promise<void>;
+  connectWebSocket(url: string, signal?: AbortSignal): Promise<WebSocket>;
+  createRustSession(key: string, code: string, signal?: AbortSignal): Promise<RustSession>;
   fetchDocument(uri: string): Promise<string>;
   fetchPreparationStatus(): Promise<DemoPreparationStatus>;
   fetchSession(): Promise<DemoSession>;
@@ -72,8 +74,12 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         throw new Error(message || `Example switch failed with ${response.status}`);
       }
     },
-    async createRustSession(key: string, code: string): Promise<RustSession> {
+    async releaseRustSession(key) {
+      await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}?key=${encodeURIComponent(key)}`, { method: "DELETE", keepalive: true });
+    },
+    async createRustSession(key: string, code: string, signal?: AbortSignal): Promise<RustSession> {
       const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}`, {
+        ...(signal ? { signal } : {}),
         body: JSON.stringify({ code, key }),
         headers: {
           "Content-Type": "application/json",
@@ -106,7 +112,7 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         method: "POST",
       });
       if (!response.ok) {
-        throw new Error(`Rust main update failed with ${response.status}`);
+        throw new Error(await response.text() || `Rust main update failed with ${response.status}`);
       }
       return parseRustMainUpdateResult(await response.json());
     },
@@ -124,16 +130,14 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
       }
       return parseDemoSession(await response.json());
     },
-    async connectWebSocket(url: string): Promise<WebSocket> {
+    async connectWebSocket(url: string, signal?: AbortSignal): Promise<WebSocket> {
       const socket = new WebSocket(url);
-      await new Promise<void>((resolve, reject) => {
-        socket.addEventListener("open", () => resolve(), { once: true });
-        socket.addEventListener(
-          "error",
-          () => reject(new Error("WebSocket connection failed.")),
-          { once: true },
-        );
-      });
+      const close = () => socket.close();
+      signal?.addEventListener("abort", close, { once: true });
+      if (signal?.aborted) close();
+      try { await waitForWebSocketOpen(socket); }
+      catch (error) { socket.close(); throw error; }
+      finally { signal?.removeEventListener("abort", close); }
       return socket;
     },
   };

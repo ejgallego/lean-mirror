@@ -15,5 +15,9 @@ related font code is distributed under the MIT license:
 - https://creativecommons.org/licenses/by/4.0/
 - https://opensource.org/license/mit
 
-These notices apply only to the copied infoview stylesheet and font. The
-`codemirror-lean4-lsp` source code remains under the repository's MIT license.
+The repository's experimental demo also vendors the Rosetta core under
+`demo/rosetta/vendor/rosetta`, copyright Lean FRO LLC, under Apache-2.0. Its
+license and revision provenance are retained beside that snapshot. The demo
+and this vendored package are excluded from the published npm package.
+
+The remaining `codemirror-lean4-lsp` source code is under this repository's MIT license.

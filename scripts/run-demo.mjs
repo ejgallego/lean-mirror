@@ -1,14 +1,19 @@
+import { stopChild } from "./process-lifetime.mjs";
 import { spawn } from "node:child_process";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
 import { readDemoConfig } from "./demo-config.mjs";
+import { resolveRosettaSource } from "../demo/server/rosetta.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const demo = readDemoConfig(process.env);
+const rosettaSource = await resolveRosettaSource();
+const rosettaModules = resolve(rosettaSource, "Rosetta");
+const rosettaConfigFiles = ["Rosetta.lean", "lakefile.toml", "lean-toolchain"].map(name => resolve(rosettaSource, name));
 const defaultBackendReadyTimeoutMs =
-  process.env.LEAN_DEMO_ANNEAL_MANIFEST || process.env.LEAN_DEMO_LEAN_ROOT ? "300000" : "60000";
+  process.env.LEAN_DEMO_LEAN_ONLY === "1" ? "60000" : "300000";
 const backendReadyTimeoutMs = Number.parseInt(
   process.env.DEMO_BACKEND_READY_TIMEOUT_MS ?? defaultBackendReadyTimeoutMs,
   10,
@@ -38,6 +43,8 @@ function shortPath(path) {
 }
 
 function shouldRestartBridges(path) {
+  const absolute = resolve(path);
+  if (rosettaConfigFiles.includes(absolute) || absolute.startsWith(rosettaModules + sep)) return true;
   const file = shortPath(path);
   if (
     file.startsWith("demo/rust-blocks/") ||
@@ -57,6 +64,7 @@ function shouldRestartBridges(path) {
     file === "demo/index.html" ||
     file === "demo/server.mjs" ||
     file.startsWith("demo/server/") ||
+    file.startsWith("demo/rosetta/") ||
     file.startsWith("demo/shared/") ||
     file.startsWith("demo/src/") ||
     file.startsWith("demo/workspace/") ||
@@ -171,29 +179,7 @@ async function stopBackend() {
   }
   backendStopping = true;
   backendChild = null;
-  await new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      resolve(undefined);
-    };
-    const timeout = setTimeout(() => {
-      if (!child.killed) {
-        child.kill("SIGKILL");
-      }
-      finish();
-    }, 3_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      finish();
-    });
-    if (!child.killed) {
-      child.kill("SIGTERM");
-    }
-  });
+  await stopChild(child);
   backendStopping = false;
 }
 
@@ -258,35 +244,45 @@ process.on("SIGTERM", () => {
   void shutdown(143);
 });
 
-await startBackend();
+try {
+  await startBackend();
 
-viteServer = await createServer({
-  configFile: resolve(rootDir, "demo/vite.config.ts"),
-});
+  viteServer = await createServer({
+    configFile: resolve(rootDir, "demo/vite.config.ts"),
+  });
 
-viteServer.watcher.add([
-  resolve(rootDir, "demo/externalGeneration.mjs"),
-  resolve(rootDir, "demo/server.mjs"),
-  resolve(rootDir, "demo/server"),
-  resolve(rootDir, "demo/shared"),
-  resolve(rootDir, "demo/index.html"),
-  resolve(rootDir, "demo/src"),
-  resolve(rootDir, "demo/workspace"),
-  resolve(rootDir, "src"),
-]);
+  viteServer.watcher.add([
+    rosettaModules,
+    ...rosettaConfigFiles,
+    resolve(rootDir, "demo/externalGeneration.mjs"),
+    resolve(rootDir, "demo/server.mjs"),
+    resolve(rootDir, "demo/server"),
+    resolve(rootDir, "demo/rosetta"),
+    resolve(rootDir, "demo/shared"),
+    resolve(rootDir, "demo/index.html"),
+    resolve(rootDir, "demo/src"),
+    resolve(rootDir, "demo/workspace"),
+    resolve(rootDir, "src"),
+  ]);
 
-viteServer.watcher.on("all", (event, path) => {
-  if (!watchReady) {
-    return;
-  }
-  if (!shouldRestartBridges(path)) {
-    return;
-  }
-  scheduleBridgeRestart(`${event} ${shortPath(path)}`);
-});
+  viteServer.watcher.on("all", (event, path) => {
+    if (!watchReady) {
+      return;
+    }
+    if (!shouldRestartBridges(path)) {
+      return;
+    }
+    scheduleBridgeRestart(`${event} ${shortPath(path)}`);
+  });
 
-await viteServer.listen();
-watchReady = true;
+  await viteServer.listen();
+  watchReady = true;
 
-console.log(`Demo frontend listening on ${demo.frontendUrl}`);
-console.log(`Demo backend listening on ${demo.backendUrl}`);
+  console.log(`Rust in Lean: ${demo.frontendUrl}/`);
+  console.log(`Lean in Rust: ${demo.frontendUrl}/?mode=rust`);
+  console.log(`Demo backend listening on ${demo.backendUrl}`);
+} catch (error) {
+  console.error(`[demo] ${error instanceof Error ? error.message : String(error)}`);
+  console.error("[demo] Check the error above; run npm run demo:setup if tools or dependencies are missing.");
+  await shutdown(1);
+}

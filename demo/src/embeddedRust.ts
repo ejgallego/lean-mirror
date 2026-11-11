@@ -1,5 +1,6 @@
+import { RustSessionOwner } from "./rustSessionOwner.js";
 import type { Extension } from "@codemirror/state";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { rust } from "@codemirror/lang-rust";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import {
@@ -13,7 +14,7 @@ import {
   serverCompletion,
   signatureHelp,
 } from "@codemirror/lsp-client";
-import { createWebSocketTransport, leanUtilities } from "codemirror-lean4-lsp";
+import { leanUtilities } from "codemirror-lean4-lsp";
 import { EditorView, hoverTooltip, keymap, type Tooltip } from "@codemirror/view";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type * as lsp from "vscode-languageserver-protocol";
@@ -25,12 +26,17 @@ import {
 } from "./embeddedBlocks.js";
 import type { DemoSessionApi } from "./demoSession.js";
 import { sanitizeHtml } from "./sanitizeHtml.js";
+import { renderRustPreview, type RustPreviewToken } from "./rustPreview.js";
+import { normalizeRustHover, rustHoverDom } from "./rustHover.js";
+import { rustSourceHover } from "./rustSourceHover.js";
+
+export type RustPresentation = "source" | "preview" | "editor";
 
 export interface EmbeddedRustBlock extends EmbeddedBlock {}
 
 const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   defaultTitle(block) {
-    return block.label ?? `Rust Block ${block.ordinal}`;
+    return block.label?.match(/^\(name\s*:=\s*«?([^»)]*)»?\)$/)?.[1] ?? block.label ?? `Rust Block ${block.ordinal}`;
   },
   displayName: "Rust",
   editorExtensions(): Extension[] {
@@ -55,41 +61,16 @@ const baseRustAdapter = createVersoCommentAdapter<EmbeddedRustBlock>({
   hostLanguageIds: ["lean4"],
   kind: "rust",
   scaffold: {
-    baseLabel: "demo-widget",
+    baseLabel: "demoWidget",
+    createBlock(label) {
+      return { code: "", from: 0, to: 0, ordinal: 0, title: label,
+        key: `rust:${label}`, label: `(name := «${label}»)` };
+    },
     code() {
       return ['fn demo() {', '    println!("hello from Rust");', '}'].join("\n");
     },
   },
 });
-
-function stripRustHoverPrefix(text: string): string {
-  return text.replace(/^(?:widget|embedded_[a-z0-9_]+)\r?\n\r?\n/, "");
-}
-
-function normalizeRustHover(
-  contents: string | lsp.MarkupContent | lsp.MarkedString | lsp.MarkedString[],
-): lsp.MarkupContent | null {
-  if (Array.isArray(contents)) {
-    const parts = contents
-      .map((item) => normalizeRustHover(item))
-      .filter((item): item is lsp.MarkupContent => item !== null)
-      .map((item) => item.value);
-    return parts.length > 0 ? { kind: "markdown", value: parts.join("\n\n") } : null;
-  }
-  if (typeof contents === "string") {
-    return { kind: "markdown", value: stripRustHoverPrefix(contents) };
-  }
-  if ("language" in contents) {
-    return {
-      kind: "markdown",
-      value: `\`\`\`${contents.language}\n${stripRustHoverPrefix(contents.value)}\n\`\`\``,
-    };
-  }
-  return {
-    kind: contents.kind,
-    value: stripRustHoverPrefix(contents.value),
-  };
-}
 
 function hoverErrorMessage(error: unknown): string | null {
   if (!error || typeof error !== "object") {
@@ -144,15 +125,12 @@ function rustHoverTooltips(
           end: result.range ? plugin.fromPosition(result.range.end) : pos,
           above: true,
           create() {
-            const dom = document.createElement("div");
-            dom.className = "cm-lsp-hover-tooltip cm-lsp-documentation";
-            dom.innerHTML = sanitizeHtml(plugin.docToHTML(contents));
-            return { dom };
+            return { dom: rustHoverDom(view, contents) };
           },
         };
       })
       .catch((error: unknown) => {
-        if (isTransientRustHoverError(error)) {
+        if (!canRequest() || isTransientRustHoverError(error)) {
           return null;
         }
         throw error;
@@ -176,13 +154,30 @@ function rustClientExtensions(
 function createRustInlineHandle(
   sessionApi: DemoSessionApi,
   options: EmbeddedBlockInlineCreateOptions<EmbeddedRustBlock>,
+  initiallyEditing: boolean,
 ): EmbeddedBlockInlineHandle {
   const container = document.createElement("div");
   container.className = "cm-embedded-block-inline";
   const status = document.createElement("div");
   status.className = "cm-embedded-block-inline-status";
   status.textContent = "Connecting to rust-analyzer";
-  container.append(status);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  const preview = document.createElement("div");
+  const editorHost = document.createElement("div");
+  const diagnosticSummary = document.createElement("ul");
+  diagnosticSummary.className = "rosetta-diagnostics";
+  diagnosticSummary.setAttribute("aria-label", "Rust diagnostics");
+  let editing = initiallyEditing;
+  editorHost.hidden = !editing;
+  preview.hidden = editing;
+  toggle.textContent = editing ? "Preview Rust" : "Edit Rust";
+  container.append(toggle, status, preview, diagnosticSummary, editorHost);
+  const binding = new Compartment();
+  let previewEpoch = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 250;
+  let connectPromise: Promise<void> | null = null;
 
   let destroyed = false;
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -201,14 +196,13 @@ function createRustInlineHandle(
   let lastDiagnosticStamp = "";
   let nestedView: EditorView | null = null;
   let socket: WebSocket | null = null;
+  let owner: RustSessionOwner | null = null;
   let client: LSPClient | null = null;
-  let sessionInfo: { documentUri: string } | null = null;
+  let sessionInfo: { documentUri: string; key: string } | null = null;
 
   function canRequestHover(): boolean {
     return (
       !destroyed &&
-      persistTimer === null &&
-      pendingDiagnosticsVersion === null &&
       !syncingFromOuter &&
       client !== null
     );
@@ -255,6 +249,12 @@ function createRustInlineHandle(
       ),
     );
     options.outerView.requestMeasure();
+    diagnosticSummary.replaceChildren(...latestDiagnostics.map(diagnostic => {
+      const item = document.createElement("li");
+      item.textContent = diagnostic.message;
+      item.dataset.severity = severity(diagnostic.severity);
+      return item;
+    }));
   }
 
   function updateDiagnosticsForVersion(
@@ -262,7 +262,7 @@ function createRustInlineHandle(
     diagnostics: typeof latestDiagnostics,
     optionsForUpdate: { log: boolean },
   ): void {
-    if (version <= resolvedDiagnosticsVersion) {
+    if (version < resolvedDiagnosticsVersion) {
       return;
     }
     resolvedDiagnosticsVersion = version;
@@ -279,10 +279,9 @@ function createRustInlineHandle(
   }
 
   async function requestDiagnostics(
-    session: { documentUri: string },
+    session: { documentUri: string; key: string },
     epoch: number,
     expectedVersion: number,
-    attempt = 0,
   ): Promise<void> {
     if (
       !client ||
@@ -293,6 +292,8 @@ function createRustInlineHandle(
       return;
     }
     client.sync();
+    const ticket = { owner, client, revision: expectedVersion, wireVersion: client.workspace.getFile(session.documentUri)?.version };
+    if (ticket.revision !== currentDocVersion) return;
     const report = await client.request<
       { textDocument: { uri: string } },
       { items?: typeof latestDiagnostics; kind: "full" | "unchanged" }
@@ -303,29 +304,25 @@ function createRustInlineHandle(
       destroyed ||
       epoch !== diagnosticPullEpoch ||
       pendingDiagnosticsVersion !== expectedVersion ||
+      ticket.owner !== owner || ticket.client !== client || ticket.revision !== currentDocVersion ||
+      ticket.wireVersion !== client?.workspace.getFile(session.documentUri)?.version ||
       report.kind !== "full"
     ) {
       return;
     }
     const pulled = Array.isArray(report.items) ? report.items : [];
-    if (pulled.length > 0 || attempt >= 11) {
-      pendingDiagnosticsVersion = null;
-      updateDiagnosticsForVersion(expectedVersion, pulled, { log: true });
-      return;
-    }
-    diagnosticPullTimer = setTimeout(() => {
-      diagnosticPullTimer = null;
-      void requestDiagnostics(session, epoch, expectedVersion, attempt + 1).catch(() => {});
-    }, 500);
+    pendingDiagnosticsVersion = null;
+    updateDiagnosticsForVersion(expectedVersion, pulled, { log: true });
   }
 
   async function persistDocument(
-    session: { documentUri: string },
+    session: { documentUri: string; key: string },
     expectedVersion: number,
   ): Promise<void> {
     if (!client || destroyed) {
       return;
     }
+    const activeClient = client;
     const code = latestCode;
     if (expectedVersion !== currentDocVersion) {
       return;
@@ -334,8 +331,8 @@ function createRustInlineHandle(
     if (destroyed) {
       return;
     }
-    await sessionApi.updateRustDocument(options.block.key, code, expectedVersion);
-    if (destroyed || expectedVersion !== currentDocVersion) {
+    await sessionApi.updateRustDocument(session.key, code, expectedVersion);
+    if (destroyed || expectedVersion !== currentDocVersion || client !== activeClient || sessionInfo?.key !== session.key) {
       return;
     }
     options.log(`Saved ${options.block.title}`);
@@ -354,7 +351,7 @@ function createRustInlineHandle(
     }, 900);
   }
 
-  function schedulePersist(session: { documentUri: string }, expectedVersion: number): void {
+  function schedulePersist(session: { documentUri: string; key: string }, expectedVersion: number): void {
     if (persistTimer) {
       clearTimeout(persistTimer);
     }
@@ -373,106 +370,171 @@ function createRustInlineHandle(
     }, 350);
   }
 
-  void (async () => {
+  async function refreshPreview(): Promise<void> {
+    const epoch = ++previewEpoch;
+    const source = latestCode;
+    renderRustPreview(preview, source, [], async () => null);
+    const activeClient = client;
+    const activeSession = sessionInfo;
+    if (!activeClient || !activeSession || !nestedView) return;
+    activeClient.sync();
     try {
-      const session = await sessionApi.createRustSession(options.block.key, latestCode);
-      sessionInfo = session;
-      if (destroyed) {
-        return;
-      }
-      client = new LSPClient({
-        extensions: rustClientExtensions(canRequestHover),
-        notificationHandlers: {
-          "textDocument/publishDiagnostics": (_client, params) => {
-            if (params?.uri !== session.documentUri) {
-              return false;
-            }
-            const version =
-              typeof params.version === "number"
-                ? params.version
-                : pendingDiagnosticsVersion ?? currentDocVersion;
-            if (version <= resolvedDiagnosticsVersion) {
-              return true;
-            }
-            if (
-              pendingDiagnosticsVersion !== null &&
-              version >= pendingDiagnosticsVersion
-            ) {
-              pendingDiagnosticsVersion = null;
-              diagnosticPullEpoch += 1;
-              if (diagnosticPullTimer) {
-                clearTimeout(diagnosticPullTimer);
-                diagnosticPullTimer = null;
-              }
-            }
-            updateDiagnosticsForVersion(version, Array.isArray(params.diagnostics) ? params.diagnostics : [], {
-              log: true,
-            });
-            return true;
-          },
-        },
-        rootUri: session.rootUri,
-        sanitizeHTML: sanitizeHtml,
-        timeout: 20_000,
+      await owner?.analysisReady();
+      const tokens = await activeClient.request<{ textDocument: { uri: string } }, RustPreviewToken[]>(
+        "rosetta/preview", { textDocument: { uri: activeSession.documentUri } },
+      );
+      if (destroyed || epoch !== previewEpoch || source !== latestCode || client !== activeClient) return;
+      renderRustPreview(preview, source, tokens, async position => {
+        if (source !== latestCode || activeClient !== client) return null;
+        try {
+          const result = await activeClient.request<lsp.HoverParams, lsp.Hover | null>("textDocument/hover", {
+            position, textDocument: { uri: activeSession.documentUri },
+          });
+          return result ? normalizeRustHover(result.contents)?.value ?? null : null;
+        } catch { return null; }
       });
-      socket = await sessionApi.connectWebSocket(session.websocketUrl);
-      if (destroyed) {
-        socket.close();
-        client.disconnect();
-        return;
-      }
-      client.connect(createWebSocketTransport(socket));
-      await client.initializing;
-      if (destroyed) {
-        client.disconnect();
-        socket.close();
-        return;
-      }
-      status.textContent = "rust-analyzer connected";
-      nestedView = new EditorView({
-        parent: container,
-        state: EditorState.create({
-          doc: latestCode,
-          extensions: [
-            ...baseRustAdapter.editorExtensions(),
-            syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-            client.plugin(session.documentUri, "rust"),
-            EditorView.updateListener.of((update) => {
-              if (!update.docChanged || syncingFromOuter) {
-                return;
-              }
-              currentDocVersion += 1;
-              latestCode = update.state.doc.toString();
-              options.syncOuter(latestCode);
-              schedulePersist(session, currentDocVersion);
-            }),
-          ],
-        }),
-      });
-      applyDiagnostics();
-      status.remove();
-      options.outerView.requestMeasure();
     } catch (error) {
-      if (destroyed) {
-        return;
-      }
-      status.textContent =
-        error instanceof Error ? `rust-analyzer failed: ${error.message}` : "rust-analyzer failed";
+      if (!destroyed && epoch === previewEpoch) options.log(`Rust preview analysis pending: ${String(error)}`);
     }
-  })();
+    options.outerView.requestMeasure();
+  }
+
+  nestedView = new EditorView({
+    parent: editorHost,
+    state: EditorState.create({
+      doc: latestCode,
+      extensions: [
+        ...baseRustAdapter.editorExtensions(),
+        EditorState.transactionFilter.of(transaction => {
+          if (!transaction.docChanged || syncingFromOuter || options.validateEdit(transaction.startState.doc.toString(), transaction.newDoc.toString())) return transaction;
+          status.hidden = false;
+          status.textContent = "This edit would break the Lean comment or Verso fence. Edit the raw host source instead.";
+          return [];
+        }),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        binding.of([]),
+        EditorView.updateListener.of(update => {
+          if (!update.docChanged || syncingFromOuter) return;
+          currentDocVersion++;
+          latestCode = update.state.doc.toString();
+          options.syncOuter(latestCode);
+          if (sessionInfo) schedulePersist(sessionInfo, currentDocVersion);
+        }),
+      ],
+    }),
+  });
+  renderRustPreview(preview, latestCode, [], async () => null);
+  toggle.addEventListener("click", () => {
+    if (!client) void connect();
+    editing = !editing;
+    editorHost.hidden = !editing;
+    preview.hidden = editing;
+    toggle.textContent = editing ? "Preview Rust" : "Edit Rust";
+    if (editing) { nestedView?.requestMeasure(); nestedView?.focus(); }
+    else void refreshPreview();
+    options.outerView.requestMeasure();
+  });
+
+  function connect(): Promise<void> {
+    if (connectPromise || destroyed) return connectPromise ?? Promise.resolve();
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    connectPromise = (async () => {
+      diagnosticPullEpoch++;
+      if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+      if (diagnosticPullTimer) { clearTimeout(diagnosticPullTimer); diagnosticPullTimer = null; }
+      client = null;
+      socket = null;
+      sessionInfo = null;
+      // Reset running completion contexts before removing their state field.
+      if (nestedView) nestedView.dispatch({ selection: nestedView.state.selection });
+      nestedView?.dispatch({ effects: binding.reconfigure([]) });
+      owner?.destroy();
+      owner = null;
+      status.hidden = false;
+      status.textContent = "Connecting through Rosetta";
+      try {
+        let session: { key: string; documentUri: string };
+        const nextOwner = owner = new RustSessionOwner(sessionApi, {
+          extensions: rustClientExtensions(canRequestHover),
+          notificationHandlers: {
+            "textDocument/publishDiagnostics": (_client, params: lsp.PublishDiagnosticsParams) => {
+              const nextClient = _client;
+              if (!session) return true;
+              const file = nextClient.workspace.getFile(session.documentUri);
+              if (destroyed || client !== nextClient || !file || params.uri !== session.documentUri ||
+                  params.version !== file.version || file.doc.toString() !== latestCode) return true;
+              pendingDiagnosticsVersion = null;
+              diagnosticPullEpoch++;
+              if (diagnosticPullTimer) clearTimeout(diagnosticPullTimer);
+              updateDiagnosticsForVersion(currentDocVersion, [...params.diagnostics], { log: true });
+              return true;
+            },
+          },
+          sanitizeHTML: sanitizeHtml, timeout: 20_000,
+        });
+        const opened = await nextOwner.open(options.block.key, latestCode);
+        session = opened.info;
+        const nextClient = opened.client;
+        const nextSocket = opened.socket;
+        if (destroyed) { nextOwner.destroy(); return; }
+        client = nextClient;
+        socket = nextSocket;
+        sessionInfo = session;
+        currentDocVersion = 1;
+        resolvedDiagnosticsVersion = 0;
+        pendingDiagnosticsVersion = null;
+        diagnosticPullEpoch++;
+        nestedView?.dispatch({ effects: binding.reconfigure(nextClient.plugin(session.documentUri, "rust")) });
+        const interrupted = () => {
+          if (!destroyed && socket === nextSocket) {
+            status.hidden = false;
+            status.textContent = "Reconnecting Rust through Rosetta";
+            scheduleReconnect();
+          }
+        };
+        nextSocket.addEventListener("close", interrupted, { once: true });
+        nextSocket.addEventListener("error", interrupted, { once: true });
+        status.hidden = true;
+        reconnectDelay = 250;
+        options.log("Rosetta Rust session ready.");
+        schedulePersist(session, currentDocVersion);
+        if (!editing) void refreshPreview();
+      } catch (error) {
+        if (destroyed) return;
+        owner?.destroy();
+        owner = null;
+        client = null;
+        socket = null;
+        sessionInfo = null;
+        status.textContent = `Rosetta connection failed: ${String(error)}`;
+        options.log(status.textContent);
+        scheduleReconnect();
+      }
+    })().finally(() => { connectPromise = null; });
+    return connectPromise;
+  }
+  function scheduleReconnect(): void {
+    if (destroyed) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; void connect(); }, reconnectDelay);
+    reconnectDelay = Math.min(5000, reconnectDelay * 2);
+  }
+  void connect();
 
   return {
     destroy() {
       destroyed = true;
+      previewEpoch++;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (persistTimer) {
         clearTimeout(persistTimer);
       }
       if (diagnosticPullTimer) {
         clearTimeout(diagnosticPullTimer);
       }
+      owner?.destroy();
       nestedView?.destroy();
-      client?.disconnect();
-      socket?.close();
+
     },
     dom: container,
     sync(code: string) {
@@ -496,6 +558,7 @@ function createRustInlineHandle(
         currentDocVersion += 1;
         schedulePersist(sessionInfo, currentDocVersion);
       }
+      if (!editing) void refreshPreview();
       options.outerView.requestMeasure();
     },
   };
@@ -503,11 +566,17 @@ function createRustInlineHandle(
 
 export function createEmbeddedRustAdapter(
   sessionApi: DemoSessionApi,
+  presentation: RustPresentation = "source",
 ) {
   return {
     ...baseRustAdapter,
+    sourceInitiallyVisible: presentation === "source",
+    sourceEditable: true,
+    sourceExtensions(visible: (state: EditorState, block: EmbeddedRustBlock) => boolean) {
+      return rustSourceHover(sessionApi, baseRustAdapter.parseBlocks, visible);
+    },
     createInlineHandle(options: EmbeddedBlockInlineCreateOptions<EmbeddedRustBlock>) {
-      return createRustInlineHandle(sessionApi, options);
+      return createRustInlineHandle(sessionApi, options, presentation === "editor");
     },
   };
 }

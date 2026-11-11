@@ -13,6 +13,7 @@ import {
 } from "../demo/src/embeddedRust.js";
 import {
   createVersoCommentAdapter,
+  validateEmbeddedReplacement,
   parseVersoCommentBlocks,
   serializeVersoCommentBlock,
   type EmbeddedBlock,
@@ -401,4 +402,57 @@ describe("embeddedRust", () => {
     expect(embeddedLeanHostFingerprint(commentEdited)).toBe(embeddedLeanHostFingerprint(before));
     expect(embeddedLeanHostFingerprint(rustEdited)).not.toBe(embeddedLeanHostFingerprint(before));
   });
+});
+
+
+describe("source projection invariants", () => {
+  it("preserves declaration docstrings, fence spacing, indentation and CRLF", () => {
+    const source = '/--\r\n  ```rust (name := bump)  \r\n  fn bump() {}\r\n  ```\r\n-/\r\n';
+    const block = parseEmbeddedRustBlocks(source)[0]!;
+    expect(block.code).toBe('fn bump() {}');
+    expect(serializeEmbeddedRustBlock(block, block.code)).toBe(source);
+    expect(serializeEmbeddedRustBlock(block, 'fn bump() { /* edit */ }')).toBe(source.replace('fn bump() {}', 'fn bump() { /* edit */ }'));
+  });
+  it("ignores strings, raw strings, ordinary comments and nested comments", () => {
+    const apparent = '/--\n```rust\nfn fake() {}\n```\n-/';
+    for (const source of [`def s := "\n${apparent}\n"`, `def s := r#"\n${apparent}\n"#`, `/-\n${apparent}\n-/`]) {
+      expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+    }
+    expect(parseEmbeddedRustBlocks(apparent)).toHaveLength(1);
+  });
+});
+
+
+it("does not project apparent Rust fences inside other fenced blocks", () => {
+  for (const fence of ['````rust', '````lean', '```lean']) {
+    const close = fence.startsWith('````') ? '````' : '```';
+    const source = ['/--', fence, '```rust', 'fn example() {}', '```', close, '-/'].join('\n');
+    expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+  }
+});
+
+
+it("finds supported fences after an unsupported wider fence", () => {
+  const source = ['/--', '````lean', '```rust', 'fn fake() {}', '```', '````', '```rust', 'fn real() {}', '```', '-/'].join('\n');
+  expect(parseEmbeddedRustBlocks(source).map(block => block.code)).toEqual(['fn real() {}']);
+});
+
+it("never scans beyond a lexical doc-comment end", () => {
+  const source = '/--\nDocumentation. -/\ndef s := "\n```rust\nfn not_rust() {}\n```\n-/\n"';
+  expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+});
+
+it("uses the outer comment end when comments are nested", () => {
+  const source = ['/--', 'A nested /- comment', '-/', '```rust', 'fn real() {}', '```', '-/'].join('\n');
+  expect(parseEmbeddedRustBlocks(source).map(block => block.code)).toEqual(['fn real() {}']);
+});
+
+
+it("rejects Rust replacements that escape the Lean comment or Verso fence", () => {
+  const source = ['/--', '```rust (name := sample)', 'fn sample() {}', '```', '-/'].join('\n') + '\n';
+  const block = parseEmbeddedRustBlocks(source)[0]!;
+  for (const code of ['fn f() { let s = "-/"; }', 'fn f() { let s = "/-"; }', 'fn f() {}\n```\nprose']) {
+    expect(validateEmbeddedReplacement(source, block, code, parseEmbeddedRustBlocks, serializeEmbeddedRustBlock)).toBe(false);
+  }
+  expect(validateEmbeddedReplacement(source, block, 'fn valid() {}', parseEmbeddedRustBlocks, serializeEmbeddedRustBlock)).toBe(true);
 });

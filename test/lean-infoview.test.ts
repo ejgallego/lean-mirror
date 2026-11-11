@@ -388,6 +388,24 @@ describe("Lean infoview host", () => {
     harness.view.destroy(); harness.client.disconnect();
   });
 
+  it("rejects RPC admission while stopped even before the old client disconnects", async () => {
+    const harness = await createHarness();
+    harness.transport.onRequest("during-stop", () => ({ accepted: true }));
+    try {
+      harness.host.serverStopped({ message: "Reconnecting", reason: "test" });
+      await expect(harness.editorApi.sendClientRequest(MAIN_URI, "during-stop", {}))
+        .rejects.toMatchObject({ name: "AbortError" });
+      await expect(harness.editorApi.createRpcSession(MAIN_URI))
+        .rejects.toMatchObject({ name: "AbortError" });
+      expect(harness.transport.requests("during-stop")).toHaveLength(0);
+      harness.host.serverRestarted();
+      await expect(harness.editorApi.sendClientRequest(MAIN_URI, "during-stop", {}))
+        .resolves.toEqual({ accepted: true });
+    } finally {
+      harness.host.dispose(); harness.view.destroy(); harness.client.disconnect();
+    }
+  });
+
   it("aborts a pending RPC session connection when the server stops", async () => {
     const harness = await createHarness();
     harness.transport.onRequest(

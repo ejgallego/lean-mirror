@@ -49,6 +49,7 @@ export function parseDemoSession(value) {
     ...(record.rustMainDocumentUri === undefined
       ? {}
       : { rustMainDocumentUri: expectString(record.rustMainDocumentUri, "rustMainDocumentUri") }),
+    ...(record.rustMainDiskRevision === undefined ? {} : { rustMainDiskRevision: expectString(record.rustMainDiskRevision, "rustMainDiskRevision") }),
     ...(record.rustMainWebsocketUrl === undefined
       ? {}
       : { rustMainWebsocketUrl: expectString(record.rustMainWebsocketUrl, "rustMainWebsocketUrl") }),
@@ -86,6 +87,7 @@ export function parseCreateRustSessionRequest(value) {
 export function parseRustSession(value) {
   const record = expectRecord(value, "RustSession");
   return {
+    key: expectString(record.key, "key"),
     documentUri: expectString(record.documentUri, "documentUri"),
     rootUri: expectString(record.rootUri, "rootUri"),
     websocketUrl: expectString(record.websocketUrl, "websocketUrl"),
@@ -105,8 +107,8 @@ export function parseUpdateRustDocumentRequest(value) {
 export function parseRustMainUpdateRequest(value) {
   const record = expectRecord(value, "RustMainUpdateRequest");
   return {
+    diskRevision: expectString(record.diskRevision, "diskRevision"),
     code: expectString(record.code, "code"),
-    leanDocument: expectString(record.leanDocument, "leanDocument"),
     revision: expectNumber(record.revision, "revision"),
     uri: expectString(record.uri, "uri"),
   };
@@ -115,6 +117,8 @@ export function parseRustMainUpdateRequest(value) {
 export function parseRustMainUpdateResult(value) {
   const record = expectRecord(value, "RustMainUpdateResult");
   return {
+    ...(record.projectionError === undefined ? {} : { projectionError: expectString(record.projectionError, "projectionError") }),
+    diskRevision: expectString(record.diskRevision, "diskRevision"),
     leanDocumentUri: expectString(record.leanDocumentUri, "leanDocumentUri"),
     revision: expectNumber(record.revision, "revision"),
     ...(record.stale === undefined ? {} : { stale: expectBoolean(record.stale, "stale") }),

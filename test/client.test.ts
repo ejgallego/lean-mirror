@@ -177,6 +177,26 @@ describe("lean4", () => {
     client.disconnect();
   });
 
+  it("settles an in-flight upstream completion as cancellation when its client retires", async () => {
+    const transport = new MockTransport();
+    const client = createInitializedClient(transport);
+    const view = createTestView("Nat.s", lean4({ client, uri: URI }));
+    try {
+      await client.initializing;
+      await waitFor(() => transport.notifications("textDocument/didOpen").length === 1);
+      const result = serverCompletionSource(
+        new CompletionContext(view.state, view.state.doc.length, true, view),
+      );
+      const settled = expect(result).resolves.toBeNull();
+      await waitFor(() => transport.requests("textDocument/completion").length === 1);
+      client.disconnect();
+      await settled;
+    } finally {
+      view.destroy();
+      client.disconnect();
+    }
+  });
+
   it("sends hover requests with Lean document positions", async () => {
     const transport = new MockTransport();
     let requested: unknown = null;

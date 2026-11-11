@@ -15,7 +15,7 @@ if (!expectedLeanVersion) {
 
 // Integration tests may skip unavailable tools during focused local runs.
 // The full CI command requires them, so a missing prerequisite cannot pass CI.
-for (const command of ["lean", "lake", "rust-analyzer"]) {
+for (const command of ["lean", "lake", "rust-analyzer", "rustfmt"]) {
   const result = spawnSync(command, ["--version"], {
     cwd: root,
     encoding: "utf8",

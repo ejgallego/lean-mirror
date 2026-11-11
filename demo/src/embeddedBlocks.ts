@@ -3,6 +3,11 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import { parseLineCommentFencedBlocks as parseSharedLineCommentFencedBlocks } from "../shared/embeddedLineComments.mjs";
 
 export interface EmbeddedBlock {
+  /** UTF-16 offsets of the embedded code lines in the host document. */
+  codeLineStarts?: readonly number[];
+  /** The replacement covers only a fence, preserving surrounding comment prose. */
+  fencedOnly?: boolean;
+  envelope?: { prefix: string; suffix: string; indent: string; newline: string; original: string };
   code: string;
   from: number;
   key: string;
@@ -36,6 +41,7 @@ export interface EmbeddedBlockInlineCreateOptions<TBlock extends EmbeddedBlock> 
   log(message: string): void;
   outerView: EditorView;
   syncOuter(code: string): void;
+  validateEdit(before: string, code: string): boolean;
 }
 
 export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
@@ -48,6 +54,9 @@ export interface EmbeddedBlockEditorAdapter<TBlock extends EmbeddedBlock> {
   displayName?: string;
   hostLanguageIds?: readonly string[];
   kind: string;
+  sourceInitiallyVisible?: boolean;
+  sourceEditable?: boolean;
+  sourceExtensions?(visible: (state: EditorState, block: TBlock) => boolean): Extension;
   editorExtensions(): Extension[];
   parse(source: string): TBlock[];
   scaffold?: EmbeddedBlockScaffold<TBlock>;
@@ -140,7 +149,43 @@ function embeddedBlockKey(
   return seen === 0 ? base : `${base}#${seen + 1}`;
 }
 
-// Demo-side heuristic: treat standalone Lean doc comments with a single fenced block as embeddable.
+/** Locate real Lean doc comments without interpreting string contents as syntax. */
+function leanDocSpans(source: string): Map<number, number> {
+  const starts = new Map<number, number>();
+  for (let i = 0; i < source.length;) {
+    if (source.startsWith("--", i)) {
+      const end = source.indexOf("\n", i); i = end < 0 ? source.length : end + 1;
+    } else if (source.startsWith("/-", i)) {
+      const start = i;
+      const doc = source.startsWith("/--", i) || source.startsWith("/-!", i);
+      let depth = 1; i += 2;
+      while (i < source.length && depth) {
+        if (source.startsWith("/-", i)) { depth++; i += 2; }
+        else if (source.startsWith("-/", i)) { depth--; i += 2; }
+        else i++;
+      }
+      if (doc && depth === 0) starts.set(start, i);
+    } else {
+      const raw = /^r(#+)?"/.exec(source.slice(i));
+      if (raw) {
+        const end = source.indexOf('"' + (raw[1] ?? ""), i + raw[0].length);
+        i = end < 0 ? source.length : end + 1 + (raw[1]?.length ?? 0);
+      } else if (source[i] === '"') {
+        i++;
+        while (i < source.length) {
+          if (source[i] === "\\") i += 2;
+          else if (source[i++] === '"') break;
+        }
+      } else {
+        const character = /^'(?:\\.|[^'\\\r\n])'/u.exec(source.slice(i));
+        i += character?.[0].length ?? 1;
+      }
+    }
+  }
+  return starts;
+}
+
+// A source-envelope scanner for complete fenced blocks in Lean doc comments.
 export function parseVersoCommentBlocks(
   source: string,
   spec: Pick<VersoCommentSpec, "defaultTitle" | "kind">,
@@ -149,52 +194,61 @@ export function parseVersoCommentBlocks(
   const blocks: EmbeddedBlock[] = [];
   let ordinal = 0;
   const seenKeys = new Map<string, number>();
+  const docSpans = leanDocSpans(source);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line || !isVersoCommentStart(line.text)) {
+    if (!line || !isVersoCommentStart(line.text) || !docSpans.has(line.from + line.text.indexOf("/-"))) {
       continue;
     }
 
-    const headerLine = lines[index + 1];
-    const header = headerLine
-      ? new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text)
-      : null;
-    if (!header) {
-      continue;
-    }
-
-    const from = line.from;
-    const label = header[1]?.trim() || null;
-    const codeLines: string[] = [];
-
-    for (let inner = index + 2; inner < lines.length; inner += 1) {
-      const innerLine = lines[inner];
-      if (!innerLine) {
-        break;
-      }
-      if (/^\s*```\s*$/.test(innerLine.text)) {
-        const closingLine = lines[inner + 1];
-        if (!closingLine || !/^\s*-\s*\/\s*$/.test(closingLine.text)) {
-          break;
+    const end = docSpans.get(line.from + line.text.indexOf("/-"))!;
+    const commentEnd = lines.findIndex(candidate => candidate.from <= end - 2 && end - 2 < candidate.end);
+    // Unsupported inline closers stay raw; never search beyond the lexical span.
+    if (commentEnd <= index || !/^\s*-\/\s*$/.test(lines[commentEnd]!.text)) continue;
+    for (let headerIndex = index + 1; headerIndex < commentEnd; headerIndex++) {
+      const headerLine = lines[headerIndex]!;
+      const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text);
+      if (!header) {
+        // Another language or a wider fence owns its body, even if it contains
+        // text resembling a supported Rust opener.
+        const other = /^\s*(`{3,})/.exec(headerLine.text);
+        if (other) {
+          const close = new RegExp("^\\s*`{" + other[1]!.length + ",}\\s*$");
+          while (++headerIndex < commentEnd && !close.test(lines[headerIndex]!.text)) { /* skip body */ }
         }
+        continue;
+      }
+      const label = header[1]?.trim() || null;
+      let fenceEnd = headerIndex + 1;
+      while (fenceEnd < commentEnd && !/^\s*```\s*$/.test(lines[fenceEnd]!.text)) fenceEnd++;
+      if (fenceEnd < commentEnd) {
+        const indent = /^ */.exec(headerLine.text)![0];
+        const standalone = headerIndex === index + 1 && fenceEnd + 1 === commentEnd;
         ordinal += 1;
         const block: EmbeddedBlock = {
-          code: codeLines.join("\n"),
-          from,
+          ...(standalone ? {} : { fencedOnly: true }),
+          code: lines.slice(headerIndex + 1, fenceEnd).map(line => line.text.startsWith(indent) ? line.text.slice(indent.length) : line.text).join("\n"),
+          envelope: {
+            prefix: source.slice(standalone ? line.from : headerLine.from, headerLine.end),
+            suffix: source.slice(lines[fenceEnd]!.from, lines[standalone ? commentEnd : fenceEnd]!.end),
+            indent, newline: source.slice(headerLine.from, headerLine.end).endsWith("\r\n") ? "\r\n" : "\n",
+            original: source.slice(standalone ? line.from : headerLine.from, lines[standalone ? commentEnd : fenceEnd]!.end),
+          },
+          codeLineStarts: lines.slice(headerIndex + 1, fenceEnd).map(line => line.from + (line.text.startsWith(indent) ? indent.length : 0)),
+          from: standalone ? line.from : headerLine.from,
           key: embeddedBlockKey(spec.kind, label, ordinal, seenKeys),
           label,
           ordinal,
           title: "",
-          to: closingLine.end,
+          to: lines[standalone ? commentEnd : fenceEnd]!.end,
         };
         block.title = spec.defaultTitle(block);
         blocks.push(block);
-        index = inner + 1;
-        break;
+        headerIndex = fenceEnd;
       }
-      codeLines.push(innerLine.text);
     }
+    index = commentEnd;
   }
 
   return blocks;
@@ -219,13 +273,28 @@ export function serializeVersoCommentBlock(
   kind: string,
   code: string,
 ): string {
+  if (block.envelope) {
+    if (code === block.code) return block.envelope.original;
+    const { prefix, suffix, indent, newline } = block.envelope;
+    const body = code ? code.split("\n").map(line => indent + line).join(newline) + newline : "";
+    return prefix + body + suffix;
+  }
   return [
-    "/-!",
+    ...(block.fencedOnly ? [] : ["/-!"]),
     `\`\`\`${kind}${block.label ? ` ${block.label}` : ""}`,
     code,
     "```",
-    "-/",
+    ...(block.fencedOnly ? [] : ["-/"]),
   ].join("\n") + "\n";
+}
+
+/** Validate a projected replacement before it can enter the authoritative host. */
+export function validateEmbeddedReplacement(source: string, block: EmbeddedBlock, code: string,
+  parse: (source: string) => EmbeddedBlock[], serialize: (block: EmbeddedBlock, code: string) => string): boolean {
+  const replacement = serialize(block, code);
+  const result = source.slice(0, block.from) + replacement + source.slice(block.to);
+  const projected = parse(result).find(candidate => candidate.key === block.key && candidate.from === block.from);
+  return !!projected && projected.to === block.from + replacement.length && projected.code === code;
 }
 
 export function serializeLineCommentFencedBlock(
@@ -468,11 +537,16 @@ export function createVersoCommentAdapter<TBlock extends EmbeddedBlock = Embedde
   parseBlocks(source: string): TBlock[];
   serializeBlock(block: TBlock, code: string): string;
 } {
-  const parseBlocks = (source: string): TBlock[] =>
-    parseVersoCommentBlocks(source, {
+  let cachedSource: string | undefined;
+  let cachedBlocks: TBlock[] = [];
+  const parseBlocks = (source: string): TBlock[] => {
+    if (source === cachedSource) return cachedBlocks;
+    cachedSource = source;
+    return cachedBlocks = parseVersoCommentBlocks(source, {
       defaultTitle: spec.defaultTitle,
       kind: spec.kind,
     }) as TBlock[];
+  };
 
   const serializeBlock = (block: TBlock, code: string): string =>
     serializeVersoCommentBlock(block, spec.kind, code);
@@ -533,6 +607,7 @@ export function embeddedBlockSourceMode(
   adapters: readonly AnyEmbeddedBlockEditorAdapter[],
   options: {
     disabled(state: EditorState, block: EmbeddedBlock): boolean;
+    readOnly?(state: EditorState, block: EmbeddedBlock): boolean;
   },
 ): Extension {
   return [
@@ -575,7 +650,8 @@ export function embeddedBlockSourceMode(
         return true;
       }
       return collectEmbeddedBlocks(transaction.startState.doc.toString(), adapters)
-        .filter((block) => options.disabled(transaction.startState, block))
+        .filter((block) => options.disabled(transaction.startState, block) &&
+          (options.readOnly?.(transaction.startState, block) ?? true))
         .flatMap((block) => [block.from, block.to]);
     }),
   ];

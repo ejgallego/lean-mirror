@@ -31,6 +31,7 @@ export interface DemoSession {
   initialDoc: string;
   rustRootUri?: string;
   rustMainDocumentUri?: string;
+  rustMainDiskRevision?: string;
   rustMainWebsocketUrl?: string;
   websocketUrl: string;
 }
@@ -46,6 +47,7 @@ export interface CreateRustSessionRequest {
 }
 
 export interface RustSession {
+  key: string;
   documentUri: string;
   rootUri: string;
   websocketUrl: string;
@@ -58,13 +60,15 @@ export interface UpdateRustDocumentRequest {
 }
 
 export interface RustMainUpdateRequest {
+  diskRevision: string;
   code: string;
-  leanDocument: string;
   revision: number;
   uri: string;
 }
 
 export interface RustMainUpdateResult {
+  projectionError?: string;
+  diskRevision: string;
   leanDocumentUri: string;
   revision: number;
   stale?: boolean;

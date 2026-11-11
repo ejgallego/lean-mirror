@@ -46,6 +46,7 @@ const demoWorkspaceShellClassNames = {
 export type RegenerationMode = "manual" | "auto";
 
 export interface DemoUi {
+  setRegenerationAvailable(available: boolean): void;
   editorHost: HTMLDivElement;
   infoviewHost: HTMLDivElement;
   logEvent(text: string): void;
@@ -131,7 +132,7 @@ export function createDemoUi(
     },
     labels: {
       editorDescription:
-        "Try hover, completion, go-to-definition, rename, diagnostics, Rust formatting, embedded Rust blocks, and embedded Lean snippets in the Rust driver.",
+        "Edit the raw Verso comment and hover over Rust names. Use Render Rust in the gutter to open the preview and inline editor.",
       infoAriaLabel: "Lean InfoView",
       infoTitle: "InfoView",
       secondaryTitle: "Runtime",
@@ -146,12 +147,12 @@ export function createDemoUi(
   if (header) {
     const titleEl = document.createElement("h1");
     titleEl.id = "demo-title";
-    titleEl.textContent = "Embedded Lean over Rust comments";
+    titleEl.textContent = "Rust inside a Lean document";
     const summaryEl = document.createElement("p");
     summaryEl.id = "demo-summary";
     summaryEl.className = "lede";
     summaryEl.textContent =
-      "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
+      "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline.";
     header.append(titleEl, summaryEl);
   }
 
@@ -236,6 +237,10 @@ export function queryDemoUi(
   }
 
   return {
+    setRegenerationAvailable(available) {
+      regenerationModeEl.parentElement!.hidden = !available;
+      regenerateButton.parentElement!.hidden = !available;
+    },
     editorHost,
     infoviewHost,
     platformStore,
@@ -282,9 +287,9 @@ export function queryDemoUi(
       demoProjectEl.textContent = project ?? "Lean 4 + CodeMirror 6";
       demoSummaryEl.textContent =
         summary ??
-        "This demo mirrors Lean spec comments embedded in Rust into a hidden Lean file, then checks them through the local Lean LSP while keeping rust-analyzer attached to the host Rust driver.";
-      demoTitleEl.textContent = title ?? "Embedded Lean over Rust comments";
-      document.title = title ?? "Anneal Embedded Lean Demo";
+        "Explore the raw Verso source with Rust hovers, or use the gutter to render the block and edit it inline.";
+      demoTitleEl.textContent = title ?? "Rust inside a Lean document";
+      document.title = title ?? "Rust inside a Lean document";
     },
     setActiveDocument(uri: string) {
       for (const button of documentsEl.querySelectorAll<HTMLButtonElement>("button")) {

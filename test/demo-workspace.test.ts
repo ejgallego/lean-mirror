@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -17,6 +18,7 @@ async function createFixture(): Promise<{ demoDir: string; workspace: DemoWorksp
   await writeFile(join(workspaceDir, "Main.rs"), "fn main() {}\n", "utf8");
   await writeFile(join(workspaceDir, "Main.lean"), "import Helper\n", "utf8");
   await writeFile(join(workspaceDir, "Helper.lean"), "def helperValue := 1\n", "utf8");
+  await writeFile(join(workspaceDir, "AeneasDemo.lean"), "def bump (x : Nat) := x + 1\n", "utf8");
   await writeFile(join(workspaceDir, "RustSnippets.lean"), "import Helper\n", "utf8");
   await writeFile(
     join(workspaceDir, "lakefile.toml"),
@@ -211,6 +213,7 @@ describe("demo workspace backend", () => {
       workspace.uris.embeddedLeanUri,
       workspace.uris.documentUri,
       workspace.uris.helperUri,
+      new URL("AeneasDemo.lean", workspace.uris.documentUri).href,
     ]);
   });
 
@@ -218,33 +221,47 @@ describe("demo workspace backend", () => {
     const { workspace } = await createFixture();
     const session = await workspace.createRustBlockSession("Rust Demo Widget", "pub fn old() {}\n");
 
-    expect(session.slug).toBe("rust-demo-widget");
+    expect(session.slug).toMatch(/^rust-demo-widget-/);
     expect(await readFile(session.documentPath, "utf8")).toBe("pub fn old() {}\n");
 
     await Promise.all([
-      workspace.updateRustBlockDocument("Rust Demo Widget", "pub fn stale() {}\n", 1),
-      workspace.updateRustBlockDocument("Rust Demo Widget", "pub fn fresh() {}\n", 2),
+      workspace.updateRustBlockDocument(session.key, "pub fn stale() {}\n", 1),
+      workspace.updateRustBlockDocument(session.key, "pub fn fresh() {}\n", 2),
     ]);
 
     expect(await readFile(session.documentPath, "utf8")).toBe("pub fn fresh() {}\n");
+    const replacement = await workspace.createRustBlockSession("Rust Demo Widget", "pub fn fresh() {}\n");
+    expect(replacement.key).not.toBe(session.key);
+    expect(await workspace.updateRustBlockDocument(replacement.key, "pub fn edited() {}\n", 1)).toBe(true);
+    await workspace.updateRustBlockDocument(session.key, "pub fn retired() {}\n", 3);
+    expect(await readFile(replacement.documentPath, "utf8")).toBe("pub fn edited() {}\n");
   });
 
   it("updates the Rust driver and generated Lean snippet document", async () => {
     const { workspace } = await createFixture();
 
+    const diskRevision = createHash("sha256").update("fn main() {}\n").digest("hex");
     const result = await workspace.updateRustMainDocument({
+      diskRevision,
       code: "fn changed() {}\n",
-      leanDocument: "#check helperValue\n",
+
       revision: 12,
       uri: workspace.uris.rustMainUri,
     });
 
     expect(result).toEqual({
+      diskRevision: createHash("sha256").update("fn changed() {}\n").digest("hex"),
       leanDocumentUri: workspace.uris.embeddedLeanUri,
       revision: 12,
     });
     expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
-    expect(await workspace.readDocument(workspace.uris.embeddedLeanUri)).toBe("#check helperValue\n");
+    expect(await workspace.readDocument(workspace.uris.embeddedLeanUri)).toBe("\n");
+    await expect(workspace.updateRustMainDocument({
+      diskRevision, code: "fn stale() {}\n",
+      revision: 11, uri: workspace.uris.rustMainUri,
+    })).rejects.toMatchObject({ code: "ERR_LEAN_DOCUMENT_CONFLICT" });
+    expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
+
   });
 
   it("refreshes the embedded Lean document from Rust comments during preparation", async () => {
@@ -311,3 +328,53 @@ describe("demo workspace backend", () => {
     expect(session.preparationStatus?.phase).toBe("ready");
   });
 });
+
+
+it("releases isolated Rust workspaces and rejects retired saves", async () => {
+  const { workspace } = await createFixture();
+  const info = await workspace.createRustBlockSession("rust:probe", "fn probe() {}");
+  const lease = workspace.acquireRustBlockSession(info.slug)!;
+  expect(workspace.acquireRustBlockSession(info.slug)).toBeNull();
+  await workspace.releaseRustBlockSession(info.key);
+  expect(await workspace.updateRustBlockDocument(info.key, "stale", 2)).toBe(false);
+  await lease.release();
+  await expect(readFile(info.documentPath)).rejects.toMatchObject({ code: "ENOENT" });
+  await workspace.releaseRustBlockSession(info.key);
+});
+
+it("acknowledges committed source even when its Lean projection cannot be written", async () => {
+  const { workspace } = await createFixture();
+  const urls = { websocketUrl: 'ws://lean', rustMainWebsocketUrl: 'ws://rust' };
+  const initial = await workspace.readSession(urls);
+  const leanPath = new URL(workspace.uris.embeddedLeanUri);
+  await rm(leanPath);
+  await mkdir(leanPath);
+  const first = await workspace.updateRustMainDocument({ uri: workspace.uris.rustMainUri,
+    code: 'pub fn invalid(\n', diskRevision: initial.rustMainDiskRevision!, revision: 1 });
+  expect(first.projectionError).toBeTruthy();
+  expect(await readFile(workspace.paths.rustMainPath, 'utf8')).toBe('pub fn invalid(\n');
+  const corrected = await workspace.updateRustMainDocument({ uri: workspace.uris.rustMainUri,
+    code: 'pub fn corrected() {}\n', diskRevision: first.diskRevision, revision: 2 });
+  expect(corrected.diskRevision).not.toBe(first.diskRevision);
+  await expect(workspace.updateRustMainDocument({ uri: workspace.uris.rustMainUri,
+    code: 'other writer', diskRevision: first.diskRevision, revision: 3 })).rejects.toMatchObject({ code: 'ERR_LEAN_DOCUMENT_CONFLICT' });
+});
+
+it("failed regeneration cannot consume an unknown source revision", async () => {
+  const { workspace } = await createSwitchableExternalFixture();
+  const urls = {websocketUrl:'ws://lean',rustMainWebsocketUrl:'ws://rust'};
+  const initial = await workspace.readSession(urls);
+  const invalid = 'pub fn invalid(\n';
+  await expect(workspace.regenerateRustMainDocument({uri:workspace.uris.rustMainUri,code:invalid,
+    diskRevision:initial.rustMainDiskRevision!,revision:1},urls)).rejects.toMatchObject({code:'ERR_LEAN_DOCUMENT_CONFLICT'});
+  expect(await readFile(workspace.paths.rustMainPath,'utf8')).toBe(initial.initialDoc);
+  const committed = await workspace.updateRustMainDocument({uri:workspace.uris.rustMainUri,code:invalid,
+    diskRevision:initial.rustMainDiskRevision!,revision:2});
+  // The fixture generator has no executable target: changed-source generation fails deterministically.
+  await expect(workspace.regenerateRustMainDocument({uri:workspace.uris.rustMainUri,code:invalid,
+    diskRevision:committed.diskRevision,revision:2},urls)).rejects.toThrow();
+  const corrected = await workspace.updateRustMainDocument({uri:workspace.uris.rustMainUri,code:'pub fn corrected() {}\n',
+    diskRevision:committed.diskRevision,revision:3});
+  expect(corrected.diskRevision).not.toBe(committed.diskRevision);
+  expect(await readFile(workspace.paths.rustMainPath,'utf8')).toBe('pub fn corrected() {}\n');
+}, 30000);

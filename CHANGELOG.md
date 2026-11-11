@@ -9,6 +9,14 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- Shared Rust session ownership with bounded acquisition, backend lease release, and explicit analysis readiness. Rosetta mock lifecycle checks now run in CI.
+
+- `npm run demo:setup` checks prerequisites, installs pinned Lean/Rust tools and locked npm dependencies, and builds both demos and Rosetta. Demo startup prints both URLs and cleans up its backend when startup fails.
+
+- A static Aeneas-style `bump` example whose Rust Verso docstring is attached to its Lean translation, with a self-contained checked-arithmetic model, a proved increment specification, and success/overflow evaluations. Rust edits do not regenerate Lean.
+
+- A Lean-first full demo with real Verso Rust fences, Rosetta-backed rendered previews, an inline editing toggle, all six Rust editor features, and independent Rust session recovery. The Rust-driver and external Anneal experiments remain available.
+
 - The infoview host mounts through `mountInfoview()` when the installed `@leanprover/infoview` provides it, so `dispose()` unmounts the React tree; older releases keep the detach-only fallback.
 - An optional webview `session` in the private editor-platform protocol (`ready`, commands, and `command-result`). The VS Code adapter drops commands from any session other than the current one, including late messages from a replaced webview.
 - `detectLeanLineEnding()` lets hosts persist documents with their original CRLF or LF ending, following VS Code's majority rule; the workspace example keeps each file's ending and stays clean after edit-and-undo.
@@ -41,6 +49,16 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - An isolated packed-browser consumer gate that production-bundles a public-only editor composition and exercises startup, diagnostics, infoview, editing, and reconnection against a real Lean server.
 
 ### Changed
+
+- Fix Rust active-document rollback and concurrent connection startup; acknowledge saved source independently of projection/generation failures. Validate lexical comment spans and reject nested edits that break their embedding. Claim allocations only after validated upgrades, and enforce the Rosetta facade's one-document contract.
+
+- Preserve Lean comment envelopes during nested edits and recognize blocks only in doc comments. Derive saved Lean snippets on the backend, start the Rust driver lazily, hide unavailable regeneration controls, and wait for backend exit after forced shutdown.
+
+- Shorten the README's demo descriptions and setup notes, credit Lean's upstream infoview explicitly, and show screenshots of both nested-editor demos.
+
+- Root validation and the demo workspace now pin Lean 4.35.0, matching the bundled Rosetta host.
+
+- The full demo starts with raw, editable Verso source and Rust LSP hovers. Gutter controls and `?view=rendered` retain the rendered preview and full inline editor.
 
 - The workspace example mounts editors immediately and returns a `ready` promise; `dispose()` or an `AbortSignal` cancels a pending startup. It reports Lean's file checking separately from the connection and tracks current and saved text as immutable documents.
 - Raised the CodeMirror dependency floors to the current releases (`@codemirror/state` 6.7.6, `view` 6.43.15, `language` 6.13.1, `commands` 6.11.1, `search` 6.7.2, `autocomplete` 6.20.4, `@lezer/highlight` 1.2.5). `@codemirror/lsp-client` stays pinned at 6.3.0, the latest release.
@@ -76,6 +94,10 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - The minimal example now separates its reusable public-package editor composition from the private editor-platform shell adapter.
 
 ### Fixed
+
+- Reconnecting cancels pending completions before detaching their editor state, and retired requests carry the LSP cancellation code. The infoview rejects new RPCs while stopped, including while an old client still exists.
+
+- The full demo preserves Rust source and per-file undo history across file switches, reconnects rust-analyzer after transport loss, isolates recreated Rust widget sessions, and rejects conflicting Rust-driver disk saves.
 
 - The workspace example shares pending startup with reconnect requests, so disposal closes the connection and rejects every waiter. Fatal Lean progress now shows a failed check and recovers after correcting the document.
 - Workspace-loaded text splits lone carriage returns like CodeMirror, so an editor view built from the same text matches the loaded document.
