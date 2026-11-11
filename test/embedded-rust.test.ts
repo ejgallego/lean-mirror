@@ -420,3 +420,18 @@ describe("source projection invariants", () => {
     expect(parseEmbeddedRustBlocks(apparent)).toHaveLength(1);
   });
 });
+
+
+it("does not project apparent Rust fences inside other fenced blocks", () => {
+  for (const fence of ['````rust', '````lean', '```lean']) {
+    const close = fence.startsWith('````') ? '````' : '```';
+    const source = ['/--', fence, '```rust', 'fn example() {}', '```', close, '-/'].join('\n');
+    expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+  }
+});
+
+
+it("finds supported fences after an unsupported wider fence", () => {
+  const source = ['/--', '````lean', '```rust', 'fn fake() {}', '```', '````', '```rust', 'fn real() {}', '```', '-/'].join('\n');
+  expect(parseEmbeddedRustBlocks(source).map(block => block.code)).toEqual(['fn real() {}']);
+});

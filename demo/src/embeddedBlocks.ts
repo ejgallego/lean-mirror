@@ -205,7 +205,16 @@ export function parseVersoCommentBlocks(
     for (let headerIndex = index + 1; headerIndex < commentEnd; headerIndex++) {
       const headerLine = lines[headerIndex]!;
       const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text);
-      if (!header) continue;
+      if (!header) {
+        // Another language or a wider fence owns its body, even if it contains
+        // text resembling a supported Rust opener.
+        const other = /^\s*(`{3,})/.exec(headerLine.text);
+        if (other) {
+          const close = new RegExp("^\\s*`{" + other[1]!.length + ",}\\s*$");
+          while (++headerIndex < commentEnd && !close.test(lines[headerIndex]!.text)) { /* skip body */ }
+        }
+        continue;
+      }
       const label = header[1]?.trim() || null;
       let fenceEnd = headerIndex + 1;
       while (fenceEnd < commentEnd && !/^\s*```\s*$/.test(lines[fenceEnd]!.text)) fenceEnd++;
