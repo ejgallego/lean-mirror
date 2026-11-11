@@ -41,6 +41,7 @@ export interface EmbeddedBlockInlineCreateOptions<TBlock extends EmbeddedBlock> 
   log(message: string): void;
   outerView: EditorView;
   syncOuter(code: string): void;
+  validateEdit(before: string, code: string): boolean;
 }
 
 export interface EmbeddedBlockWidgetConfig<TBlock extends EmbeddedBlock> {
@@ -149,19 +150,21 @@ function embeddedBlockKey(
 }
 
 /** Locate real Lean doc comments without interpreting string contents as syntax. */
-function leanDocStarts(source: string): Set<number> {
-  const starts = new Set<number>();
+function leanDocSpans(source: string): Map<number, number> {
+  const starts = new Map<number, number>();
   for (let i = 0; i < source.length;) {
     if (source.startsWith("--", i)) {
       const end = source.indexOf("\n", i); i = end < 0 ? source.length : end + 1;
     } else if (source.startsWith("/-", i)) {
-      if (source.startsWith("/--", i) || source.startsWith("/-!", i)) starts.add(i);
+      const start = i;
+      const doc = source.startsWith("/--", i) || source.startsWith("/-!", i);
       let depth = 1; i += 2;
       while (i < source.length && depth) {
         if (source.startsWith("/-", i)) { depth++; i += 2; }
         else if (source.startsWith("-/", i)) { depth--; i += 2; }
         else i++;
       }
+      if (doc && depth === 0) starts.set(start, i);
     } else {
       const raw = /^r(#+)?"/.exec(source.slice(i));
       if (raw) {
@@ -191,17 +194,18 @@ export function parseVersoCommentBlocks(
   const blocks: EmbeddedBlock[] = [];
   let ordinal = 0;
   const seenKeys = new Map<string, number>();
-  const docStarts = leanDocStarts(source);
+  const docSpans = leanDocSpans(source);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line || !isVersoCommentStart(line.text) || !docStarts.has(line.from + line.text.indexOf("/-"))) {
+    if (!line || !isVersoCommentStart(line.text) || !docSpans.has(line.from + line.text.indexOf("/-"))) {
       continue;
     }
 
-    let commentEnd = index + 1;
-    while (commentEnd < lines.length && !/^\s*-\/\s*$/.test(lines[commentEnd]!.text)) commentEnd++;
-    if (commentEnd === lines.length) continue;
+    const end = docSpans.get(line.from + line.text.indexOf("/-"))!;
+    const commentEnd = lines.findIndex(candidate => candidate.from <= end - 2 && end - 2 < candidate.end);
+    // Unsupported inline closers stay raw; never search beyond the lexical span.
+    if (commentEnd <= index || !/^\s*-\/\s*$/.test(lines[commentEnd]!.text)) continue;
     for (let headerIndex = index + 1; headerIndex < commentEnd; headerIndex++) {
       const headerLine = lines[headerIndex]!;
       const header = new RegExp(`^\\s*\`\`\`${escapeRegExp(spec.kind)}(?:\\s+(.+))?\\s*$`).exec(headerLine.text);
@@ -282,6 +286,15 @@ export function serializeVersoCommentBlock(
     "```",
     ...(block.fencedOnly ? [] : ["-/"]),
   ].join("\n") + "\n";
+}
+
+/** Validate a projected replacement before it can enter the authoritative host. */
+export function validateEmbeddedReplacement(source: string, block: EmbeddedBlock, code: string,
+  parse: (source: string) => EmbeddedBlock[], serialize: (block: EmbeddedBlock, code: string) => string): boolean {
+  const replacement = serialize(block, code);
+  const result = source.slice(0, block.from) + replacement + source.slice(block.to);
+  const projected = parse(result).find(candidate => candidate.key === block.key && candidate.from === block.from);
+  return !!projected && projected.to === block.from + replacement.length && projected.code === code;
 }
 
 export function serializeLineCommentFencedBlock(

@@ -405,6 +405,12 @@ function createRustInlineHandle(
       doc: latestCode,
       extensions: [
         ...baseRustAdapter.editorExtensions(),
+        EditorState.transactionFilter.of(transaction => {
+          if (!transaction.docChanged || syncingFromOuter || options.validateEdit(transaction.startState.doc.toString(), transaction.newDoc.toString())) return transaction;
+          status.hidden = false;
+          status.textContent = "This edit would break the Lean comment or Verso fence. Edit the raw host source instead.";
+          return [];
+        }),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         binding.of([]),
         EditorView.updateListener.of(update => {

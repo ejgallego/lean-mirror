@@ -4,6 +4,7 @@ import { setDiagnostics } from "@codemirror/lint";
 
 import {
   EmbeddedBlockWidget,
+  validateEmbeddedReplacement,
   collectEmbeddedBlocks,
   embeddedBlockSourceMode,
   findEmbeddedBlockByKey,
@@ -390,6 +391,13 @@ export function createEmbeddedEditorShell(
           options.log(message);
         },
         outerView,
+        validateEdit(before, code) {
+          const source = outerView.state.doc.toString();
+          const target = findEmbeddedBlockByKey(source, block.key, adapter.parse);
+          const valid = !!target && target.code === before && validateEmbeddedReplacement(source, target, code, adapter.parse, adapter.serialize);
+          if (!valid) options.log("Nested edit rejected: preserve the containing comment and fence. Edit the raw host source instead.");
+          return valid;
+        },
         syncOuter(code) {
           const target = findEmbeddedBlockByKey(
             outerView.state.doc.toString(),
@@ -456,6 +464,15 @@ export function createEmbeddedEditorShell(
         doc: block.code,
         extensions: [
           ...adapter.editorExtensions(),
+          EditorState.transactionFilter.of(transaction => {
+            if (!transaction.docChanged || syncingFromOuter) return transaction;
+            const source = outerView.state.doc.toString();
+            const target = findEmbeddedBlockByKey(source, block.key, adapter.parse);
+            if (target && target.code === transaction.startState.doc.toString() &&
+                validateEmbeddedReplacement(source, target, transaction.newDoc.toString(), adapter.parse, adapter.serialize)) return transaction;
+            options.log("Nested edit rejected: preserve the containing comment and fence. Edit the raw host source instead.");
+            return [];
+          }),
           ...(options.extraExtensions?.(adapter, block) ?? []),
           innerSyncExtension,
           activeInlineExtension,

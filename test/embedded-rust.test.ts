@@ -13,6 +13,7 @@ import {
 } from "../demo/src/embeddedRust.js";
 import {
   createVersoCommentAdapter,
+  validateEmbeddedReplacement,
   parseVersoCommentBlocks,
   serializeVersoCommentBlock,
   type EmbeddedBlock,
@@ -434,4 +435,24 @@ it("does not project apparent Rust fences inside other fenced blocks", () => {
 it("finds supported fences after an unsupported wider fence", () => {
   const source = ['/--', '````lean', '```rust', 'fn fake() {}', '```', '````', '```rust', 'fn real() {}', '```', '-/'].join('\n');
   expect(parseEmbeddedRustBlocks(source).map(block => block.code)).toEqual(['fn real() {}']);
+});
+
+it("never scans beyond a lexical doc-comment end", () => {
+  const source = '/--\nDocumentation. -/\ndef s := "\n```rust\nfn not_rust() {}\n```\n-/\n"';
+  expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+});
+
+it("uses the outer comment end when comments are nested", () => {
+  const source = ['/--', 'A nested /- comment', '-/', '```rust', 'fn real() {}', '```', '-/'].join('\n');
+  expect(parseEmbeddedRustBlocks(source).map(block => block.code)).toEqual(['fn real() {}']);
+});
+
+
+it("rejects Rust replacements that escape the Lean comment or Verso fence", () => {
+  const source = ['/--', '```rust (name := sample)', 'fn sample() {}', '```', '-/'].join('\n') + '\n';
+  const block = parseEmbeddedRustBlocks(source)[0]!;
+  for (const code of ['fn f() { let s = "-/"; }', 'fn f() { let s = "/-"; }', 'fn f() {}\n```\nprose']) {
+    expect(validateEmbeddedReplacement(source, block, code, parseEmbeddedRustBlocks, serializeEmbeddedRustBlock)).toBe(false);
+  }
+  expect(validateEmbeddedReplacement(source, block, 'fn valid() {}', parseEmbeddedRustBlocks, serializeEmbeddedRustBlock)).toBe(true);
 });
