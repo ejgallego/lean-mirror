@@ -67,6 +67,7 @@ export interface RustMainUpdateRequest {
 }
 
 export interface RustMainUpdateResult {
+  projectionError?: string;
   diskRevision: string;
   leanDocumentUri: string;
   revision: number;

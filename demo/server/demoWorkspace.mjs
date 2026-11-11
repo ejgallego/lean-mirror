@@ -252,8 +252,12 @@ export function createDemoWorkspace(demoDir, options = {}) {
     const saved = await rustSourceStore().save({
       uri: rustMainUri, text: payload.code, revision: payload.diskRevision,
     });
-    await writeFile(embeddedLeanPath, buildEmbeddedLeanDocumentFromSource(payload.code, currentEmbeddedLeanContext()), "utf8");
+    let projectionError;
+    try {
+      await writeFile(embeddedLeanPath, buildEmbeddedLeanDocumentFromSource(payload.code, currentEmbeddedLeanContext()), "utf8");
+    } catch (error) { projectionError = error instanceof Error ? error.message : String(error); }
     return {
+      ...(projectionError ? { projectionError } : {}),
       diskRevision: saved.revision,
       leanDocumentUri: embeddedLeanUri,
       revision: payload.revision,
@@ -434,8 +438,13 @@ export function createDemoWorkspace(demoDir, options = {}) {
     }
     const job = rustMainUpdateQueue.then(async () => {
       try {
-        setPreparationStatus("preparing", "Saving Rust source before regeneration.");
-        await rustSourceStore().save({ uri: rustMainUri, text: payload.code, revision: payload.diskRevision });
+        const committed = await rustSourceStore().read(rustMainUri);
+        if (committed.revision !== payload.diskRevision || committed.text !== payload.code) {
+          const error = new Error("Regeneration requires an acknowledged source snapshot. Save the source first.");
+          error.code = "ERR_LEAN_DOCUMENT_CONFLICT";
+          throw error;
+        }
+        setPreparationStatus("preparing", "Generating from the acknowledged Rust source.");
         await configureExternalWorkspace();
         await ensureEmbeddedLeanArtifacts(embeddedLeanPath, currentEmbeddedLeanContext());
         setPreparationStatus("ready", "Demo workspace ready.");

@@ -126,10 +126,12 @@ describe("raw Verso Rust hover", () => {
       connectWebSocket: async () => { connections++; throw new Error("unexpected connection"); },
     }, "rust:pending", "fn pending() {}");
     const hover = session.hover({ line: 0, character: 4 });
+    await waitFor(() => typeof finish === "function");
     session.destroy();
     finish(info);
     await expect(hover).resolves.toBeNull();
     expect(connections).toBe(0);
+    await waitFor(() => released.length === 1);
     expect(released).toEqual([info.key]);
   });
 });

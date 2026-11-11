@@ -50,6 +50,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Fix Rust active-document rollback and concurrent connection startup; acknowledge saved source independently of projection/generation failures. Validate lexical comment spans and reject nested edits that break their embedding. Claim allocations only after validated upgrades, and enforce the Rosetta facade's one-document contract.
+
 - Preserve Lean comment envelopes during nested edits and recognize blocks only in doc comments. Derive saved Lean snippets on the backend, start the Rust driver lazily, hide unavailable regeneration controls, and wait for backend exit after forced shutdown.
 
 - Shorten the README's demo descriptions and setup notes, credit Lean's upstream infoview explicitly, and show screenshots of both nested-editor demos.

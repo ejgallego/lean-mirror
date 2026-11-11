@@ -117,6 +117,7 @@ export function parseRustMainUpdateRequest(value) {
 export function parseRustMainUpdateResult(value) {
   const record = expectRecord(value, "RustMainUpdateResult");
   return {
+    ...(record.projectionError === undefined ? {} : { projectionError: expectString(record.projectionError, "projectionError") }),
     diskRevision: expectString(record.diskRevision, "diskRevision"),
     leanDocumentUri: expectString(record.leanDocumentUri, "leanDocumentUri"),
     revision: expectNumber(record.revision, "revision"),

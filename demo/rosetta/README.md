@@ -101,6 +101,12 @@ The host document owns authored text. Inline edits replace the fenced body and
 preserve the comment kind, fence text, indentation, line endings, and surrounding
 prose. The local scanner recognizes complete triple-backtick fences with
 standalone comment delimiters, outside Lean strings and ordinary/nested comments.
+A single balanced lexical pass supplies both comment boundaries; inline closers
+and incomplete comments stay raw. Before applying an inner transaction, the host
+validates the current projection and reparses the replacement. Rust containing
+`-/`, unmatched `/-`, or a closing fence may not fit inside this representation.
+Such nested edits are rejected with an explanation; edit the raw host source or
+use a separate source file rather than silently changing Rust semantics.
 Other Verso forms remain raw source; successful elaboration is not required for
 editing. A projection is cached per adapter/source revision and shared by hover
 and decoration consumers. Lean's parsed syntax can enrich this boundary later.
@@ -109,7 +115,11 @@ Each Rust presentation uses the demo-local `RustSessionOwner`. Disposal cancels
 acquisition and requests, closes the transport, and releases the backend lease.
 Unclaimed allocations expire after a minute. Connected workspaces are removed
 after the child exits and queued writes finish. Session identities never revive.
-The independent Rust driver starts only when its document is opened.
+The independent Rust driver starts only when its document is opened. Both paths
+share `ConnectionScope`: one pending acquisition, an explicit generation, and
+idempotent cleanup including resources that arrive after retirement. Failed
+startup can be retried with a new scope. Retained editor states preserve undo;
+active document reads and saves use the live view, and reopening it is a no-op.
 
 Rosetta's `rosetta/ready` reports rust-analyzer's explicit workspace-loading
 state; empty hover/token responses remain valid results. The documented core
@@ -118,3 +128,24 @@ tickets distinguish the owning connection from authored revisions and wire
 versions. The reverse demo sends Rust source and disk revision; the server derives
 the saved Lean projection with the same pure extractor used by the browser.
 `test:rosetta` runs the upstream mock lifecycle tests and the native host contract.
+
+## Persistence and generation
+
+`/rust-main` returns the committed disk revision even when writing the disposable
+Lean projection fails (`projectionError`). The browser adopts that source receipt
+before reporting the derived-work error. It marks the source clean only if the
+acknowledged authored revision is still current. Conflicts with other writers
+remain errors and never silently adopt another writer's revision.
+
+Regeneration first obtains a source-save receipt, then submits that acknowledged
+snapshot. The generation endpoint validates the receipt and does not save source.
+A generator failure leaves the committed revision usable for corrective edits.
+If the author edits again while generation runs, the UI retains those newer edits
+and does not restart into the older generated snapshot.
+
+The Rosetta facade admits only `src/lib.rs` in its supplied workspace. A second
+open or inconsistent lifecycle URI terminates the invalid session. Advertised
+capabilities and supported requests are limited to the single-document features;
+workspace operations, completion resolution and semantic-token range/delta modes
+are not advertised. WebSocket allocations are claimed only after a successful
+handshake, when cleanup responsibility can transfer to the child process.

@@ -883,3 +883,160 @@ test("Lean-first startup does not connect the independent Rust driver", async ({
   await page.locator('button').filter({ hasText: 'Main.rs' }).first().click();
   await expect.poll(() => connections.some(url => url.includes("rust-main-lsp"))).toBe(true);
 });
+
+test("clicking the active Rust document preserves the visible and saved snapshot", async ({ page, request }) => {
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page, 'status')).toHaveText('Ready');
+  await page.getByRole('button', {name:'Helper.lean', exact:true}).click();
+  await page.getByRole('button', {name:'Main.rs', exact:true}).click();
+  const saved = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await saved;
+  // Observe beyond the 450ms save debounce: clicking the active tab must not
+  // schedule an older retained snapshot, even if no further edit follows.
+  const rollback = page.waitForRequest(request => request.url().endsWith('/rust-main') &&
+    !request.postDataJSON()?.code?.includes('a + b + 1'), {timeout:1000}).then(() => true, () => false);
+  await page.getByRole('button', {name:'Main.rs', exact:true}).click();
+  expect(await rollback).toBe(false);
+  // A following save must carry the actual edited buffer, not a retained prior visit.
+  const next = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 2'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b + 2'))).toBe(true);
+  await next;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const session = await (await request.get(backend + '/session')).json();
+  expect(session.initialDoc).toContain('a + b + 2');
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toBe(session.initialDoc);
+});
+
+test("a rejected Rust handshake leaves its allocation releasable", async ({ request }) => {
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const info = await (await request.post(backend + '/rust-session', {data:{key:'handshake-probe',code:'fn probe() {}'}})).json();
+  const url = new URL(info.websocketUrl); url.protocol = 'http:';
+  const rejected = await request.get(url.href, {headers:{Connection:'Upgrade', Upgrade:'websocket', 'Sec-WebSocket-Version':'13', 'Sec-WebSocket-Key':'invalid'}});
+  expect(rejected.status()).toBe(400);
+  expect((await request.delete(backend + '/rust-session?key=' + encodeURIComponent(info.key))).status()).toBe(204);
+  await expect(readFile(new URL(info.documentUri))).rejects.toMatchObject({code:'ENOENT'});
+});
+
+test("overlapping lazy Rust opens create only one driver connection", async ({ page }) => {
+  let attempts = 0, remaining = 0;
+  page.on('websocket', socket => {
+    if (socket.url().includes('rust-main-lsp')) {
+      attempts++; remaining++;
+      socket.on('close', () => { remaining--; });
+    }
+  });
+  await page.addInitScript(() => {
+    const Original = window.WebSocket;
+    window.WebSocket = class extends Original {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        if (String(url).includes('rust-main-lsp')) {
+          const add = this.addEventListener.bind(this);
+          this.addEventListener = ((type: string, handler: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+            if (type === 'open') add(type, event => setTimeout(() => typeof handler === 'function' ? handler(event) : handler.handleEvent(event), 300), options);
+            else add(type, handler, options);
+          }) as typeof this.addEventListener;
+        }
+      }
+    };
+  });
+  await page.goto('/');
+  await expect(statusValue(page, 'status')).toHaveText('Ready');
+  await page.getByRole('button', {name:'Main.rs',exact:true}).dblclick();
+  await expect(statusValue(page, 'document')).toContainText('Main.rs');
+  expect(attempts).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
+  await expect.poll(() => remaining).toBe(0);
+});
+
+test("a failed generation keeps its source receipt usable for a corrective save", async ({ page, request }) => {
+  await page.route('**/session', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({response,json:{...body,canRegenerate:true}});
+  });
+  await page.route('**/regenerate-rust-main', route => route.fulfill({status:500,body:'controlled generator failure'}));
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  const generated = page.waitForResponse(response => response.url().endsWith('/regenerate-rust-main'));
+  await page.evaluate(() => {
+    window.__leanDemo?.replaceCurrentText('a + b', 'a + b +');
+    document.querySelector<HTMLButtonElement>('#regenerate-workspace')!.click();
+  });
+  await generated;
+  await expect(page.locator('#events')).toContainText('controlled generator failure');
+  const correction = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() && response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b +', 'a + b + 1'))).toBe(true);
+  await correction;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const persisted = await (await request.get(backend + '/session')).json();
+  expect(persisted.initialDoc).toContain('a + b + 1');
+});
+
+test("invalid nested Rust edits preserve both editor buffers", async ({ page }) => {
+  await page.goto('/?view=rendered');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await page.getByRole('button',{name:'Edit Rust',exact:true}).click();
+  const inner = page.locator('.cm-embedded-block-inline .cm-content');
+  await inner.click();
+  const before = await page.evaluate(() => window.__leanDemo?.currentDoc());
+  const innerBefore = await inner.innerText();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText('\nfn delimiter() { let s = "-/"; }');
+  await expect(page.locator('.cm-embedded-block-inline-status')).toContainText('break the Lean comment');
+  expect(await page.evaluate(() => window.__leanDemo?.currentDoc())).toBe(before);
+  expect(await inner.innerText()).toBe(innerBefore);
+});
+
+test("restoring saved text during an in-flight save still persists the current revision", async ({ page, request }) => {
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await expect(page.locator('#events')).toContainText('Rust driver saved; Lean snippets refreshed.');
+  let committed!: () => void, release!: () => void;
+  const committedPromise = new Promise<void>(resolve => { committed = resolve; });
+  const releasePromise = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/rust-main', async route => {
+    const response = await route.fetch();
+    if (route.request().postDataJSON()?.code?.includes('a + b + 1')) {
+      committed(); await releasePromise;
+    }
+    await route.fulfill({response});
+  });
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await committedPromise;
+  const restored = page.waitForResponse(response => response.url().endsWith('/rust-main') && response.ok() &&
+    response.request().postDataJSON()?.code?.includes('a + b') && !response.request().postDataJSON()?.code?.includes('a + b + 1'));
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b'))).toBe(true);
+  release(); await restored;
+  const backend = `http://${process.env.DEMO_BACKEND_HOST ?? '127.0.0.1'}:${process.env.DEMO_BACKEND_PORT ?? '7360'}`;
+  const disk = await (await request.get(backend + '/session')).json();
+  expect(disk.initialDoc).toBe(await page.evaluate(() => window.__leanDemo?.currentDoc()));
+});
+
+test("failed auto-generation does not suppress a newer authored snapshot", async ({page}) => {
+  await page.route('**/session', async route => {
+    const response = await route.fetch();
+    await route.fulfill({response,json:{...await response.json(),canRegenerate:true}});
+  });
+  let firstStarted!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { firstStarted = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const attempts: string[] = [];
+  await page.route('**/regenerate-rust-main', async route => {
+    attempts.push(route.request().postDataJSON().code);
+    if (attempts.length === 1) { firstStarted(); await held; }
+    await route.fulfill({status:500,body:'controlled auto-generation failure'});
+  });
+  await page.goto('/?mode=rust');
+  await expect(statusValue(page,'status')).toHaveText('Ready');
+  await page.locator('#regeneration-mode button[data-mode="auto"]').click();
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b', 'a + b + 1'))).toBe(true);
+  await started;
+  expect(await page.evaluate(() => window.__leanDemo?.replaceCurrentText('a + b + 1', 'a + b + 2'))).toBe(true);
+  release();
+  await expect.poll(() => attempts.length).toBe(2);
+  expect(attempts[0]).toContain('a + b + 1');
+  expect(attempts[1]).toContain('a + b + 2');
+  await expect(page.locator('#extraction-state')).toHaveText('Generation failed');
+});

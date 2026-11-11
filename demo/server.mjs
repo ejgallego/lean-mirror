@@ -296,7 +296,7 @@ async function handleHttpRequest(req, res) {
       res.end(JSON.stringify(result));
     } catch (error) {
       res.writeHead(
-        500,
+        error.code === "ERR_LEAN_DOCUMENT_CONFLICT" ? 409 : 500,
         withCorsHeaders(req, {
           "Content-Type": "text/plain; charset=utf-8",
         }),
@@ -434,18 +434,24 @@ httpServer.on("upgrade", (req, socket, head) => {
       socket.destroy();
       return;
     }
-    const session = demoWorkspace.acquireRustBlockSession(block);
-    if (!session) { rejectUpgrade(socket, "404 Not Found", "Rust session is retired or already connected"); return; }
-    const { rootPath } = session;
     if (!rosettaBinary) {
       rejectUpgrade(socket, "503 Service Unavailable", "Rosetta is not ready");
       return;
     }
+    // Only a validated handshake may claim an allocation and clear its expiry.
     wsServer.handleUpgrade(req, socket, head, (connection) => {
-      // Rosetta owns a process group and needs time to join its IO workers.
-      attachSpawnedLsp(connection, rosettaBinary, [rootPath], rootPath, {
-        ...lspRelayLimits, killDelayMs: 2000,
-      }).once("close", () => { void session.release(); });
+      const session = demoWorkspace.acquireRustBlockSession(block);
+      if (!session) { connection.close(1008, "Rust session retired or already connected"); return; }
+      const { rootPath } = session;
+      try {
+        attachSpawnedLsp(connection, rosettaBinary, [rootPath], rootPath, {
+          ...lspRelayLimits, killDelayMs: 2000,
+        }).once("close", () => { void session.release(); });
+      } catch (error) {
+        void session.release();
+        connection.close(1011, "Cannot start Rust session");
+        console.error(error);
+      }
     });
     return;
   }
