@@ -48,6 +48,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Changed
 
+- Shorten the README's demo descriptions and setup notes, and credit Lean's upstream infoview explicitly.
+
 - Root validation and the demo workspace now pin Lean 4.35.0, matching the bundled Rosetta host.
 
 - The full demo starts with raw, editable Verso source and Rust LSP hovers. Gutter controls and `?view=rendered` retain the rendered preview and full inline editor.

@@ -1,5 +1,10 @@
 # Using the library
 
+The library builds on the [official CodeMirror LSP client](https://github.com/codemirror/lsp-client).
+Your application supplies the language-server processes and transports. The
+nested editor integration currently lives in the demos; it is not a public
+library API.
+
 ## Install
 
 The package is not yet published on npm. Build and pack this checkout:
