@@ -16,8 +16,9 @@ extraction into its own repository. No remote repository or release is assumed.
 
 The bridge references the core through `..`, so both packages share one source
 checkout. Core-only consumers do not fetch Verso. Neither package depends on
-Blueprint. The current toolchain and Verso dependency target Lean 4.35.0;
-broader release support remains to be decided.
+Blueprint. Both packages default to Lean 4.35.0, matching the Verso bridge's
+dependency stack. The core also uses the module system for Lean 4.36 consumers;
+the bridge has not been migrated to a Lean 4.36 dependency stack.
 
 ## Build and test
 
@@ -53,6 +54,14 @@ require rosetta from "/path/to/rosetta"
 
 Then use `import Rosetta`. The main generator operation is
 `Rosetta.analyze : Array ContextProfile → Array Request → EIO ClientError Bundle`.
+For named workspace references, `client.sourceDefinition languageId reference separator`
+searches workspace symbols, follows the LSP definition result, and highlights
+the returned source range with semantic tokens. It requires a unique exact name
+and, when supplied, a matching server-reported container. It never chooses an
+arbitrary fuzzy result. Server initialization and readiness remain caller-owned.
+Use `ClientConfig.retainedNotificationMethods` and `Client.latestNotification`
+when a loading-state update must survive eviction from the notification journal.
+
 See the [API guide](doc/API.md) for sessions, handles, error constructors, and
 conversion to an application's `IO` boundary.
 

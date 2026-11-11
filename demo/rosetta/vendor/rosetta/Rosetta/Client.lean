@@ -3,10 +3,14 @@ Copyright (c) 2026 Lean FRO LLC. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
-import Rosetta.Framing
-import Rosetta.Protocol
-import Std.Sync.Mutex
-import Std.Sync.CancellationToken
+module
+
+public import Rosetta.Framing
+public import Rosetta.Protocol
+public import Std.Sync.Mutex
+public import Std.Sync.CancellationToken
+
+public section
 
 /-! Experimental stdio client. Transport state never protects blocking IO.
 Document handles belong to one client and one admitted document version. -/
@@ -21,13 +25,16 @@ structure ClientConfig where
   initializationOptions : Json := .null
   configuration : Array (String × Json) := #[]
   experimentalCapabilities : Json := .null
+  /-- General notification methods whose latest params survive journal eviction.
+  Configure before startup to include notifications sent during initialization. -/
+  retainedNotificationMethods : Array String := #[]
   timeoutMs : Nat := 5000
   maxQueuedMessages : Nat := 128
   maxQueuedBytes : Nat := 8 * 1024 * 1024
   maxPendingRequests : Nat := 128
   maxInboundBytes : Nat := 16 * 1024 * 1024
 
-private def stdio : IO.Process.StdioConfig := {
+def stdio : IO.Process.StdioConfig := {
   stdin := .piped, stdout := .piped, stderr := .piped }
 
 private structure Outbound where
@@ -44,7 +51,7 @@ private structure State where
   queuedBytes : Nat := 0
   active? : Option Outbound := none
   stopWriter : Bool := false
-  serverStatus? : Option Json := none
+  latestNotifications : Std.HashMap String Json := {}
   notifications : Array Json := #[]
   droppedNotifications : Nat := 0
   failure? : Option ClientError := none
@@ -60,7 +67,7 @@ structure Client where
   private stderrReader : Task (Except IO.Error Unit)
   private stderrBytes : IO.Ref ByteArray
   private initializeResult : IO.Ref Json
-  private config : ClientConfig
+  config : ClientConfig
   private cleanup : IO.Promise CloseReport
 
 /-- A document version in its owning session. Obtain a new handle after an edit;
@@ -176,11 +183,13 @@ private def dispatch (config : ClientConfig) (state : Std.Mutex State) (message 
           | none => s
           | some doc => { s with documents := s.documents.insert params.uri (doc.publish params) }
     else state.atomically do
-      if method == "experimental/serverStatus" then
-        modify fun s => { s with serverStatus? := some params }
+      if config.retainedNotificationMethods.contains method then
+        modify fun s => { s with latestNotifications := s.latestNotifications.insert method params }
       modify fun s =>
         if s.notifications.size < 512 then { s with notifications := s.notifications.push message }
-        else { s with droppedNotifications := s.droppedNotifications + 1 }
+        else { s with
+          notifications := (s.notifications.extract 1 s.notifications.size).push message
+          droppedNotifications := s.droppedNotifications + 1 }
   else
     let id ← protocol <| message.getObjValAs? Nat "id"
     let result := message.getObjVal? "result"
@@ -375,9 +384,11 @@ def Document.diagnostics (document : Document) : EIO ClientError (Option Diagnos
     checkDocument s (some (document.uri, document.version))
     return s.documents[document.uri]? >>= (·.diagnostics?)
 
-/-- Latest server loading state, independent of the bounded notification journal. -/
-def Client.serverStatus (client : Client) : BaseIO (Option Json) :=
-  client.state.atomically do return (← get).serverStatus?
+/-- Latest params for a configured general notification method, independent of
+the journal. None means no retained value; some Json.null is a received value.
+Like capabilities and stderr, this is a snapshot, not a session liveness test. -/
+def Client.latestNotification (client : Client) (method : String) : BaseIO (Option Json) :=
+  client.state.atomically do return (← get).latestNotifications[method]?
 
 def Client.notifications (client : Client) : BaseIO (Array Json × Nat) :=
   client.state.atomically do return ((← get).notifications, (← get).droppedNotifications)
@@ -486,13 +497,15 @@ def Client.start (config : ClientConfig) : EIO ClientError Client := do
       ("capabilities", Json.mkObj [
         ("experimental", config.experimentalCapabilities),
         ("general", Json.mkObj [("positionEncodings", toJson #["utf-16"])]),
-        ("workspace", Json.mkObj [("configuration", toJson true), ("workspaceFolders", toJson true)]),
+        ("workspace", Json.mkObj [("configuration", toJson true), ("workspaceFolders", toJson true),
+          ("symbol", Json.mkObj [("resolveSupport", Json.mkObj [
+            ("properties", toJson #["location.range"])])])]),
         ("textDocument", Json.mkObj [
           ("publishDiagnostics", Json.mkObj [("versionSupport", toJson true)]),
           ("definition", Json.mkObj [("linkSupport", toJson true)]),
           ("diagnostic", Json.mkObj [("relatedDocumentSupport", toJson false)]),
           ("semanticTokens", Json.mkObj [
-            ("requests", Json.mkObj [("full", toJson true)]),
+            ("requests", Json.mkObj [("full", toJson true), ("range", toJson true)]),
             ("tokenTypes", toJson #["namespace", "type", "class", "enum", "interface", "struct",
               "typeParameter", "parameter", "variable", "property", "enumMember", "event",
               "function", "method", "macro", "keyword", "modifier", "comment", "string",

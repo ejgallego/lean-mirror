@@ -3,8 +3,12 @@ Copyright (c) 2026 Lean FRO LLC. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
-import Lean.Data.Lsp
-import Rosetta.Source
+module
+
+public import Lean.Data.Lsp
+public import Rosetta.Source
+
+public section
 
 /-! Experimental normalization of external LSP results, without genre metadata. -/
 namespace Rosetta
@@ -65,6 +69,7 @@ legend and the exact document. Unknown legend indexes and invalid ranges fail
 explicitly, without changing the underlying source text. -/
 def semanticSpans (source : String) (provider result : Json) :
     Except String (Array SemanticSpan) := do
+  if result == .null then return #[]
   let legend ← provider.getObjVal? "legend"
   let types ← legend.getObjValAs? (Array String) "tokenTypes"
   let modifiers ← legend.getObjValAs? (Array String) "tokenModifiers"

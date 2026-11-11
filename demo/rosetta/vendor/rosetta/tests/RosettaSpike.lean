@@ -3,6 +3,7 @@ Copyright (c) 2026 Lean FRO LLC. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
+import Rosetta.Workspace
 import Rosetta.Client
 import Rosetta.Source
 
@@ -311,11 +312,6 @@ private def mockChecks (server : String) : EIO ClientError Unit := do
     | _ => false
   let startupDetail := match startup with | .error error => toString error | .ok _ => "unexpected success"
   check startupTyped s!"process startup failure escaped the typed interface: {startupDetail}"
-  Client.withSession { command := "python3", args := #[server], root := "." } fun statusClient => do
-    discard <| statusClient.request "test/status-overflow" .null
-    let some status ← statusClient.serverStatus | throw <| ClientError.invalidInput "missing latest status"
-    check ((status.getObjValAs? Bool "quiescent").toOption == some true)
-      "notification overflow hid the latest loading state"
   cleanupFailureChecks server
   IO.println <| (Json.mkObj [("mock", "passed"), ("chattyDeadlineMs", toJson chattyElapsed),
     ("blockedWriteDeadlineMs", toJson blockedElapsed), ("activeWriteDeadlineMs", toJson activeElapsed),
@@ -443,8 +439,98 @@ private def probe (language command root : String) : EIO ClientError Unit := do
   finally
     check (← client.close).complete s!"{language}: process was not reaped"
 
+
+private def assertCheck (condition : Bool) (message : String) : EIO ClientError Unit :=
+  unless condition do throw <| ClientError.invalidInput message
+
+/-- A workspace result in one file resolves into a differently located definition.
+Unicode and CRLF exercise token slicing without using any Rust-specific syntax. -/
+def workspaceChecks (server : String) : EIO ClientError Unit :=
+  IO.FS.withTempFile fun indexHandle indexFile => IO.FS.withTempFile fun targetHandle targetFile => do
+    indexHandle.putStr "index\n"
+    indexHandle.flush
+    targetHandle.putStr "😀fn measure() { 1 }\r\n"
+    targetHandle.flush
+    let sourceUri := (System.Uri.pathToUri indexFile : String)
+    let targetUri := (System.Uri.pathToUri targetFile : String)
+    Client.withSession {
+        command := "python3", args := #[server], root := "."
+        retainedNotificationMethods := #["test/status", "test/null-status", "missing/readiness"]
+        initializationOptions := Json.mkObj [
+          ("mode", "workspace"), ("sourceUri", toJson sourceUri), ("targetUri", toJson targetUri)] } fun client => do
+      assertCheck ((← client.latestNotification "test/status").any (fun params =>
+        (params.getObjValAs? Bool "ready").toOption == some false))
+        "notification sent during initialization was lost"
+      let definition ← client.sourceDefinition "test-language" "Container::measure" "::"
+      assertCheck (definition.definition.uri == targetUri) "definition location was ignored"
+      assertCheck (String.join (definition.pieces.toList.map HighlightedPiece.text) == "fn measure() { 1 }")
+        "source slice did not preserve the exact definition range"
+      assertCheck (definition.pieces.any (fun piece => piece.tokenType == "function" &&
+          piece.text == "measure" && piece.modifiers == #["declaration"])) "semantic coloring was lost"
+      for reference in #["missing", "measure", "::measure", "Container::"] do
+        let result ← (client.workspaceDefinition "test-language" reference "::").toBaseIO
+        assertCheck (match result with | .error (.invalidInput _) => true | _ => false)
+          s!"expected unresolved, ambiguous, or malformed reference: {reference}"
+      let deferred ← client.workspaceSymbols "deferred"
+      assertCheck (deferred.size == 1 && (deferred[0]?).any (fun symbol => symbol.location.uri == sourceUri))
+        "deferred workspace symbol location was not resolved"
+      let clipped ← client.highlightDefinition "test-language" {
+        definition.definition with range := { start := ⟨0, 3⟩, «end» := ⟨0, 10⟩ } }
+      assertCheck (String.join (clipped.pieces.toList.map HighlightedPiece.text) == "n measu")
+        "tokens intersecting source boundaries were discarded"
+      let multiline ← client.highlightDefinition "test-language" {
+        definition.definition with range := { start := ⟨0, 2⟩, «end» := ⟨1, 0⟩ } }
+      assertCheck (String.join (multiline.pieces.toList.map HighlightedPiece.text) == "fn measure() { 1 }\r\n")
+        "source slice lost its CRLF terminator"
+      discard <| client.request "test/readiness" (Json.mkObj [])
+      client.waitForNotification "test/status" (fun params =>
+        (params.getObjValAs? Bool "ready").toOption == some true) 1000
+      let (notifications, dropped) ← client.notifications
+      assertCheck (notifications.size == 512 && dropped > 0) "notification trace was not bounded"
+      assertCheck (!(notifications.any fun message =>
+        (message.getObjValAs? String "method").toOption == some "test/status"))
+        "readiness regression did not evict the journal entry"
+      assertCheck ((← client.latestNotification "test/null-status") == some Json.null)
+        "null notification params were confused with an absent notification"
+      discard <| client.request "test/not-ready" (Json.mkObj [])
+      let busy ← (client.waitForNotification "test/status" (fun params =>
+        (params.getObjValAs? Bool "ready").toOption == some true) 0).toBaseIO
+      assertCheck (match busy with | .error (.deadline _) => true | _ => false)
+        "an older ready notification hid a newer busy notification"
+      let timedOut ← (client.waitForNotification "missing/readiness" (fun _ => true) 0).toBaseIO
+      assertCheck (match timedOut with | .error (.deadline _) => true | _ => false)
+        "readiness wait did not respect its deadline"
+      let unconfigured ← (client.waitForNotification "unconfigured/status" (fun _ => true) 0).toBaseIO
+      assertCheck (match unconfigured with | .error (.invalidInput _) => true | _ => false)
+        "readiness wait accepted an unconfigured notification method"
+      IO.println "Workspace lookup, definition following, ambiguity and Unicode highlighting passed"
+    for tokenMode in #["range", "full", "null", "none"] do
+      Client.withSession {
+          command := "python3", args := #[server], root := "."
+          initializationOptions := Json.mkObj [
+            ("mode", "workspace"), ("sourceUri", toJson sourceUri), ("targetUri", toJson targetUri),
+            ("tokenMode", toJson tokenMode)] } fun client => do
+        assertCheck ((← client.latestNotification "test/status").isNone)
+          "retained state leaked into another session"
+        let result ← (client.sourceDefinition "test-language" "Container::measure" "::").toBaseIO
+        if tokenMode == "none" then
+          assertCheck (match result with | .error (.unsupported _) => true | _ => false)
+            "unsupported token methods were requested"
+        else
+          let definition ← EIO.ofExcept result
+          assertCheck (String.join (definition.pieces.toList.map HighlightedPiece.text) == "fn measure() { 1 }")
+            s!"{tokenMode}: source slice changed"
+          assertCheck ((definition.pieces.any (fun piece => piece.tokenType == "function")) == (tokenMode != "null"))
+            s!"{tokenMode}: token result was mishandled"
+        if tokenMode == "range" then
+          let document ← client.openDocument targetUri "test-language" "😀fn measure() { 1 }\r\n"
+          let full ← try (document.semanticTokens "😀fn measure() { 1 }\r\n").toBaseIO finally document.close
+          assertCheck (match full with | .error (.unsupported _) => true | _ => false)
+            "range-only server received a full-document request"
+    IO.println "Semantic token negotiation, full fallback, null results and readiness passed"
+
 def main (args : List String) : IO Unit := do
   match args with
-  | ["mock", server] => pureChecks; (mockChecks server).toIO (IO.userError ∘ toString)
+  | ["mock", server] => pureChecks; (mockChecks server *> workspaceChecks server).toIO (IO.userError ∘ toString)
   | ["probe", language, command, root] => (probe language command root).toIO (IO.userError ∘ toString)
   | _ => throw <| IO.userError "usage: rosetta-spike mock SERVER.py | probe LANGUAGE COMMAND ROOT"

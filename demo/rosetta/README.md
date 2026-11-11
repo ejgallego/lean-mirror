@@ -55,7 +55,7 @@ Lean toolchain pin have no new dependencies.
 
 The [vendored core provenance](vendor/UPSTREAM.md) identifies the upstream
 revision and Apache-2.0 license. This package is unpublished, so the demo keeps
-a reproducible snapshot with the documented server-status patch. The separate VersoRosetta Manual bridge
+an unchanged, reproducible core snapshot. The separate VersoRosetta Manual bridge
 is not needed for this Lean doc-comment host.
 
 `demo/server/rosetta.mjs` copies the core and facade into
@@ -122,8 +122,8 @@ startup can be retried with a new scope. Retained editor states preserve undo;
 active document reads and saves use the live view, and reopening it is a no-op.
 
 Rosetta's `rosetta/ready` reports rust-analyzer's explicit workspace-loading
-state; empty hover/token responses remain valid results. The documented core
-patch retains the latest status beyond notification-journal capacity. Diagnostic
+state; empty hover/token responses remain valid results. The facade opts into retaining `experimental/serverStatus` and reads it through
+`Client.latestNotification`, independently of notification-journal capacity. Diagnostic
 tickets distinguish the owning connection from authored revisions and wire
 versions. The reverse demo sends Rust source and disk revision; the server derives
 the saved Lean projection with the same pure extractor used by the browser.
