@@ -402,3 +402,21 @@ describe("embeddedRust", () => {
     expect(embeddedLeanHostFingerprint(rustEdited)).not.toBe(embeddedLeanHostFingerprint(before));
   });
 });
+
+
+describe("source projection invariants", () => {
+  it("preserves declaration docstrings, fence spacing, indentation and CRLF", () => {
+    const source = '/--\r\n  ```rust (name := bump)  \r\n  fn bump() {}\r\n  ```\r\n-/\r\n';
+    const block = parseEmbeddedRustBlocks(source)[0]!;
+    expect(block.code).toBe('fn bump() {}');
+    expect(serializeEmbeddedRustBlock(block, block.code)).toBe(source);
+    expect(serializeEmbeddedRustBlock(block, 'fn bump() { /* edit */ }')).toBe(source.replace('fn bump() {}', 'fn bump() { /* edit */ }'));
+  });
+  it("ignores strings, raw strings, ordinary comments and nested comments", () => {
+    const apparent = '/--\n```rust\nfn fake() {}\n```\n-/';
+    for (const source of [`def s := "\n${apparent}\n"`, `def s := r#"\n${apparent}\n"#`, `/-\n${apparent}\n-/`]) {
+      expect(parseEmbeddedRustBlocks(source)).toEqual([]);
+    }
+    expect(parseEmbeddedRustBlocks(apparent)).toHaveLength(1);
+  });
+});

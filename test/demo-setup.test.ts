@@ -72,3 +72,19 @@ test("a failed demo launch releases its backend port", async () => {
     if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
   }
 }, 20_000);
+
+
+test.skipIf(process.platform === "win32")("shutdown escalates when a child ignores SIGTERM", () => {
+  const script = `
+    import { spawn } from 'node:child_process';
+    import { once } from 'node:events';
+    import { stopChild } from './scripts/process-lifetime.mjs';
+    const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});process.stdout.write('ready');setInterval(()=>{},1000)"], {stdio:['ignore','pipe','ignore']});
+    await once(child.stdout,'data');
+    await stopChild(child,50);
+    if(child.signalCode !== 'SIGKILL') process.exit(1);
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { timeout: 5000, encoding: "utf8" });
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+});

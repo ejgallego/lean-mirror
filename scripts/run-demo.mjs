@@ -1,3 +1,4 @@
+import { stopChild } from "./process-lifetime.mjs";
 import { spawn } from "node:child_process";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -178,29 +179,7 @@ async function stopBackend() {
   }
   backendStopping = true;
   backendChild = null;
-  await new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      resolve(undefined);
-    };
-    const timeout = setTimeout(() => {
-      if (!child.killed) {
-        child.kill("SIGKILL");
-      }
-      finish();
-    }, 3_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      finish();
-    });
-    if (!child.killed) {
-      child.kill("SIGTERM");
-    }
-  });
+  await stopChild(child);
   backendStopping = false;
 }
 
