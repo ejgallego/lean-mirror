@@ -14,8 +14,13 @@ comment, or Lean inside a Rust comment, with language support in both editors.
   translation and proof. Hover the Rust source directly, or open it in a nested
   editor. The translation is a hand-authored Aeneas-style example; editing Rust
   does not regenerate Lean.
+
+  ![Rust editor inside a Lean docstring, beside the Lean translation, proof, and upstream infoview](docs/screenshots/rust-in-lean.png)
+
 - **Lean in Rust** — Lean code in Rust doc comments opens in nested Lean editors.
   Edit the Lean code and see Lean's messages in the infoview.
+
+  ![Lean editors inside Rust doc comments, with types and messages in the upstream infoview](docs/screenshots/lean-in-rust.png)
 
 ## Run the demos
 

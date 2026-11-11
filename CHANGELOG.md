@@ -52,7 +52,7 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 - Preserve Lean comment envelopes during nested edits and recognize blocks only in doc comments. Derive saved Lean snippets on the backend, start the Rust driver lazily, hide unavailable regeneration controls, and wait for backend exit after forced shutdown.
 
-- Shorten the README's demo descriptions and setup notes, and credit Lean's upstream infoview explicitly.
+- Shorten the README's demo descriptions and setup notes, credit Lean's upstream infoview explicitly, and show screenshots of both nested-editor demos.
 
 - Root validation and the demo workspace now pin Lean 4.35.0, matching the bundled Rosetta host.
 
