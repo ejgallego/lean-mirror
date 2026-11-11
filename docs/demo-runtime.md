@@ -34,8 +34,8 @@ request sequences and serializes requests. Every successful commit advances its
 known disk revision, even if the author has edited again. A stale queued snapshot
 is skipped; a canceled debounce settles its caller without a write.
 
-`currentAtCommit` is an observation, not a promise about later UI delivery.
-Presentation code rechecks the document model before marking a source clean.
+A receipt carries its exact submitted snapshot, not a cached currentness flag.
+Presentation code checks the document model at delivery before marking a source clean.
 Returning to the original text still creates a new authored snapshot and can
 require another save when an earlier request has committed different text.
 

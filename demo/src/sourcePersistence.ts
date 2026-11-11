@@ -7,7 +7,6 @@ export interface SourceReceipt {
 export interface AcknowledgedSource<R extends SourceReceipt> {
   readonly snapshot: AuthoredSnapshot;
   readonly receipt: R;
-  readonly currentAtCommit: boolean;
 }
 
 /** Serializes committed source receipts and derived work without owning UI state. */
@@ -54,7 +53,7 @@ export class SourcePersistence<R extends SourceReceipt> {
     const receipt = await this.options.save(snapshot, this.diskRevision, ++this.sequence);
     // A successful commit remains acknowledged even if its author has edited again.
     this.diskRevision = receipt.diskRevision;
-    return Object.freeze({ snapshot, receipt, currentAtCommit: this.options.isCurrent(snapshot) });
+    return Object.freeze({ snapshot, receipt });
   }
   private enqueue<T>(action: () => Promise<T>): Promise<T | null> {
     const result = this.queue.then(() => this.disposed ? null : action());

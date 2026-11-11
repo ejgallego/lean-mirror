@@ -63,8 +63,8 @@ test("a late receipt advances the disk revision while preserving a newer restore
   const second = persistence.schedule(current);
   await vi.advanceTimersByTimeAsync(450);
   finish({diskRevision:"disk-1",revision:1});
-  expect((await first)?.currentAtCommit).toBe(false);
-  expect((await second)?.currentAtCommit).toBe(true);
+  expect((await first)?.snapshot).toEqual(snapshot(1,"edited"));
+  expect((await second)?.snapshot).toEqual(current);
   expect(expected).toEqual(["disk-0","disk-1"]);
   persistence.dispose();
 });
