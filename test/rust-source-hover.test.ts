@@ -26,13 +26,16 @@ class Socket extends EventTarget {
 function harness(code = "pub fn probe() -> i32 { 42 }") {
   const transport = new MockTransport();
   transport.onRequest("initialize", () => ({ capabilities: { hoverProvider: true, textDocumentSync: 1 } }));
+  transport.onRequest("rosetta/ready", () => true);
   transport.onRequest("textDocument/hover", () => ({ contents: "probe" }));
   const socket = new Socket(transport);
+  const released: string[] = [];
   const session = new RustSourceSession({
+    releaseRustSession: async key => { released.push(key); },
     createRustSession: async () => info,
     connectWebSocket: async () => socket as unknown as WebSocket,
   }, "rust:probe", code);
-  return { session, socket, transport };
+  return { session, socket, transport, released };
 }
 
 describe("raw Verso Rust hover", () => {
@@ -71,7 +74,7 @@ describe("raw Verso Rust hover", () => {
   });
 
   it("opens an overlay without a nested editor and syncs authored edits before hover", async () => {
-    const { session, transport } = harness();
+    const { session, transport, released } = harness();
     try {
       await expect(session.hover({ line: 0, character: 8 })).resolves.toEqual({ contents: "probe" });
       expect(transport.notifications("textDocument/didOpen")[0]?.params).toMatchObject({
@@ -84,6 +87,7 @@ describe("raw Verso Rust hover", () => {
       expect(transport.sent.indexOf(change!)).toBeLessThan(transport.sent.indexOf(transport.requests("textDocument/hover")[1]!));
     } finally { session.destroy(); }
     expect(transport.notifications("textDocument/didClose")).toHaveLength(1);
+    expect(released).toEqual([info.key]);
   });
 
   it("discards an in-flight result even if edits restore the original text", async () => {
@@ -115,7 +119,9 @@ describe("raw Verso Rust hover", () => {
   it("does not connect a session whose host closed during creation", async () => {
     let finish!: (session: RustSession) => void;
     let connections = 0;
+    const released: string[] = [];
     const session = new RustSourceSession({
+      releaseRustSession: async key => { released.push(key); },
       createRustSession: () => new Promise(resolve => { finish = resolve; }),
       connectWebSocket: async () => { connections++; throw new Error("unexpected connection"); },
     }, "rust:pending", "fn pending() {}");
@@ -124,5 +130,6 @@ describe("raw Verso Rust hover", () => {
     finish(info);
     await expect(hover).resolves.toBeNull();
     expect(connections).toBe(0);
+    expect(released).toEqual([info.key]);
   });
 });

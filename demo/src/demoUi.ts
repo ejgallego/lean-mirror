@@ -46,6 +46,7 @@ const demoWorkspaceShellClassNames = {
 export type RegenerationMode = "manual" | "auto";
 
 export interface DemoUi {
+  setRegenerationAvailable(available: boolean): void;
   editorHost: HTMLDivElement;
   infoviewHost: HTMLDivElement;
   logEvent(text: string): void;
@@ -236,6 +237,10 @@ export function queryDemoUi(
   }
 
   return {
+    setRegenerationAvailable(available) {
+      regenerationModeEl.parentElement!.hidden = !available;
+      regenerateButton.parentElement!.hidden = !available;
+    },
     editorHost,
     infoviewHost,
     platformStore,

@@ -244,7 +244,7 @@ describe("demo workspace backend", () => {
     const result = await workspace.updateRustMainDocument({
       diskRevision,
       code: "fn changed() {}\n",
-      leanDocument: "#check helperValue\n",
+
       revision: 12,
       uri: workspace.uris.rustMainUri,
     });
@@ -255,9 +255,9 @@ describe("demo workspace backend", () => {
       revision: 12,
     });
     expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
-    expect(await workspace.readDocument(workspace.uris.embeddedLeanUri)).toBe("#check helperValue\n");
+    expect(await workspace.readDocument(workspace.uris.embeddedLeanUri)).toBe("\n");
     await expect(workspace.updateRustMainDocument({
-      diskRevision, code: "fn stale() {}\n", leanDocument: "-- stale\n",
+      diskRevision, code: "fn stale() {}\n",
       revision: 11, uri: workspace.uris.rustMainUri,
     })).rejects.toMatchObject({ code: "ERR_LEAN_DOCUMENT_CONFLICT" });
     expect(await readFile(workspace.paths.rustMainPath, "utf8")).toBe("fn changed() {}\n");
@@ -327,4 +327,17 @@ describe("demo workspace backend", () => {
     expect(session.demoTitle).toBe("Configured external title");
     expect(session.preparationStatus?.phase).toBe("ready");
   });
+});
+
+
+it("releases isolated Rust workspaces and rejects retired saves", async () => {
+  const { workspace } = await createFixture();
+  const info = await workspace.createRustBlockSession("rust:probe", "fn probe() {}");
+  const lease = workspace.acquireRustBlockSession(info.slug)!;
+  expect(workspace.acquireRustBlockSession(info.slug)).toBeNull();
+  await workspace.releaseRustBlockSession(info.key);
+  expect(await workspace.updateRustBlockDocument(info.key, "stale", 2)).toBe(false);
+  await lease.release();
+  await expect(readFile(info.documentPath)).rejects.toMatchObject({ code: "ENOENT" });
+  await workspace.releaseRustBlockSession(info.key);
 });

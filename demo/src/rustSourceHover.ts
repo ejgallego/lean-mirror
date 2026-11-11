@@ -1,16 +1,17 @@
+import { RustSessionOwner } from "./rustSessionOwner.js";
 import type { LSPClient } from "@codemirror/lsp-client";
 import type { EditorState, Extension } from "@codemirror/state";
 import { hoverTooltip, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import {
-  createLeanEditorSession, createLeanWorkspace, createWebSocketTransport,
-  type LeanEditorSession, type LeanLspClientExtension, type LeanServerDocumentLease, type LeanWorkspace,
+  createLeanWorkspace,
+  type LeanLspClientExtension, type LeanServerDocumentLease, type LeanWorkspace,
 } from "codemirror-lean4-lsp";
 import type * as lsp from "vscode-languageserver-protocol";
 import type { DemoSessionApi } from "./demoSession.js";
 import type { EmbeddedBlock } from "./embeddedBlocks.js";
 import { normalizeRustHover, rustHoverDom } from "./rustHover.js";
 
-type RustSessionApi = Pick<DemoSessionApi, "createRustSession" | "connectWebSocket">;
+type RustSessionApi = Pick<DemoSessionApi, "createRustSession" | "connectWebSocket" | "releaseRustSession">;
 
 /** The host routes body hovers to Rust instead of displaying Lean's code-block help too. */
 export function filterLeanHovers(ownedByRust: (params: lsp.HoverParams) => boolean): LeanLspClientExtension {
@@ -49,11 +50,11 @@ export function rustPositionInSource(block: EmbeddedBlock, position: lsp.Positio
 
 /** A server document lease supplies an overlay without mounting another editor. */
 export class RustSourceSession {
-  private readonly session: LeanEditorSession;
+  private readonly owner: RustSessionOwner;
   private readonly ready: Promise<LSPClient | null>;
   private workspace: LeanWorkspace | null = null;
   private lease: LeanServerDocumentLease | null = null;
-  private socket: WebSocket | null = null;
+
   private documentUri: string | null = null;
   private disposed = false;
   private revision = 0;
@@ -63,15 +64,15 @@ export class RustSourceSession {
     readonly key: string,
     private code: string,
   ) {
-    this.session = createLeanEditorSession({ client: {
+    this.owner = new RustSessionOwner(this.api, {
       features: { completion: false, diagnostics: false, hover: false, signatureHelp: false,
         definitionKeymap: false, renameKeymap: false, referencesKeymap: false },
       timeout: 15000,
       workspace: client => this.workspace = createLeanWorkspace({
         loadDocument: uri => uri === this.documentUri ? { doc: this.code, languageId: "rust" } : null,
       })(client),
-    } });
-    this.ready = this.open().catch(error => { this.destroy(); throw error; });
+    });
+    this.ready = this.open().catch(error => { const retired = this.disposed; this.destroy(); if (retired) return null; throw error; });
     // A view can close before any hover caller starts awaiting initialization.
     void this.ready.catch(() => undefined);
   }
@@ -79,24 +80,16 @@ export class RustSourceSession {
   get closed(): boolean { return this.disposed; }
 
   private async open(): Promise<LSPClient | null> {
-    const info = await this.api.createRustSession(this.key, this.code);
+    const { info, client, socket } = await this.owner.open(this.key, this.code);
     if (this.disposed) return null;
-    this.documentUri = info.documentUri;
-    const socket = await this.api.connectWebSocket(info.websocketUrl);
-    if (this.disposed) { socket.close(); return null; }
-    this.socket = socket;
     socket.addEventListener("close", () => this.destroy(), { once: true });
-    socket.addEventListener("error", () => this.destroy(), { once: true });
-    const connection = this.session.connect(createWebSocketTransport(socket), {
-      disposeTransport: () => socket.close(),
-    });
-    await connection.initialized;
+    this.documentUri = info.documentUri;
     const lease = await this.workspace!.acquireServerDocument(info.documentUri);
     if (this.disposed) { lease?.release(); return null; }
     if (!lease) throw new Error("Cannot open the Rust source overlay.");
     this.lease = lease;
     this.sync();
-    return connection.client;
+    return client;
   }
 
   private sync(): void {
@@ -105,7 +98,7 @@ export class RustSourceSession {
     if (file.doc.toString() !== this.code) this.workspace.updateFile(this.documentUri, {
       changes: { from: 0, to: file.doc.length, insert: this.code },
     });
-    this.session.client?.sync();
+    this.owner.session.client?.sync();
   }
 
   setCode(code: string): void {
@@ -120,6 +113,7 @@ export class RustSourceSession {
     const client = await this.ready;
     if (!client || this.disposed || revision !== this.revision) return null;
     this.sync();
+    await this.owner.analysisReady();
     const result = await client.request<lsp.HoverParams, lsp.Hover | null>("textDocument/hover", {
       position, textDocument: { uri: this.documentUri! },
     });
@@ -130,8 +124,8 @@ export class RustSourceSession {
     if (this.disposed) return;
     this.disposed = true;
     this.lease?.release();
-    this.session.dispose();
-    this.socket?.close();
+    this.owner.destroy();
+
   }
 }
 
@@ -166,19 +160,13 @@ export function rustSourceHover(
     const session = owner.current;
     const current = () => view.state.doc === doc && owner.current === session && !session.closed;
     try {
-      // Rust can initially return null while its new Cargo workspace loads.
-      for (let attempt = 0; attempt < 12 && current(); attempt++) {
-        const result = await session.hover(position);
-        if (!current()) return null;
-        if (result) {
-          const contents = normalizeRustHover(result.contents);
-          const from = result.range ? rustPositionInSource(block, result.range.start) : pos;
-          const to = result.range ? rustPositionInSource(block, result.range.end) : pos;
-          if (!contents || from === null || to === null || from > pos || to < pos) return null;
-          return { pos: from, end: to, above: true, create: () => ({ dom: rustHoverDom(view, contents) }) };
-        }
-        await new Promise(resolve => setTimeout(resolve, 250));
-      }
+      const result = await session.hover(position);
+      if (!current() || !result) return null;
+      const contents = normalizeRustHover(result.contents);
+      const from = result.range ? rustPositionInSource(block, result.range.start) : pos;
+      const to = result.range ? rustPositionInSource(block, result.range.end) : pos;
+      if (!contents || from === null || to === null || from > pos || to < pos) return null;
+      return { pos: from, end: to, above: true, create: () => ({ dom: rustHoverDom(view, contents) }) };
     } catch { /* A stale overlay or closed view must not surface an old hover. */ }
     return null;
   }, { hideOn: transaction => transaction.docChanged })];

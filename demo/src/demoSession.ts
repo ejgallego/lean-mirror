@@ -25,8 +25,9 @@ export type {
 export type RustMainUpdatePayload = RustMainUpdateRequest;
 
 export interface DemoSessionApi {
-  connectWebSocket(url: string): Promise<WebSocket>;
-  createRustSession(key: string, code: string): Promise<RustSession>;
+  releaseRustSession(key: string): Promise<void>;
+  connectWebSocket(url: string, signal?: AbortSignal): Promise<WebSocket>;
+  createRustSession(key: string, code: string, signal?: AbortSignal): Promise<RustSession>;
   fetchDocument(uri: string): Promise<string>;
   fetchPreparationStatus(): Promise<DemoPreparationStatus>;
   fetchSession(): Promise<DemoSession>;
@@ -73,8 +74,12 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
         throw new Error(message || `Example switch failed with ${response.status}`);
       }
     },
-    async createRustSession(key: string, code: string): Promise<RustSession> {
+    async releaseRustSession(key) {
+      await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}?key=${encodeURIComponent(key)}`, { method: "DELETE", keepalive: true });
+    },
+    async createRustSession(key: string, code: string, signal?: AbortSignal): Promise<RustSession> {
       const response = await fetch(`${apiBase}${DEMO_ENDPOINTS.rustSession}`, {
+        ...(signal ? { signal } : {}),
         body: JSON.stringify({ code, key }),
         headers: {
           "Content-Type": "application/json",
@@ -125,10 +130,14 @@ export function createDemoSessionApi(apiBase: string): DemoSessionApi {
       }
       return parseDemoSession(await response.json());
     },
-    async connectWebSocket(url: string): Promise<WebSocket> {
+    async connectWebSocket(url: string, signal?: AbortSignal): Promise<WebSocket> {
       const socket = new WebSocket(url);
+      const close = () => socket.close();
+      signal?.addEventListener("abort", close, { once: true });
+      if (signal?.aborted) close();
       try { await waitForWebSocketOpen(socket); }
       catch (error) { socket.close(); throw error; }
+      finally { signal?.removeEventListener("abort", close); }
       return socket;
     },
   };

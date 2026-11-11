@@ -28,12 +28,9 @@ test.beforeEach(async ({ page, request }) => {
   if (session.rootUri === new URL("../../demo/workspace", import.meta.url).href) {
     // Restore through the backend queue so a failed scenario cannot leave its
     // persisted Rust edit behind for the next one. External workspaces stay alone.
-    const [code, leanDocument] = await Promise.all([
-      readFile(new URL("../../demo/baseline/Main.rs", import.meta.url), "utf8"),
-      readFile(new URL("../../demo/baseline/RustSnippets.lean", import.meta.url), "utf8"),
-    ]);
+    const code = await readFile(new URL("../../demo/baseline/Main.rs", import.meta.url), "utf8");
     const restored = await request.post(backend + "/rust-main", {
-      data: { uri: session.rustMainDocumentUri, diskRevision: session.rustMainDiskRevision, code, leanDocument, revision: 0 },
+      data: { uri: session.rustMainDocumentUri, diskRevision: session.rustMainDiskRevision, code, revision: 0 },
     });
     expect(restored.ok()).toBe(true);
   }
@@ -667,7 +664,7 @@ test("static Aeneas mock-up pairs a Rust docstring with checked Lean without reg
   await expect(statusValue(page, "status")).toHaveText("Ready");
   await expect(statusValue(page, "document")).toContainText("AeneasDemo.lean");
   await expect(page.locator("#extraction-state")).toHaveText("Static mock-up");
-  await expect(page.locator("#regenerate-workspace")).toBeDisabled();
+  await expect(page.locator("#regenerate-workspace")).toBeHidden();
   const content = page.locator("#editor > .cm-editor .cm-content");
   await expect(content).toContainText("pub fn bump(x: &mut u32)");
   await expect(content).toContainText("Static mock-up:");
@@ -874,4 +871,15 @@ test("regenerated Lean updates a previously opened hidden editor", async ({ page
   await saved;
   await openDocumentContaining(page, "RustSnippets.lean", "#check Nat.pred");
   expect(await page.evaluate(() => (window as any).__consumeConsoleErrors())).toEqual([]);
+});
+
+
+test("Lean-first startup does not connect the independent Rust driver", async ({ page }) => {
+  const connections: string[] = [];
+  page.on("websocket", socket => connections.push(socket.url()));
+  await page.goto("/");
+  await expect(statusValue(page, "status")).toHaveText("Ready");
+  expect(connections.some(url => url.includes("rust-main-lsp"))).toBe(false);
+  await page.locator('button').filter({ hasText: 'Main.rs' }).first().click();
+  await expect.poll(() => connections.some(url => url.includes("rust-main-lsp"))).toBe(true);
 });

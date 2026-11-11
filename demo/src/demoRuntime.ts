@@ -442,7 +442,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
   }
 
   function setRegenerateControlState(): void {
-    const staticMockup = currentUri?.endsWith("/AeneasDemo.lean") ?? false;
+    const staticMockup = currentLanguageId === "lean4" && !session.canRegenerate;
     if (staticMockup) options.ui.setExtractionState("Static mock-up", "pending");
     else if (rustMainExtractionFresh !== null && !rustMainRegenerationInFlight) {
       options.ui.setExtractionState(rustMainExtractionFresh ? "Fresh" : "Stale", rustMainExtractionFresh ? "fresh" : "stale");
@@ -591,7 +591,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
             () => options.sessionApi.updateRustMainDocument({
               diskRevision: rustMainDiskRevision,
               code: source,
-              leanDocument,
               revision,
               uri,
             }),
@@ -667,7 +666,6 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
         .regenerateRustMainDocument({
           diskRevision: rustMainDiskRevision,
           code: source,
-          leanDocument: embeddedLeanDocument.doc,
           revision,
           uri,
         })
@@ -888,6 +886,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     session.activeExampleId,
     options.switchExample,
   );
+  options.ui.setRegenerationAvailable(session.canRegenerate === true);
   options.ui.setRootUri(session.rootUri);
   options.ui.setCurrentDocument(initialUri);
   syncRustMainExtractionState(session.initialDoc, { logTransition: false });
@@ -1203,12 +1202,8 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
     return rustReconnectPromise;
   }
 
-  if (session.rustMainWebsocketUrl) await connectRustGeneration();
-  else {
-    rustRuntime.stopped();
-  }
-
   const openDocument = async (uri: string): Promise<void> => {
+    if (languageIdForUri(session, uri) === "rust" && !rustClient && session.rustMainWebsocketUrl) await connectRustGeneration();
     const retained = documentStates.get(uri);
     const file = languageIdForUri(session, uri) === "rust"
       ? rustClient?.workspace.getFile(uri) : await workspace?.requestFile(uri);
@@ -1219,6 +1214,7 @@ export async function bootDemoRuntime(options: DemoRuntimeOptions): Promise<Demo
 
   demoBridge.install(openDocument);
   options.ui.renderDocumentButtons(session.documents, openDocument);
+  if (languageIdForUri(session, initialUri) === "rust") await connectRustGeneration();
   await mountDocument(initialUri, initialDoc);
   leanInfoview.updateCursorLocation();
 

@@ -36,14 +36,10 @@ export function renderRustPreview(
     span.addEventListener("mouseenter", () => {
       const epoch = ++hoverEpoch;
       void (async () => {
-        // An early hover can be empty while Rust's workspace loads. Retry only
-        // while the pointer remains over this exact token in this preview.
-        for (let attempt = 0; attempt < 12 && span.isConnected && epoch === hoverEpoch; attempt++) {
+        try {
           const text = await hover(token.range.start);
-          if (epoch !== hoverEpoch || !span.isConnected) return;
-          if (text) { span.title = text; return; }
-          await new Promise(resolve => setTimeout(resolve, 250));
-        }
+          if (text && span.isConnected && epoch === hoverEpoch) span.title = text;
+        } catch { /* Retired previews do not display analysis errors. */ }
       })();
     });
     code.append(span);

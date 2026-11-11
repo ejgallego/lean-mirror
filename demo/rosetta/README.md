@@ -55,7 +55,7 @@ Lean toolchain pin have no new dependencies.
 
 The [vendored core provenance](vendor/UPSTREAM.md) identifies the upstream
 revision and Apache-2.0 license. This package is unpublished, so the demo keeps
-an unchanged, reproducible snapshot. The separate VersoRosetta Manual bridge
+a reproducible snapshot with the documented server-status patch. The separate VersoRosetta Manual bridge
 is not needed for this Lean doc-comment host.
 
 `demo/server/rosetta.mjs` copies the core and facade into
@@ -74,12 +74,9 @@ the demo after selecting a different checkout. Subsequent edits to its Lean
 modules, Lake configuration, or toolchain trigger a rebuild and browser reload.
 `npm run demo:rosetta:checkout -- --reset` restores the bundled fallback.
 `LEAN_DEMO_ROSETTA_ROOT` overrides either selection for one command.
-Builds write only to this repository's cache, never the selected checkout. `rust-analyzer`, `rust-src`, and `rustfmt` are required. To match CI:
-
-```sh
-rustup toolchain install 1.99.0 --profile minimal --component rust-analyzer --component rust-src --component rustfmt
-RUSTUP_TOOLCHAIN=1.99.0 npm run demo
-```
+Builds write only to this repository's cache, never the selected checkout.
+Run `npm run demo:setup` to install the pinned tools and build the demos, then
+`npm run demo` to start them.
 
 The separate Rust driver is available at `/?mode=rust`. The Anneal wrapper
 continues to open its configured external Rust source.
@@ -97,3 +94,27 @@ formatting, Unicode/CRLF positions, versioned Cargo diagnostics, and shutdown.
 Browser scenarios exercise the corresponding keybindings, comment round trips,
 preview toggles, and reconnection. Run browser suites sequentially because
 launchers reset the shared demo fixtures.
+
+## Editing contract
+
+The host document owns authored text. Inline edits replace the fenced body and
+preserve the comment kind, fence text, indentation, line endings, and surrounding
+prose. The local scanner recognizes complete triple-backtick fences with
+standalone comment delimiters, outside Lean strings and ordinary/nested comments.
+Other Verso forms remain raw source; successful elaboration is not required for
+editing. A projection is cached per adapter/source revision and shared by hover
+and decoration consumers. Lean's parsed syntax can enrich this boundary later.
+
+Each Rust presentation uses the demo-local `RustSessionOwner`. Disposal cancels
+acquisition and requests, closes the transport, and releases the backend lease.
+Unclaimed allocations expire after a minute. Connected workspaces are removed
+after the child exits and queued writes finish. Session identities never revive.
+The independent Rust driver starts only when its document is opened.
+
+Rosetta's `rosetta/ready` reports rust-analyzer's explicit workspace-loading
+state; empty hover/token responses remain valid results. The documented core
+patch retains the latest status beyond notification-journal capacity. Diagnostic
+tickets distinguish the owning connection from authored revisions and wire
+versions. The reverse demo sends Rust source and disk revision; the server derives
+the saved Lean projection with the same pure extractor used by the browser.
+`test:rosetta` runs the upstream mock lifecycle tests and the native host contract.

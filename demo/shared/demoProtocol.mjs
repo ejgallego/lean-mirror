@@ -109,7 +109,6 @@ export function parseRustMainUpdateRequest(value) {
   return {
     diskRevision: expectString(record.diskRevision, "diskRevision"),
     code: expectString(record.code, "code"),
-    leanDocument: expectString(record.leanDocument, "leanDocument"),
     revision: expectNumber(record.revision, "revision"),
     uri: expectString(record.uri, "uri"),
   };

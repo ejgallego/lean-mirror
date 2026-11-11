@@ -97,7 +97,7 @@ function withCorsHeaders(req, headers = {}) {
     ...(origin && allowedOrigins.has(origin)
       ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" }
       : {}),
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     ...headers,
   };
@@ -219,6 +219,10 @@ async function handleHttpRequest(req, res) {
       }),
     );
     return;
+  }
+  if (req.method === "DELETE" && new URL(req.url, `http://${host}:${port}`).pathname === DEMO_ENDPOINTS.rustSession) {
+    await demoWorkspace.releaseRustBlockSession(new URL(req.url, `http://${host}:${port}`).searchParams.get("key"));
+    res.writeHead(204, withCorsHeaders(req)); res.end(); return;
   }
   if (req.method === "POST" && req.url === DEMO_ENDPOINTS.rustDocument) {
     await preparePromise;
@@ -392,6 +396,7 @@ function attachSpawnedLsp(connection, command, args, cwd, limits = lspRelayLimit
   child.once("error", () => connection.close());
   pipeServerStderr(child.stderr);
   attachLspProcess(connection, child, limits);
+  return child;
 }
 
 wsServer.on("connection", (socket) => {
@@ -429,7 +434,9 @@ httpServer.on("upgrade", (req, socket, head) => {
       socket.destroy();
       return;
     }
-    const { rootPath } = demoWorkspace.rustBlockPaths(block);
+    const session = demoWorkspace.acquireRustBlockSession(block);
+    if (!session) { rejectUpgrade(socket, "404 Not Found", "Rust session is retired or already connected"); return; }
+    const { rootPath } = session;
     if (!rosettaBinary) {
       rejectUpgrade(socket, "503 Service Unavailable", "Rosetta is not ready");
       return;
@@ -438,7 +445,7 @@ httpServer.on("upgrade", (req, socket, head) => {
       // Rosetta owns a process group and needs time to join its IO workers.
       attachSpawnedLsp(connection, rosettaBinary, [rootPath], rootPath, {
         ...lspRelayLimits, killDelayMs: 2000,
-      });
+      }).once("close", () => { void session.release(); });
     });
     return;
   }

@@ -65,13 +65,13 @@ describe("demo protocol", () => {
     expect(parseRustMainUpdateRequest({
       diskRevision: "disk",
       code: "fn changed() {}",
-      leanDocument: "#check Nat",
+
       revision: 4,
       uri: "file:///workspace/Main.rs",
     })).toEqual({
       diskRevision: "disk",
       code: "fn changed() {}",
-      leanDocument: "#check Nat",
+
       revision: 4,
       uri: "file:///workspace/Main.rs",
     });

@@ -9,6 +9,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 
 ### Added
 
+- Shared Rust session ownership with bounded acquisition, backend lease release, and explicit analysis readiness. Rosetta mock lifecycle checks now run in CI.
+
 - `npm run demo:setup` checks prerequisites, installs pinned Lean/Rust tools and locked npm dependencies, and builds both demos and Rosetta. Demo startup prints both URLs and cleans up its backend when startup fails.
 
 - A static Aeneas-style `bump` example whose Rust Verso docstring is attached to its Lean translation, with a self-contained checked-arithmetic model, a proved increment specification, and success/overflow evaluations. Rust edits do not regenerate Lean.
@@ -47,6 +49,8 @@ provide public-API compatibility guarantees. Normal SemVer compatibility begins 
 - An isolated packed-browser consumer gate that production-bundles a public-only editor composition and exercises startup, diagnostics, infoview, editing, and reconnection against a real Lean server.
 
 ### Changed
+
+- Preserve Lean comment envelopes during nested edits and recognize blocks only in doc comments. Derive saved Lean snippets on the backend, start the Rust driver lazily, hide unavailable regeneration controls, and wait for backend exit after forced shutdown.
 
 - Shorten the README's demo descriptions and setup notes, and credit Lean's upstream infoview explicitly.
 

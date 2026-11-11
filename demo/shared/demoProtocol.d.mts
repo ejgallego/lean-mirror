@@ -62,7 +62,6 @@ export interface UpdateRustDocumentRequest {
 export interface RustMainUpdateRequest {
   diskRevision: string;
   code: string;
-  leanDocument: string;
   revision: number;
   uri: string;
 }

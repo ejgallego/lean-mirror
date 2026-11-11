@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -12,7 +12,7 @@ import {
   markAnnealGenerationBuilt,
   registerAnnealGeneration,
 } from "../externalGeneration.mjs";
-import { ensureEmbeddedLeanArtifacts } from "./embeddedLeanDocument.mjs";
+import { ensureEmbeddedLeanArtifacts, buildEmbeddedLeanDocumentFromSource } from "./embeddedLeanDocument.mjs";
 import { createLeanDocumentStore } from "./leanDocuments.mjs";
 import {
   parseExternalAnnealArgs,
@@ -72,6 +72,25 @@ export function createDemoWorkspace(demoDir, options = {}) {
   let rustMainUpdateQueue = Promise.resolve();
   let preparationStatus = createPreparationStatus("idle", "Waiting to prepare demo workspace.");
   const rustBlockUpdateStates = new Map();
+  const rustSessions = new Map();
+  async function releaseRustBlockSession(key) {
+    const entry = rustSessions.get(key);
+    if (!entry) return;
+    entry.retired = true;
+    if (entry.active) return;
+    clearTimeout(entry.expiry);
+    rustSessions.delete(key);
+    await rustBlockUpdateStates.get(key)?.queue;
+    rustBlockUpdateStates.delete(key);
+    await rm(entry.rootPath, { recursive: true, force: true });
+  }
+  function acquireRustBlockSession(slug) {
+    const entry = [...rustSessions.values()].find(entry => entry.slug === slug);
+    if (!entry || entry.retired || entry.active) return null;
+    clearTimeout(entry.expiry);
+    entry.active = true;
+    return { ...entry, release: async () => { entry.active = false; await releaseRustBlockSession(entry.key); } };
+  }
   const rustSourceStores = new Map();
   function rustSourceStore() {
     let store = rustSourceStores.get(rustMainPath);
@@ -179,6 +198,9 @@ export function createDemoWorkspace(demoDir, options = {}) {
       "utf8",
     );
     await writeFile(documentPath, code, "utf8");
+    const expiry = setTimeout(() => { void releaseRustBlockSession(key); }, 60_000);
+    expiry.unref?.();
+    rustSessions.set(key, { key, slug, rootPath, active: false, retired: false, expiry });
     return {
       key,
       documentPath,
@@ -206,6 +228,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
   }
 
   function enqueueRustBlockDocumentUpdate(key, code, version) {
+    if (!rustSessions.has(key) || rustSessions.get(key).retired) return false;
     let state = rustBlockUpdateStates.get(key);
     if (!state) {
       state = { latestVersion: -1, queue: Promise.resolve() };
@@ -229,7 +252,7 @@ export function createDemoWorkspace(demoDir, options = {}) {
     const saved = await rustSourceStore().save({
       uri: rustMainUri, text: payload.code, revision: payload.diskRevision,
     });
-    await writeFile(embeddedLeanPath, payload.leanDocument, "utf8");
+    await writeFile(embeddedLeanPath, buildEmbeddedLeanDocumentFromSource(payload.code, currentEmbeddedLeanContext()), "utf8");
     return {
       diskRevision: saved.revision,
       leanDocumentUri: embeddedLeanUri,
@@ -487,6 +510,8 @@ export function createDemoWorkspace(demoDir, options = {}) {
       return preparationStatus;
     },
     createRustBlockSession: ensureRustBlockWorkspace,
+    releaseRustBlockSession,
+    acquireRustBlockSession,
     async readDocument(uri) {
       const path = fileURLToPath(uri);
       if (!allowedDocumentRoots.some((root) => path === root || path.startsWith(`${root}/`))) {

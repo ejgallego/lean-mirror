@@ -47,6 +47,8 @@ export interface DemoWorkspace {
   prepare(): Promise<void>;
   readPreparationStatus(): DemoPreparationStatus;
   readSession(urls: DemoSessionUrls): Promise<DemoSession>;
+  releaseRustBlockSession(key: string): Promise<void>;
+  acquireRustBlockSession(slug: string): { rootPath: string; release(): Promise<void> } | null;
   createRustBlockSession(key: string, code: string): Promise<RustBlockSession>;
   readDocument(uri: string): Promise<string>;
   regenerateRustMainDocument(payload: RustMainUpdateRequest, urls: DemoSessionUrls): Promise<DemoSession>;
