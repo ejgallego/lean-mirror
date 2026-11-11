@@ -64,6 +64,10 @@ private def request (client : Client) (file : Option OpenFile) (method : String)
       ("textDocumentSync", Json.mkObj [("openClose", toJson true), ("change", toJson (1 : Nat)),
         ("save", Json.mkObj [("includeText", toJson true)])])]),
       ("serverInfo", Json.mkObj [("name", toJson "Rosetta / rust-analyzer")])]
+  if method == "rosetta/ready" then
+    let status ← client.serverStatus
+    return toJson <| status.any fun value =>
+      (value.getObjValAs? Bool "quiescent").toOption.getD false
   if method == "rosetta/preview" then
     let some file := file | throw <| ClientError.invalidInput "document is not open"
     let caps ← client.capabilities
@@ -107,6 +111,7 @@ private def serve (root : System.FilePath) : EIO ClientError Unit := do
     liftM (output.writeSerializedLspMessage message.compress)
   Client.withSession {
     command := "rust-analyzer", root, timeoutMs := 20000
+    experimentalCapabilities := Json.mkObj [("serverStatusNotification", toJson true)]
     initializationOptions := Json.mkObj [("checkOnSave", toJson true)]
   } fun client => do
     let mut file : Option OpenFile := none
@@ -187,14 +192,13 @@ private def serve (root : System.FilePath) : EIO ClientError Unit := do
           currentFile.set none
         else if method == "textDocument/didSave" then client.notify method params
     catch error =>
+      if !(error matches .disconnected) then throw error
+    finally
       stopped.set true
       discard <| IO.wait observer
-      if !(error matches .disconnected) then throw error
-    stopped.set true
-    discard <| IO.wait observer
-    for (_, token) in pending.toList do token.cancel
-    discard <| client.close
-    for task in tasks do discard <| IO.wait task.task
+      for (_, token) in pending.toList do token.cancel
+      discard <| client.close
+      for task in tasks do discard <| IO.wait task.task
 
 def main (args : List String) : IO UInt32 := do
   let [root] := args | throw <| IO.userError "usage: rosetta-bridge RUST_WORKSPACE"

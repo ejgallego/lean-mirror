@@ -311,6 +311,11 @@ private def mockChecks (server : String) : EIO ClientError Unit := do
     | _ => false
   let startupDetail := match startup with | .error error => toString error | .ok _ => "unexpected success"
   check startupTyped s!"process startup failure escaped the typed interface: {startupDetail}"
+  Client.withSession { command := "python3", args := #[server], root := "." } fun statusClient => do
+    discard <| statusClient.request "test/status-overflow" .null
+    let some status ← statusClient.serverStatus | throw <| ClientError.invalidInput "missing latest status"
+    check ((status.getObjValAs? Bool "quiescent").toOption == some true)
+      "notification overflow hid the latest loading state"
   cleanupFailureChecks server
   IO.println <| (Json.mkObj [("mock", "passed"), ("chattyDeadlineMs", toJson chattyElapsed),
     ("blockedWriteDeadlineMs", toJson blockedElapsed), ("activeWriteDeadlineMs", toJson activeElapsed),

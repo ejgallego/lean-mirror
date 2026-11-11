@@ -77,6 +77,11 @@ while True:
         document = params["textDocument"]
         diagnostics(document["uri"], 1, "stale after edit")
         diagnostics(document["uri"], document["version"], "current warning")
+    elif method == "test/status-overflow":
+        for _ in range(520):
+            send({"method": "test/noise", "params": {}})
+        send({"method": "experimental/serverStatus", "params": {"quiescent": True}})
+        reply(request_id, True)
     elif method == "test/barrier":
         reply(request_id, True)
     elif method == "test/hold-document":

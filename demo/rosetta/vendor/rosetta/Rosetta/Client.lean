@@ -44,6 +44,7 @@ private structure State where
   queuedBytes : Nat := 0
   active? : Option Outbound := none
   stopWriter : Bool := false
+  serverStatus? : Option Json := none
   notifications : Array Json := #[]
   droppedNotifications : Nat := 0
   failure? : Option ClientError := none
@@ -175,6 +176,8 @@ private def dispatch (config : ClientConfig) (state : Std.Mutex State) (message 
           | none => s
           | some doc => { s with documents := s.documents.insert params.uri (doc.publish params) }
     else state.atomically do
+      if method == "experimental/serverStatus" then
+        modify fun s => { s with serverStatus? := some params }
       modify fun s =>
         if s.notifications.size < 512 then { s with notifications := s.notifications.push message }
         else { s with droppedNotifications := s.droppedNotifications + 1 }
@@ -371,6 +374,10 @@ def Document.diagnostics (document : Document) : EIO ClientError (Option Diagnos
     admit s
     checkDocument s (some (document.uri, document.version))
     return s.documents[document.uri]? >>= (·.diagnostics?)
+
+/-- Latest server loading state, independent of the bounded notification journal. -/
+def Client.serverStatus (client : Client) : BaseIO (Option Json) :=
+  client.state.atomically do return (← get).serverStatus?
 
 def Client.notifications (client : Client) : BaseIO (Array Json × Nat) :=
   client.state.atomically do return ((← get).notifications, (← get).droppedNotifications)

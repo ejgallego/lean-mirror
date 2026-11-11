@@ -98,3 +98,6 @@ no-compatibility policy between revisions.
 - Replace `document.withClient f` with `f document.client`.
 - Manual cleanup returns `BaseIO CloseReport`; scoped cleanup raises
   `ClientError.cleanup` if that report is incomplete.
+
+Local host extension: `Client.serverStatus` returns the latest
+`experimental/serverStatus` parameters, separately from the bounded journal.

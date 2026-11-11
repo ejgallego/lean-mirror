@@ -64,6 +64,7 @@ test("Rosetta serves all six editor features and versioned Cargo diagnostics", {
     notify("textDocument/didOpen", { textDocument: { uri, languageId: "rust", text, version: 7 } });
     const base = { textDocument: { uri } };
     const position = { line: 2, character: text.split("\n")[2].indexOf("add") + 1 };
+    await until(() => request("rosetta/ready", {}), value => value === true);
     const hover = await until(() => request("textDocument/hover", { ...base, position }), value => value !== null);
     assert.match(JSON.stringify(hover), /add/);
     const tokens = await until(() => request("rosetta/preview", base),
